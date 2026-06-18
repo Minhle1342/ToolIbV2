@@ -96,6 +96,11 @@ class startAPI {
         });
         return await res.json();
     }
+
+    async getAssignStats(projectId) {
+        const res = await fetch(`/api/projects/${projectId}/assign-stats`);
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

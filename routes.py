@@ -141,6 +141,26 @@ def upload_folder():
         'count': saved_count
     })
 
+@api_bp.route('/projects/<int:project_id>/assign-stats', methods=['GET'])
+def get_assign_stats(project_id):
+    # Total
+    total_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None).count()
+    total_unassigned = Image.query.filter_by(project_id=project_id, view_id=None).count()
+    
+    # Labeled
+    labeled_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None, Image.is_labeled == True).count()
+    labeled_unassigned = Image.query.filter_by(project_id=project_id, view_id=None, is_labeled=True).count()
+    
+    # Unlabeled
+    unlabeled_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None, Image.is_labeled == False).count()
+    unlabeled_unassigned = Image.query.filter_by(project_id=project_id, view_id=None, is_labeled=False).count()
+    
+    return jsonify({
+        'both': {'assigned': total_assigned, 'unassigned': total_unassigned},
+        'labeled': {'assigned': labeled_assigned, 'unassigned': labeled_unassigned},
+        'unlabeled': {'assigned': unlabeled_assigned, 'unassigned': unlabeled_unassigned}
+    })
+
 @api_bp.route('/projects/<int:project_id>/upload', methods=['POST'])
 def upload_project_images(project_id):
     project = Project.query.get_or_404(project_id)
@@ -170,7 +190,14 @@ def upload_project_images(project_id):
 @api_bp.route('/views', methods=['POST'])
 def create_view():
     data = request.json
-    new_view = View(name=data['name'], project_id=data['project_id'])
+    view_name = data['name']
+    project_id = data['project_id']
+    
+    existing_view = View.query.filter_by(name=view_name, project_id=project_id).first()
+    if existing_view:
+        return jsonify(existing_view.to_dict()), 200
+        
+    new_view = View(name=view_name, project_id=project_id)
     db.session.add(new_view)
     db.session.commit()
     return jsonify(new_view.to_dict()), 201
@@ -178,9 +205,14 @@ def create_view():
 @api_bp.route('/views/assign', methods=['POST'])
 def assign_view():
     # Logic to assign images to a view
-    # data: { view_id, count, strategy='random'|'sequential', ... }
+    # data: { view_id, count, strategy='random'|'sequential', assign_mode='both'|'labeled'|'unlabeled' ... }
     data = request.json
-    count = utils.assign_images_to_view(data['view_id'], data.get('count', 0), data.get('project_id'))
+    count = utils.assign_images_to_view(
+        data['view_id'], 
+        data.get('count', 0), 
+        data.get('project_id'),
+        data.get('assign_mode', 'both')
+    )
     return jsonify({'message': f'Assigned {count} images to view.'})
 
 # --- Images & Labels ---
@@ -374,3 +406,36 @@ def auto_label(image_id):
         return jsonify(result), 400
         
     return jsonify(result)
+
+@api_bp.route('/progress', methods=['GET'])
+def get_progress():
+    projects = Project.query.all()
+    res = []
+    for p in projects:
+        p_data = p.to_dict()
+        p_data['views'] = []
+        
+        total_images = Image.query.filter_by(project_id=p.id).count()
+        labeled_images = Image.query.filter_by(project_id=p.id, is_labeled=True).count()
+        p_data['total_images'] = total_images
+        p_data['labeled_images'] = labeled_images
+        
+        # Unassigned progress
+        unassigned_total = Image.query.filter_by(project_id=p.id, view_id=None).count()
+        unassigned_labeled = Image.query.filter_by(project_id=p.id, view_id=None, is_labeled=True).count()
+        p_data['unassigned'] = {
+            'total_images': unassigned_total,
+            'labeled_images': unassigned_labeled
+        }
+        
+        views = View.query.filter_by(project_id=p.id).all()
+        for v in views:
+            v_dict = v.to_dict()
+            v_total = Image.query.filter_by(view_id=v.id).count()
+            v_labeled = Image.query.filter_by(view_id=v.id, is_labeled=True).count()
+            v_dict['total_images'] = v_total
+            v_dict['labeled_images'] = v_labeled
+            p_data['views'].append(v_dict)
+            
+        res.append(p_data)
+    return jsonify(res)

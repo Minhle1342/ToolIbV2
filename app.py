@@ -31,6 +31,10 @@ def create_app():
     def export_page():
         return render_template('export.html')
     
+    @app.route('/progress')
+    def progress_page():
+        return render_template('progress.html')
+    
     return app
 
 if __name__ == '__main__':

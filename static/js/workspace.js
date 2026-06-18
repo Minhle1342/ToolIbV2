@@ -1116,9 +1116,32 @@ function selectClass(id, el) {
     }
 }
 
-function openAssignModal() {
-    document.getElementById('assignModal').classList.remove('hidden');
+let currentAssignStats = null;
+
+async function updateAssignStatsDisplay() {
+    if (!currentAssignStats) return;
+    
+    const mode = document.querySelector('select[name="assign_mode"]').value;
+    const stats = currentAssignStats[mode];
+    
+    if (stats) {
+        const tpl = i18n.t('assigned_stats');
+        const text = tpl.replace('{assigned}', stats.assigned).replace('{unassigned}', stats.unassigned);
+        document.getElementById('assignStatsDisplay').innerText = text;
+    }
 }
+
+async function openAssignModal() {
+    document.getElementById('assignModal').classList.remove('hidden');
+    try {
+        currentAssignStats = await API.getAssignStats(PROJECT_ID);
+        updateAssignStatsDisplay();
+    } catch (err) {
+        console.error('Failed to get assign stats', err);
+    }
+}
+
+document.querySelector('select[name="assign_mode"]').addEventListener('change', updateAssignStatsDisplay);
 
 function closeModal(id) {
     document.getElementById(id).classList.add('hidden');
@@ -1135,7 +1158,8 @@ document.getElementById('assignForm').addEventListener('submit', async (e) => {
     const assignData = {
         view_id: viewRes.id,
         count: data.count,
-        project_id: data.project_id
+        project_id: data.project_id,
+        assign_mode: data.assign_mode
     };
 
     const res = await API.assignView(assignData);

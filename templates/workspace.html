@@ -237,6 +237,15 @@
                     class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary"
                     value="100" required>
             </div>
+            <div>
+                <label class="block text-xs font-medium text-content-muted mb-1" data-i18n="assign_mode">Assign Mode</label>
+                <select name="assign_mode" class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary">
+                    <option value="both" data-i18n="filter_all_status">All Status</option>
+                    <option value="labeled" data-i18n="filter_labeled">Labeled</option>
+                    <option value="unlabeled" data-i18n="filter_unlabeled">Unlabeled</option>
+                </select>
+                <div id="assignStatsDisplay" class="mt-2 text-xs text-content-muted"></div>
+            </div>
             <div class="flex justify-end gap-2 mt-6">
                 <button type="button"
                     class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded"

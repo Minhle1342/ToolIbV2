@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="p-8 h-full overflow-y-auto">
+    <div class="flex justify-between items-center mb-8">
+        <div>
+            <h1 class="text-3xl font-bold text-content" data-i18n="progress_title">Tiến độ phân công</h1>
+            <p class="text-content-muted mt-2" data-i18n="progress_desc">Quản lý tiến độ gán nhãn của các thành viên trong từng dự án</p>
+        </div>
+    </div>
+
+    <div id="progressContainer" class="space-y-8">
+        <!-- Progress data will be loaded here -->
+        <div class="text-center py-10">
+            <i class="fa-solid fa-spinner fa-spin text-4xl text-primary mb-4"></i>
+            <p class="text-content-muted" data-i18n="loading">Đang tải dữ liệu...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        const container = document.getElementById('progressContainer');
+        
+        try {
+            const res = await fetch('/api/progress');
+            if (!res.ok) throw new Error('Failed to fetch progress');
+            const projects = await res.json();
+            
+            if (projects.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 bg-panel border border-border rounded-lg">
+                        <i class="fa-solid fa-folder-open text-4xl text-content-muted mb-4"></i>
+                        <p class="text-content-muted" data-i18n="no_projects">Chưa có dự án nào</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            
+            projects.forEach(p => {
+                // Calculate total project progress
+                const pPercent = p.total_images > 0 ? Math.round((p.labeled_images / p.total_images) * 100) : 0;
+                
+                html += `
+                <div class="bg-panel border border-border rounded-lg shadow-sm overflow-hidden mb-6">
+                    <!-- Project Header -->
+                    <div class="bg-sidebar px-6 py-4 border-b border-border flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-bold text-content flex items-center gap-2">
+                                <i class="fa-solid fa-folder text-primary"></i> ${p.name}
+                            </h2>
+                            <p class="text-sm text-content-muted mt-1">
+                                Tổng cộng: ${p.labeled_images} / ${p.total_images} ảnh đã gán nhãn
+                            </p>
+                        </div>
+                        <div class="w-32">
+                            <div class="flex justify-between text-xs mb-1">
+                                <span>Tiến độ</span>
+                                <span class="font-bold">${pPercent}%</span>
+                            </div>
+                            <div class="w-full bg-surface rounded-full h-2">
+                                <div class="bg-primary h-2 rounded-full" style="width: ${pPercent}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Views Progress -->
+                    <div class="p-6">
+                        <h3 class="text-sm font-semibold text-content mb-4" data-i18n="assignees_progress">Tiến độ theo thành viên (Views)</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                `;
+
+                // Render each view
+                if (p.views.length > 0) {
+                    p.views.forEach(v => {
+                        const vPercent = v.total_images > 0 ? Math.round((v.labeled_images / v.total_images) * 100) : 0;
+                        html += `
+                            <div class="bg-surface border border-border rounded p-4 flex flex-col justify-between">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div class="font-medium text-content flex items-center gap-2">
+                                        <i class="fa-solid fa-user-circle text-content-muted"></i> ${v.name}
+                                    </div>
+                                    <span class="text-xs px-2 py-1 bg-panel border border-border rounded font-mono">
+                                        ${v.labeled_images}/${v.total_images}
+                                    </span>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs text-content-muted mb-1">
+                                        <span>Hoàn thành</span>
+                                        <span>${vPercent}%</span>
+                                    </div>
+                                    <div class="w-full bg-panel rounded-full h-1.5">
+                                        <div class="bg-secondary h-1.5 rounded-full" style="width: ${vPercent}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    html += `<div class="text-sm text-content-muted italic col-span-full" data-i18n="no_assignees">Chưa có phân công nào.</div>`;
+                }
+
+                html += `
+                        </div>
+                        
+                        <!-- Unassigned -->
+                        <div class="mt-6 border-t border-border pt-4">
+                            <h3 class="text-sm font-semibold text-content mb-2" data-i18n="unassigned_images">Ảnh chưa phân công</h3>
+                            <div class="flex items-center gap-4 text-sm text-content-muted">
+                                <i class="fa-solid fa-inbox"></i>
+                                <span>${p.unassigned.labeled_images} / ${p.unassigned.total_images} ảnh đã gán nhãn</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            
+            // Re-apply translations for dynamically added elements if window.applyTranslations exists
+            if (typeof applyTranslations === 'function') {
+                applyTranslations();
+            }
+            
+        } catch (e) {
+            console.error(e);
+            container.innerHTML = `
+                <div class="text-center py-10 bg-panel border border-red-500/30 rounded-lg text-red-500">
+                    <i class="fa-solid fa-triangle-exclamation text-4xl mb-4"></i>
+                    <p data-i18n="error_loading">Lỗi khi tải dữ liệu tiến độ. Vui lòng thử lại sau.</p>
+                </div>
+            `;
+        }
+    });
+</script>
+{% endblock %}

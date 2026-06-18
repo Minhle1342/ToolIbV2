@@ -66,7 +66,7 @@ def scan_and_sync_images(project):
     db.session.commit()
     return new_images_count
 
-def assign_images_to_view(view_id, count, project_id):
+def assign_images_to_view(view_id, count, project_id, assign_mode='both'):
     """
     Assigns 'count' unassigned images from 'project_id' to 'view_id'.
     Returns number of assigned images.
@@ -76,7 +76,14 @@ def assign_images_to_view(view_id, count, project_id):
     except ValueError:
         return 0
 
-    unassigned_images = Image.query.filter_by(project_id=project_id, view_id=None).limit(count).all()
+    query = Image.query.filter_by(project_id=project_id, view_id=None)
+    
+    if assign_mode == 'labeled':
+        query = query.filter_by(is_labeled=True)
+    elif assign_mode == 'unlabeled':
+        query = query.filter_by(is_labeled=False)
+
+    unassigned_images = query.limit(count).all()
     
     for img in unassigned_images:
         img.view_id = view_id
