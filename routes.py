@@ -277,7 +277,7 @@ def get_class_examples(project_id):
             if str(cid) not in examples:
                 examples[str(cid)] = {
                     'filename': img.filename,
-                    'bbox': label['bbox']
+                    'bbox': [label['x'], label['y'], label['w'], label['h']]
                 }
             if len(examples) == len(classes):
                 break
