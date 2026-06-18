@@ -886,7 +886,8 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
             const data = await res.json();
             
             const classes = data.classes;
-            const examples = data.examples;
+            this.classExamplesData = data.examples;
+            this.classExamplesIndex = {};
 
             if (classes.length === 0) {
                 content.innerHTML = '<div class="text-center text-content-muted py-10" data-i18n="no_classes">No classes found</div>';
@@ -900,7 +901,8 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
 
             for (let i = 0; i < classes.length; i++) {
                 const className = classes[i];
-                const example = examples[i.toString()];
+                const examplesList = this.classExamplesData[i.toString()];
+                this.classExamplesIndex[i] = 0;
 
                 // Determine color - editor might not be initialized yet but it usually is
                 const color = (typeof editor !== 'undefined' && editor.colors) ? editor.colors[i % 20] : '#3b82f6';
@@ -911,12 +913,27 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
                             <span class="inline-block w-3 h-3 rounded-full mr-2" style="background-color: ${color}"></span>
                             ${className}
                         </div>
-                        <div class="flex-1 aspect-square relative bg-surface flex items-center justify-center p-2">
+                        <div class="flex-1 aspect-square relative bg-surface flex items-center justify-center p-2 group">
                 `;
 
-                if (example) {
+                if (examplesList && examplesList.length > 0) {
                     html += `<canvas id="example-canvas-${i}" class="max-w-full max-h-full object-contain shadow-sm border border-border rounded"></canvas>`;
-                    renderTasks.push({ index: i, example: example, color: color });
+                    
+                    if (examplesList.length > 1) {
+                        html += `
+                            <div class="absolute inset-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button class="bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-black/80" onclick="currentWorkspace.changeClassExample(${i}, -1, '${color}')">
+                                    <i class="fa-solid fa-chevron-left"></i>
+                                </button>
+                                <button class="bg-black/50 text-white rounded-full w-8 h-8 flex items-center justify-center hover:bg-black/80" onclick="currentWorkspace.changeClassExample(${i}, 1, '${color}')">
+                                    <i class="fa-solid fa-chevron-right"></i>
+                                </button>
+                            </div>
+                            <div class="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded" id="example-counter-${i}">1/${examplesList.length}</div>
+                        `;
+                    }
+                    
+                    renderTasks.push({ index: i, color: color });
                 } else {
                     html += `<div class="text-content-muted text-xs text-center"><i class="fa-regular fa-image text-2xl mb-2 opacity-50"></i><br>No examples yet</div>`;
                 }
@@ -932,49 +949,79 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
 
             // Load images and draw on canvas
             renderTasks.forEach(task => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.getElementById(`example-canvas-${task.index}`);
-                    if (!canvas) return;
-                    
-                    const ctx = canvas.getContext('2d');
-                    const [cx, cy, cw, ch] = task.example.bbox;
-                    
-                    // YOLO relative to absolute
-                    const absW = cw * img.width;
-                    const absH = ch * img.height;
-                    const absX = (cx * img.width) - (absW / 2);
-                    const absY = (cy * img.height) - (absH / 2);
-
-                    // Add some padding to show context
-                    const pad = Math.max(absW, absH) * 0.3;
-                    let sx = Math.max(0, absX - pad);
-                    let sy = Math.max(0, absY - pad);
-                    let sw = Math.min(img.width - sx, absW + pad * 2);
-                    let sh = Math.min(img.height - sy, absH + pad * 2);
-
-                    canvas.width = sw;
-                    canvas.height = sh;
-                    
-                    // Draw cropped region
-                    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-                    
-                    // Draw bounding box
-                    ctx.strokeStyle = task.color;
-                    ctx.lineWidth = Math.max(2, sw / 150);
-                    ctx.strokeRect(absX - sx, absY - sy, absW, absH);
-                    
-                    // Add subtle fill
-                    ctx.fillStyle = task.color + '33'; // 20% opacity
-                    ctx.fillRect(absX - sx, absY - sy, absW, absH);
-                };
-                img.src = `/api/image_data/${task.example.image_id}`;
+                this.renderClassExample(task.index, task.color);
             });
 
         } catch (e) {
             console.error(e);
             content.innerHTML = `<div class="text-center text-red-500 py-10">Error loading examples: ${e.message}</div>`;
         }
+    }
+
+    changeClassExample(classIndex, direction, color) {
+        const examplesList = this.classExamplesData[classIndex.toString()];
+        if (!examplesList || examplesList.length <= 1) return;
+
+        let currentIndex = this.classExamplesIndex[classIndex];
+        currentIndex += direction;
+        
+        if (currentIndex < 0) currentIndex = examplesList.length - 1;
+        if (currentIndex >= examplesList.length) currentIndex = 0;
+        
+        this.classExamplesIndex[classIndex] = currentIndex;
+        
+        const counter = document.getElementById(`example-counter-${classIndex}`);
+        if (counter) {
+            counter.innerText = `${currentIndex + 1}/${examplesList.length}`;
+        }
+        
+        this.renderClassExample(classIndex, color);
+    }
+
+    renderClassExample(classIndex, color) {
+        const examplesList = this.classExamplesData[classIndex.toString()];
+        if (!examplesList) return;
+        
+        const currentIndex = this.classExamplesIndex[classIndex];
+        const example = examplesList[currentIndex];
+        
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.getElementById(`example-canvas-${classIndex}`);
+            if (!canvas) return;
+            
+            const ctx = canvas.getContext('2d');
+            const [cx, cy, cw, ch] = example.bbox;
+            
+            // YOLO relative to absolute
+            const absW = cw * img.width;
+            const absH = ch * img.height;
+            const absX = (cx * img.width) - (absW / 2);
+            const absY = (cy * img.height) - (absH / 2);
+
+            // Add some padding to show context
+            const pad = Math.max(absW, absH) * 0.3;
+            let sx = Math.max(0, absX - pad);
+            let sy = Math.max(0, absY - pad);
+            let sw = Math.min(img.width - sx, absW + pad * 2);
+            let sh = Math.min(img.height - sy, absH + pad * 2);
+
+            canvas.width = sw;
+            canvas.height = sh;
+            
+            // Draw cropped region
+            ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+            
+            // Draw bounding box
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(2, sw / 150);
+            ctx.strokeRect(absX - sx, absY - sy, absW, absH);
+            
+            // Add subtle fill
+            ctx.fillStyle = color + '33'; // 20% opacity
+            ctx.fillRect(absX - sx, absY - sy, absW, absH);
+        };
+        img.src = `/api/image_data/${example.image_id}`;
     }
 }
 

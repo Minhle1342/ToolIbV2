@@ -273,16 +273,20 @@ def get_class_examples(project_id):
     for img in labeled_images:
         labels = utils.read_yolo_label(img)
         for label in labels:
-            cid = label['class_id']
-            if str(cid) not in examples:
-                examples[str(cid)] = {
+            cid = str(label['class_id'])
+            if cid not in examples:
+                examples[cid] = []
+            
+            if len(examples[cid]) < 10:
+                examples[cid].append({
                     'filename': img.filename,
                     'image_id': img.id,
                     'bbox': [label['x'], label['y'], label['w'], label['h']]
-                }
-            if len(examples) == len(classes):
-                break
-        if len(examples) == len(classes):
+                })
+            
+        # Optimization: break if all classes have at least 10 examples
+        all_full = len(examples) == len(classes) and all(len(v) == 10 for v in examples.values())
+        if all_full:
             break
             
     return jsonify({
