@@ -262,6 +262,33 @@ def handle_project_classes(project_id):
 
     return jsonify(classes)
 
+@api_bp.route('/projects/<int:project_id>/class-examples', methods=['GET'])
+def get_class_examples(project_id):
+    project = Project.query.get_or_404(project_id)
+    classes = utils.get_classes(project)
+    
+    labeled_images = Image.query.filter_by(project_id=project_id, is_labeled=True).all()
+    examples = {}
+    
+    for img in labeled_images:
+        labels = utils.read_yolo_label(img)
+        for label in labels:
+            cid = label['class_id']
+            if str(cid) not in examples:
+                examples[str(cid)] = {
+                    'filename': img.filename,
+                    'bbox': label['bbox']
+                }
+            if len(examples) == len(classes):
+                break
+        if len(examples) == len(classes):
+            break
+            
+    return jsonify({
+        'classes': classes,
+        'examples': examples
+    })
+
 @api_bp.route('/projects/<int:project_id>/classes/<int:class_idx>', methods=['DELETE'])
 def delete_project_class(project_id, class_idx):
     import os

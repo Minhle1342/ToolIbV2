@@ -871,6 +871,111 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
             event.target.value = ''; // reset input
         }
     }
+
+    async showClassExamplesModal() {
+        const modal = document.getElementById('classExamplesModal');
+        const content = document.getElementById('classExamplesContent');
+        if (!modal || !content) return;
+
+        modal.classList.remove('hidden');
+        content.innerHTML = '<div class="text-center text-content-muted py-10"><i class="fa-solid fa-spinner fa-spin text-3xl mb-3"></i><div data-i18n="loading">Loading...</div></div>';
+
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/class-examples`);
+            if (!res.ok) throw new Error('Failed to load examples');
+            const data = await res.json();
+            
+            const classes = data.classes;
+            const examples = data.examples;
+
+            if (classes.length === 0) {
+                content.innerHTML = '<div class="text-center text-content-muted py-10" data-i18n="no_classes">No classes found</div>';
+                return;
+            }
+
+            let html = '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">';
+            
+            // We will render canvases and load images after HTML is set
+            const renderTasks = [];
+
+            for (let i = 0; i < classes.length; i++) {
+                const className = classes[i];
+                const example = examples[i.toString()];
+
+                // Determine color - editor might not be initialized yet but it usually is
+                const color = (typeof editor !== 'undefined' && editor.colors) ? editor.colors[i % 20] : '#3b82f6';
+
+                html += `
+                    <div class="bg-panel border border-border rounded flex flex-col overflow-hidden">
+                        <div class="bg-sidebar px-3 py-2 border-b border-border font-semibold text-sm truncate flex items-center" title="${className}">
+                            <span class="inline-block w-3 h-3 rounded-full mr-2" style="background-color: ${color}"></span>
+                            ${className}
+                        </div>
+                        <div class="flex-1 aspect-square relative bg-surface flex items-center justify-center p-2">
+                `;
+
+                if (example) {
+                    html += `<canvas id="example-canvas-${i}" class="max-w-full max-h-full object-contain shadow-sm border border-border rounded"></canvas>`;
+                    renderTasks.push({ index: i, example: example, color: color });
+                } else {
+                    html += `<div class="text-content-muted text-xs text-center"><i class="fa-regular fa-image text-2xl mb-2 opacity-50"></i><br>No examples yet</div>`;
+                }
+
+                html += `
+                        </div>
+                    </div>
+                `;
+            }
+
+            html += '</div>';
+            content.innerHTML = html;
+
+            // Load images and draw on canvas
+            renderTasks.forEach(task => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.getElementById(`example-canvas-${task.index}`);
+                    if (!canvas) return;
+                    
+                    const ctx = canvas.getContext('2d');
+                    const [cx, cy, cw, ch] = task.example.bbox;
+                    
+                    // YOLO relative to absolute
+                    const absW = cw * img.width;
+                    const absH = ch * img.height;
+                    const absX = (cx * img.width) - (absW / 2);
+                    const absY = (cy * img.height) - (absH / 2);
+
+                    // Add some padding to show context
+                    const pad = Math.max(absW, absH) * 0.3;
+                    let sx = Math.max(0, absX - pad);
+                    let sy = Math.max(0, absY - pad);
+                    let sw = Math.min(img.width - sx, absW + pad * 2);
+                    let sh = Math.min(img.height - sy, absH + pad * 2);
+
+                    canvas.width = sw;
+                    canvas.height = sh;
+                    
+                    // Draw cropped region
+                    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+                    
+                    // Draw bounding box
+                    ctx.strokeStyle = task.color;
+                    ctx.lineWidth = Math.max(2, sw / 150);
+                    ctx.strokeRect(absX - sx, absY - sy, absW, absH);
+                    
+                    // Add subtle fill
+                    ctx.fillStyle = task.color + '33'; // 20% opacity
+                    ctx.fillRect(absX - sx, absY - sy, absW, absH);
+                };
+                img.src = `/uploads/${PROJECT_ID}/${task.example.filename}`;
+            });
+
+        } catch (e) {
+            console.error(e);
+            content.innerHTML = `<div class="text-center text-red-500 py-10">Error loading examples: ${e.message}</div>`;
+        }
+    }
 }
 
 const currentWorkspace = new Workspace();

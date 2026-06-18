@@ -164,6 +164,9 @@
             class="p-4 border-b border-border bg-sidebar flex-shrink-0 flex flex-col max-h-[50%] overflow-y-auto sidebar-content">
             <div class="flex justify-between items-center mb-2">
                 <h3 class="font-semibold text-sm text-content-muted" data-i18n="inspection">Inspection</h3>
+                <button onclick="currentWorkspace.showClassExamplesModal()" class="text-content-muted hover:text-primary transition-colors" title="View Class Examples">
+                    <i class="fa-solid fa-circle-question"></i>
+                </button>
             </div>
 
             <div
@@ -242,6 +245,25 @@
                     class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded" data-i18n="btn_assign">Assign</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Class Examples Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center" id="classExamplesModal">
+    <div class="bg-panel rounded-lg shadow-xl w-[90vw] max-w-5xl h-[80vh] flex flex-col border border-border">
+        <div class="p-4 border-b border-border flex justify-between items-center">
+            <h2 class="text-xl font-bold text-content" data-i18n="class_examples">Class Examples</h2>
+            <button onclick="closeModal('classExamplesModal')" class="text-content-muted hover:text-content">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+        <div class="p-4 overflow-y-auto flex-1 bg-surface" id="classExamplesContent">
+            <!-- Content injected by JS -->
+            <div class="text-center text-content-muted py-10">
+                <i class="fa-solid fa-spinner fa-spin text-3xl mb-3"></i>
+                <div data-i18n="loading">Loading...</div>
+            </div>
+        </div>
     </div>
 </div>
 
