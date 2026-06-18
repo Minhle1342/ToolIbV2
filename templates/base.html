@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team YOLO Labeling Hub</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        // Semantic Colors
+                        surface: 'var(--color-surface)',     // Main BG
+                        sidebar: 'var(--color-sidebar)',     // Sidebar BG
+                        panel: 'var(--color-panel)',         // Panels/Cards
+                        border: 'var(--color-border)',       // Borders
+
+                        primary: 'var(--color-primary)',     // Main Brand Color
+                        secondary: 'var(--color-secondary)', // Secondary Brand Color
+                        accent: 'var(--color-accent)',       // Accents
+
+                        content: {
+                            DEFAULT: 'var(--color-text)',    // Main Text
+                            muted: 'var(--color-text-muted)',// Secondary Text
+                            inv: 'var(--color-text-inv)',    // Inverted Text
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        :root {
+            /* Dark Theme (Default) */
+            --color-surface: #0d1117;       /* gray-950 */
+            --color-sidebar: #1f2937;       /* gray-800 */
+            --color-panel: #111827;         /* gray-900 */
+            --color-border: #374151;        /* gray-700 */
+            
+            --color-primary: #3b82f6;       /* blue-500 */
+            --color-secondary: #22c55e;     /* green-500 */
+            --color-accent: #eab308;        /* yellow-500 */
+            
+            --color-text: #e5e7eb;          /* gray-200 */
+            --color-text-muted: #9ca3af;    /* gray-400 */
+            --color-text-inv: #ffffff;
+        }
+
+        .pink-mode {
+            /* Pastel Pink Theme */
+            --color-surface: #fff0f5;       /* LavenderBlush */
+            --color-sidebar: #ffe4e1;       /* MistyRose */
+            --color-panel: #ffffff;         /* White */
+            --color-border: #ffb6c1;        /* LightPink */
+            
+            --color-primary: #ff69b4;       /* HotPink */
+            --color-secondary: #ff1493;     /* DeepPink */
+            --color-accent: #ff6347;        /* Tomato */
+            
+            --color-text: #4a4a4a;          /* Dark Gray */
+            --color-text-muted: #8b8b8b;    /* Gray */
+            --color-text-inv: #ffffff;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+</head>
+
+<body class="bg-surface text-content h-screen overflow-hidden font-sans transition-colors duration-300">
+    <div class="flex h-full">
+        <!-- Global Sidebar -->
+        <nav class="w-64 bg-sidebar border-r border-border flex flex-col transition-all duration-300"
+            id="globalSidebar">
+            <div class="h-16 flex items-center justify-between px-4 border-b border-border">
+                <div class="flex items-center gap-2 font-bold text-lg text-primary" id="brandText">
+                    <i class="fa-solid fa-layer-group"></i>
+                    <span data-i18n="brand">YOLO Hub</span>
+                </div>
+                <button class="text-content-muted hover:text-content transition-colors" onclick="toggleGlobalSidebar()"
+                    title="Toggle Sidebar">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+            </div>
+
+            <ul class="flex-1 py-4 space-y-1">
+                <li>
+                    <a href="/"
+                        class="flex items-center gap-3 px-4 py-3 hover:bg-panel transition-colors {{ 'bg-primary text-content-inv' if request.path == '/' else 'text-content-muted' }}">
+                        <i class="fa-solid fa-house w-5 text-center"></i>
+                        <span class="nav-text" data-i18n="nav_dashboard">Dashboard</span>
+                    </a>
+                </li>
+                <li>
+                    <a href="/export"
+                        class="flex items-center gap-3 px-4 py-3 hover:bg-panel transition-colors {{ 'bg-primary text-content-inv' if request.path == '/export' else 'text-content-muted' }}">
+                        <i class="fa-solid fa-file-export w-5 text-center"></i>
+                        <span class="nav-text" data-i18n="nav_export">Export Dataset</span>
+                    </a>
+                </li>
+            </ul>
+
+            <!-- Theme Toggle -->
+            <div class="p-4 border-t border-border space-y-2">
+                <button onclick="toggleTheme()"
+                    class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-panel border border-border rounded text-content-muted hover:text-primary transition-colors">
+                    <i class="fa-solid fa-palette"></i>
+                    <span class="nav-text text-sm" data-i18n="nav_theme">Switch Theme</span>
+                </button>
+                <button onclick="toggleLanguage()"
+                    class="w-full flex items-center justify-center gap-2 px-4 py-2 bg-panel border border-border rounded text-content-muted hover:text-primary transition-colors">
+                    <i class="fa-solid fa-language"></i>
+                    <span class="nav-text text-sm" data-i18n="nav_lang">Tiếng Việt</span>
+                </button>
+            </div>
+        </nav>
+
+        <main class="flex-1 flex flex-col min-w-0 bg-surface text-content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script>
+        function toggleGlobalSidebar() {
+            const sidebar = document.getElementById('globalSidebar');
+            const isCollapsed = sidebar.classList.contains('w-16');
+
+            if (isCollapsed) {
+                sidebar.classList.remove('w-16');
+                sidebar.classList.add('w-64');
+                document.querySelectorAll('.nav-text').forEach(el => el.style.display = 'block');
+                document.getElementById('brandText').querySelector('span').style.display = 'block';
+            } else {
+                sidebar.classList.remove('w-64');
+                sidebar.classList.add('w-16');
+                document.querySelectorAll('.nav-text').forEach(el => el.style.display = 'none');
+                document.getElementById('brandText').querySelector('span').style.display = 'none';
+            }
+
+            localStorage.setItem('sidebar-collapsed', !isCollapsed);
+        }
+
+        function toggleTheme() {
+            const body = document.body;
+            body.classList.toggle('pink-mode');
+            const isPink = body.classList.contains('pink-mode');
+            localStorage.setItem('theme', isPink ? 'pink' : 'dark');
+        }
+
+        // Restore state
+        // Sidebar
+        if (localStorage.getItem('sidebar-collapsed') === 'true') {
+            const sidebar = document.getElementById('globalSidebar');
+            sidebar.classList.remove('w-64');
+            sidebar.classList.add('w-16');
+            document.querySelectorAll('.nav-text').forEach(el => el.style.display = 'none');
+            let brandSpan = document.getElementById('brandText')?.querySelector('span');
+            if (brandSpan) brandSpan.style.display = 'none';
+        }
+
+        // Theme
+        if (localStorage.getItem('theme') === 'pink') {
+            document.body.classList.add('pink-mode');
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>

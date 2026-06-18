@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Export Dataset</h1>
+</div>
+
+<div style="display: flex; gap: 2rem;">
+    <!-- Selection Panel -->
+    <div class="card" style="flex: 1;">
+        <h3 class="card-title">Select Projects to Merge</h3>
+        <p class="card-info">Select one or more projects to export as a single dataset.</p>
+
+        <form id="exportForm">
+            <div id="projectCheckboxes" style="margin-bottom: 2rem; max-height: 300px; overflow-y: auto;">
+                <!-- Injected via JS -->
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Train/Val Split Ratio (Default: 0.8)</label>
+                <input type="number" name="split_ratio" class="form-input" value="0.8" step="0.05" min="0.1" max="0.9">
+                <span style="font-size: 0.8rem; color: var(--text-muted)">0.8 means 80% Train, 20% Val</span>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="btnExport">
+                <i class="fa-solid fa-file-export"></i> Export & Generate data.yaml
+            </button>
+        </form>
+    </div>
+
+    <!-- Output Panel -->
+    <div class="card" style="flex: 1;" id="resultPanel" hidden>
+        <h3 class="card-title" style="color: var(--success)">Export Successful!</h3>
+        <div id="resultContent" style="margin-top: 1rem;"></div>
+    </div>
+</div>
+
+<script>
+    async function init() {
+        const projects = await API.getProjects();
+        const container = document.getElementById('projectCheckboxes');
+
+        container.innerHTML = projects.map(p => `
+            <div style="padding: 0.5rem; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" name="project_ids" value="${p.id}" id="p-${p.id}">
+                <label for="p-${p.id}" style="cursor: pointer;">${p.name}</label>
+                <span class="card-info" style="margin-bottom: 0; font-size: 0.8rem;">(${p.root_path})</span>
+            </div>
+        `).join('');
+    }
+
+    document.getElementById('exportForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('btnExport');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
+
+        // Gather selected projects
+        const checkboxes = document.querySelectorAll('input[name="project_ids"]:checked');
+        const project_ids = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+        if (project_ids.length === 0) {
+            alert('Please select at least one project.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-file-export"></i> Export & Generate data.yaml';
+            return;
+        }
+
+        const split_ratio = parseFloat(document.querySelector('input[name="split_ratio"]').value);
+
+        try {
+            const res = await API.exportDataset({
+                project_ids: project_ids,
+                split_ratio: split_ratio
+            });
+
+            document.getElementById('resultPanel').hidden = false;
+            document.getElementById('resultContent').innerHTML = `
+                <p><b>Export Path:</b> ${res.export_path}</p>
+                <p><b>Total Images:</b> ${res.stats.total}</p>
+                <p><b>Train Set:</b> ${res.stats.train}</p>
+                <p><b>Val Set:</b> ${res.stats.val}</p>
+                <br>
+                <p><i>data.yaml has been generated in the export folder.</i></p>
+            `;
+        } catch (err) {
+            alert('Export failed: ' + err);
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-file-export"></i> Export & Generate data.yaml';
+        }
+    });
+
+    init();
+</script>
+{% endblock %}
