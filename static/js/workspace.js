@@ -968,7 +968,7 @@ results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
                     ctx.fillStyle = task.color + '33'; // 20% opacity
                     ctx.fillRect(absX - sx, absY - sy, absW, absH);
                 };
-                img.src = `/uploads/${PROJECT_ID}/${task.example.filename}`;
+                img.src = `/api/image_data/${task.example.image_id}`;
             });
 
         } catch (e) {
