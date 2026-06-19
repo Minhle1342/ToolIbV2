@@ -1,0 +1,799 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="h-full flex flex-col bg-surface overflow-auto p-6" id="modelsApp">
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-content">Quản lý và Thí nghiệm Mô hình</h1>
+        <button onclick="openAddModelModal()" class="px-4 py-2 bg-primary text-content-inv rounded hover:opacity-90 font-medium">
+            <i class="fa-solid fa-plus mr-2"></i>Thêm Model mới
+        </button>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Models List -->
+        <div class="lg:col-span-1 bg-panel border border-border rounded p-4 h-max shadow-sm">
+            <h2 class="text-lg font-semibold text-content mb-4 border-b border-border pb-2">Danh sách Model</h2>
+            <div id="modelsList" class="space-y-3">
+                <!-- Models will be injected here -->
+            </div>
+        </div>
+
+        <!-- Experiment Zone -->
+        <div class="lg:col-span-2 bg-panel border border-border rounded p-4 h-max shadow-sm">
+            <h2 class="text-lg font-semibold text-content mb-4 border-b border-border pb-2">Thí nghiệm & So sánh</h2>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-content mb-2">1. Chọn các Model muốn so sánh:</label>
+                <div id="compareModelsList" class="flex flex-wrap gap-2">
+                    <!-- Checkboxes injected here -->
+                </div>
+            </div>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-content mb-2">2. Upload ảnh để test:</label>
+                <input type="file" id="testImageInput" multiple accept="image/*" class="w-full text-sm text-content-muted
+                    file:mr-4 file:py-2 file:px-4
+                    file:rounded file:border-0
+                    file:text-sm file:font-semibold
+                    file:bg-primary file:text-content-inv
+                    hover:file:bg-opacity-90 border border-border rounded p-2 bg-surface cursor-pointer"/>
+            </div>
+            
+            <!-- Environmental Parameters Simulator -->
+            <div class="mb-6 border border-border rounded p-4 bg-panel">
+                <div class="flex items-center justify-between mb-4 border-b border-border pb-2">
+                    <h3 class="text-sm font-bold text-content flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-primary"></i> 3. Giả lập thông số môi trường (Tùy chỉnh)
+                    </h3>
+                    <button onclick="resetEnvParams()" class="text-xs text-primary hover:underline font-semibold flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-left"></i> Đặt lại
+                    </button>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Brightness -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content flex items-center gap-1">
+                                Độ sáng (Brightness)
+                                <div class="relative group cursor-help text-content-muted">
+                                    <i class="fa-solid fa-circle-question text-primary"></i>
+                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 bg-black/95 text-white text-[11px] rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-50 normal-case font-normal leading-relaxed">
+                                        Giả lập ánh sáng môi trường. Giảm xuống để giả lập trời tối/ban đêm, tăng lên để giả lập nắng gắt hoặc đèn pha chiếu trực tiếp vào camera.
+                                    </span>
+                                </div>
+                            </span>
+                            <span id="val-brightness" class="text-xs font-mono text-primary font-bold">100%</span>
+                        </div>
+                        <input type="range" id="param-brightness" min="20" max="200" value="100" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateEnvVal('brightness')">
+                    </div>
+                    
+                    <!-- Contrast -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content flex items-center gap-1">
+                                Độ tương phản (Contrast)
+                                <div class="relative group cursor-help text-content-muted">
+                                    <i class="fa-solid fa-circle-question text-primary"></i>
+                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 bg-black/95 text-white text-[11px] rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-50 normal-case font-normal leading-relaxed">
+                                        Giả lập độ tương phản. Giảm xuống để giả lập thời tiết sương mù, khói bụi làm nhạt màu ảnh; tăng lên để tăng độ sắc nét giữa sáng và tối.
+                                    </span>
+                                </div>
+                            </span>
+                            <span id="val-contrast" class="text-xs font-mono text-primary font-bold">100%</span>
+                        </div>
+                        <input type="range" id="param-contrast" min="30" max="200" value="100" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateEnvVal('contrast')">
+                    </div>
+                    
+                    <!-- Blur -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content flex items-center gap-1">
+                                Độ mờ/Nhòe (Blur)
+                                <div class="relative group cursor-help text-content-muted">
+                                    <i class="fa-solid fa-circle-question text-primary"></i>
+                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 bg-black/95 text-white text-[11px] rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-50 normal-case font-normal leading-relaxed">
+                                        Giả lập độ nhòe của ống kính. Tăng lên để giả lập hiện tượng camera bị rung lắc khi di chuyển, hoặc ống kính bám nước mưa, bụi bẩn.
+                                    </span>
+                                </div>
+                            </span>
+                            <span id="val-blur" class="text-xs font-mono text-primary font-bold">0px</span>
+                        </div>
+                        <input type="range" id="param-blur" min="0" max="10" value="0" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateEnvVal('blur')">
+                    </div>
+                    
+                    <!-- Noise -->
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content flex items-center gap-1">
+                                Nhiễu hạt (Noise)
+                                <div class="relative group cursor-help text-content-muted">
+                                    <i class="fa-solid fa-circle-question text-primary"></i>
+                                    <span class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-2.5 bg-black/95 text-white text-[11px] rounded shadow-xl opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity duration-200 z-50 normal-case font-normal leading-relaxed">
+                                        Giả lập nhiễu hạt cảm biến. Tăng lên để giả lập camera chất lượng kém, nhiễu hạt ISO khi quay chụp trong điều kiện thiếu sáng.
+                                    </span>
+                                </div>
+                            </span>
+                            <span id="val-noise" class="text-xs font-mono text-primary font-bold">0%</span>
+                        </div>
+                        <input type="range" id="param-noise" min="0" max="100" value="0" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateEnvVal('noise')">
+                    </div>
+                </div>
+            </div>
+            
+            <button onclick="runExperiment()" class="w-full px-4 py-2 bg-secondary text-content-inv rounded hover:opacity-90 font-medium transition-colors" id="runTestBtn">
+                <i class="fa-solid fa-play mr-2"></i>Chạy Thí nghiệm
+            </button>
+            
+            <div id="experimentResults" class="mt-6 space-y-6">
+                <!-- Results injected here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add/Edit Model Modal -->
+<div id="modelModal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-50">
+    <div class="bg-surface rounded-lg shadow-xl w-full max-w-md p-6 border border-border">
+        <h2 id="modalTitle" class="text-xl font-bold mb-4 text-content">Thêm Model</h2>
+        <input type="hidden" id="modelId">
+        
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-content-muted mb-1">Tên hiển thị</label>
+                <input type="text" id="modelName" class="w-full bg-panel border border-border rounded px-3 py-2 text-content focus:border-primary focus:outline-none" placeholder="VD: YOLOv8 Nano">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-content-muted mb-1">Tên File (.onnx)</label>
+                <div class="flex gap-2">
+                    <select id="modelFilename" class="w-full bg-panel border border-border rounded px-3 py-2 text-content focus:border-primary focus:outline-none">
+                        <option value="">-- Chọn file .onnx --</option>
+                    </select>
+                    <button type="button" onclick="loadModelFiles()" class="px-3 py-2 bg-surface border border-border rounded hover:bg-panel text-content-muted" title="Làm mới danh sách">
+                        <i class="fa-solid fa-sync-alt"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-content-muted mt-1">Lưu ý: File phải được đặt trong thư mục <code class="bg-surface px-1">models/</code> của dự án.</p>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-content-muted mb-1">Mô tả (tùy chọn)</label>
+                <textarea id="modelDesc" class="w-full bg-panel border border-border rounded px-3 py-2 text-content focus:border-primary focus:outline-none" rows="3" placeholder="Ghi chú về model này..."></textarea>
+            </div>
+        </div>
+        
+        <div class="flex justify-end gap-3 mt-6">
+            <button onclick="closeModal()" class="px-4 py-2 bg-panel border border-border text-content rounded hover:bg-surface transition-colors">Hủy</button>
+            <button onclick="saveModel()" class="px-4 py-2 bg-primary text-content-inv rounded hover:opacity-90 transition-opacity">Lưu</button>
+        </div>
+    </div>
+</div>
+
+<!-- Fullscreen Canvas Modal -->
+<div id="fullscreenModal" onclick="closeFullscreen()" class="fixed inset-0 bg-black/95 hidden z-[100] flex flex-col items-center justify-center p-4 backdrop-blur-sm transition-all duration-300">
+    <!-- Close Button -->
+    <button onclick="closeFullscreen(); event.stopPropagation();" class="absolute top-6 right-6 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg hover:shadow-white/20" title="Thoát (Esc)">
+        <i class="fa-solid fa-xmark text-2xl font-bold"></i>
+    </button>
+    
+    <!-- Modal Body: Container for the full size canvas -->
+    <div onclick="event.stopPropagation();" class="relative w-full h-full flex items-center justify-center overflow-auto max-w-[95vw] max-h-[85vh]">
+        <canvas id="fullscreenCanvas" class="max-w-full max-h-full object-contain shadow-[0_0_30px_rgba(255,255,255,0.15)] rounded border border-white/10"></canvas>
+    </div>
+    
+    <!-- Model Name & Image Info Overlay -->
+    <div id="fullscreenTitle" class="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md border border-white/20 px-6 py-2 rounded-full text-sm font-bold text-white shadow-2xl flex items-center gap-2">
+        Model Name
+    </div>
+</div>
+
+<script>
+    let modelsData = [];
+    
+    // Load models
+    async function loadModels() {
+        const res = await fetch('/api/models');
+        modelsData = await res.json();
+        renderModelsList();
+        renderCompareOptions();
+        await loadModelFiles();
+    }
+    
+    async function loadModelFiles() {
+        try {
+            const res = await fetch('/api/models/files');
+            const files = await res.json();
+            const select = document.getElementById('modelFilename');
+            const currentVal = select.value;
+            
+            select.innerHTML = '<option value="">-- Chọn file .onnx --</option>';
+            files.forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f;
+                opt.textContent = f;
+                select.appendChild(opt);
+            });
+            
+            if (files.includes(currentVal)) {
+                select.value = currentVal;
+            }
+        } catch (e) {
+            console.error("Lỗi tải danh sách file:", e);
+        }
+    }
+    
+    function renderModelsList() {
+        const container = document.getElementById('modelsList');
+        container.innerHTML = '';
+        if(modelsData.length === 0) {
+            container.innerHTML = '<div class="text-content-muted text-sm italic">Chưa có model nào.</div>';
+            return;
+        }
+        
+        modelsData.forEach(m => {
+            const isActive = m.is_active;
+            const item = document.createElement('div');
+            item.className = `p-3 rounded border ${isActive ? 'border-primary bg-primary/5' : 'border-border bg-surface'} flex flex-col gap-2`;
+            item.innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div>
+                        <div class="font-bold text-content flex items-center gap-2">
+                            ${m.name} 
+                            ${isActive ? '<span class="text-[10px] bg-primary text-content-inv px-1.5 py-0.5 rounded uppercase font-bold">Đang dùng (Active)</span>' : ''}
+                        </div>
+                        <div class="text-xs text-content-muted font-mono mt-0.5"><i class="fa-solid fa-file-code mr-1"></i>${m.filename}</div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="editModel(${m.id})" class="text-content-muted hover:text-blue-500" title="Sửa"><i class="fa-solid fa-pen"></i></button>
+                        <button onclick="deleteModel(${m.id})" class="text-content-muted hover:text-red-500" title="Xóa"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                </div>
+                ${m.description ? `<div class="text-sm text-content">${m.description}</div>` : ''}
+                ${!isActive ? `<button onclick="activateModel(${m.id})" class="mt-2 w-full text-xs py-1.5 border border-primary text-primary hover:bg-primary hover:text-content-inv rounded transition-colors font-semibold">Sử dụng cho Auto-label</button>` : ''}
+            `;
+            container.appendChild(item);
+        });
+    }
+    
+    function renderCompareOptions() {
+        const container = document.getElementById('compareModelsList');
+        container.innerHTML = '';
+        modelsData.forEach(m => {
+            const lbl = document.createElement('label');
+            lbl.className = "flex items-center gap-2 cursor-pointer bg-surface border border-border px-3 py-1.5 rounded text-sm hover:border-primary transition-colors";
+            lbl.innerHTML = `
+                <input type="checkbox" value="${m.id}" class="model-checkbox w-4 h-4 text-primary bg-panel border-border rounded focus:ring-primary focus:ring-2" checked>
+                <span class="text-content">${m.name}</span>
+            `;
+            container.appendChild(lbl);
+        });
+    }
+    
+    // CRUD
+    function openAddModelModal() {
+        document.getElementById('modalTitle').textContent = 'Thêm Model';
+        document.getElementById('modelId').value = '';
+        document.getElementById('modelName').value = '';
+        document.getElementById('modelFilename').value = '';
+        document.getElementById('modelDesc').value = '';
+        document.getElementById('modelModal').classList.remove('hidden');
+        loadModelFiles();
+    }
+    
+    function editModel(id) {
+        const m = modelsData.find(x => x.id === id);
+        if(!m) return;
+        document.getElementById('modalTitle').textContent = 'Sửa Model';
+        document.getElementById('modelId').value = m.id;
+        document.getElementById('modelName').value = m.name;
+        document.getElementById('modelFilename').value = m.filename;
+        document.getElementById('modelDesc').value = m.description;
+        document.getElementById('modelModal').classList.remove('hidden');
+        loadModelFiles().then(() => {
+            document.getElementById('modelFilename').value = m.filename;
+        });
+    }
+    
+    function closeModal() {
+        document.getElementById('modelModal').classList.add('hidden');
+    }
+    
+    async function saveModel() {
+        const id = document.getElementById('modelId').value;
+        const payload = {
+            name: document.getElementById('modelName').value,
+            filename: document.getElementById('modelFilename').value,
+            description: document.getElementById('modelDesc').value
+        };
+        
+        const method = id ? 'PUT' : 'POST';
+        const url = id ? '/api/models/' + id : '/api/models';
+        
+        try {
+            const res = await fetch(url, {
+                method,
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+            if(!res.ok) throw new Error((await res.json()).error);
+            closeModal();
+            loadModels();
+        } catch(e) {
+            alert("Lỗi: " + e.message);
+        }
+    }
+    
+    async function deleteModel(id) {
+        if(!confirm("Bạn có chắc muốn xóa model này?")) return;
+        try {
+            const res = await fetch('/api/models/' + id, { method: 'DELETE' });
+            if(!res.ok) throw new Error((await res.json()).error);
+            loadModels();
+        } catch(e) {
+            alert("Lỗi: " + e.message);
+        }
+    }
+    
+    async function activateModel(id) {
+        try {
+            const res = await fetch('/api/models/' + id + '/activate', { method: 'POST' });
+            if(!res.ok) throw new Error((await res.json()).error);
+            loadModels();
+        } catch(e) {
+            alert("Lỗi: " + e.message);
+        }
+    }
+    
+    // Environment simulation configuration
+    function updateEnvVal(param) {
+        const input = document.getElementById(`param-${param}`);
+        const display = document.getElementById(`val-${param}`);
+        if (param === 'blur') {
+            display.textContent = input.value + 'px';
+        } else {
+            display.textContent = input.value + '%';
+        }
+    }
+    
+    function resetEnvParams() {
+        document.getElementById('param-brightness').value = 100;
+        document.getElementById('param-contrast').value = 100;
+        document.getElementById('param-blur').value = 0;
+        document.getElementById('param-noise').value = 0;
+        updateEnvVal('brightness');
+        updateEnvVal('contrast');
+        updateEnvVal('blur');
+        updateEnvVal('noise');
+    }
+
+    function processImageWithEnv(file, brightness, contrast, blur, noise) {
+        return new Promise((resolve, reject) => {
+            // If all parameters are default, return original file directly
+            if (brightness === 100 && contrast === 100 && blur === 0 && noise === 0) {
+                resolve(file);
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    
+                    let filterParts = [];
+                    if (brightness !== 100) filterParts.push(`brightness(${brightness}%)`);
+                    if (contrast !== 100) filterParts.push(`contrast(${contrast}%)`);
+                    if (blur > 0) filterParts.push(`blur(${blur}px)`);
+                    
+                    if (filterParts.length > 0) {
+                        ctx.filter = filterParts.join(' ');
+                    }
+                    
+                    ctx.drawImage(img, 0, 0);
+                    ctx.filter = 'none'; // reset filter
+                    
+                    if (noise > 0) {
+                        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const data = imgData.data;
+                        const len = data.length;
+                        const factor = noise * 1.5;
+                        for (let i = 0; i < len; i += 4) {
+                            const rand = (Math.random() - 0.5) * factor;
+                            data[i] = Math.min(255, Math.max(0, data[i] + rand));
+                            data[i+1] = Math.min(255, Math.max(0, data[i+1] + rand));
+                            data[i+2] = Math.min(255, Math.max(0, data[i+2] + rand));
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                    }
+                    
+                    canvas.toBlob((blob) => {
+                        if (blob) {
+                            resolve(blob);
+                        } else {
+                            resolve(file); // fallback to original file if blob creation fails
+                        }
+                    }, 'image/jpeg', 0.9);
+                };
+                img.onerror = () => resolve(file); // fallback to original file
+                img.src = e.target.result;
+            };
+            reader.onerror = () => resolve(file); // fallback to original file
+            reader.readAsDataURL(file);
+        });
+    }
+
+    function getParamsString(brightness, contrast, blur, noise) {
+        let parts = [];
+        if (brightness !== 100) parts.push(`Sáng: ${brightness}%`);
+        if (contrast !== 100) parts.push(`Tương phản: ${contrast}%`);
+        if (blur > 0) parts.push(`Mờ: ${blur}px`);
+        if (noise > 0) parts.push(`Nhiễu: ${noise}%`);
+        return parts.length > 0 ? parts.join(', ') : '';
+    }
+
+    // Experiment
+    async function runExperiment() {
+        const files = document.getElementById('testImageInput').files;
+        if(files.length === 0) return alert("Vui lòng chọn ít nhất 1 ảnh để test.");
+        
+        const checkedBoxes = document.querySelectorAll('.model-checkbox:checked');
+        if(checkedBoxes.length === 0) return alert("Vui lòng chọn ít nhất 1 model để so sánh.");
+        
+        const modelIds = Array.from(checkedBoxes).map(cb => cb.value).join(',');
+        
+        const btn = document.getElementById('runTestBtn');
+        const ogText = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i>Đang xử lý...';
+        btn.disabled = true;
+        
+        const resultsContainer = document.getElementById('experimentResults');
+        resultsContainer.innerHTML = '';
+        
+        const modelTimes = {};
+        const modelScores = {};
+        Array.from(checkedBoxes).forEach(cb => {
+            modelTimes[cb.value] = [];
+            modelScores[cb.value] = [];
+        });
+
+        // Get env parameters values
+        const brightness = parseInt(document.getElementById('param-brightness').value);
+        const contrast = parseInt(document.getElementById('param-contrast').value);
+        const blur = parseInt(document.getElementById('param-blur').value);
+        const noise = parseInt(document.getElementById('param-noise').value);
+        
+        try {
+            for(let i=0; i<files.length; i++) {
+                const file = files[i];
+                
+                // Process image with environmental simulation parameters
+                const processedBlob = await processImageWithEnv(file, brightness, contrast, blur, noise);
+                let activeFile = file;
+                if (processedBlob !== file) {
+                    activeFile = new File([processedBlob], file.name, { type: 'image/jpeg' });
+                }
+                
+                const formData = new FormData();
+                formData.append('image', activeFile);
+                formData.append('model_ids', modelIds);
+                
+                const res = await fetch('/api/models/test', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await res.json();
+                
+                // Calculate round scores
+                const roundScores = {};
+                for(let mid in data) {
+                    const modelRes = data[mid];
+                    if (modelRes && modelRes.time_ms !== undefined) {
+                        if (!modelTimes[mid]) modelTimes[mid] = [];
+                        modelTimes[mid].push(modelRes.time_ms);
+                    }
+                    if (modelRes && !modelRes.error) {
+                        const scoreObj = calculateModelScore(modelRes.predictions || [], modelRes.time_ms || 0);
+                        roundScores[mid] = scoreObj.total;
+                        if (!modelScores[mid]) modelScores[mid] = [];
+                        modelScores[mid].push(scoreObj.total);
+                    } else {
+                        roundScores[mid] = 0;
+                        if (!modelScores[mid]) modelScores[mid] = [];
+                        modelScores[mid].push(0);
+                    }
+                }
+                
+                // Determine winner of this round
+                let roundWinnerId = null;
+                let maxRoundScore = -1;
+                for (let mid in roundScores) {
+                    if (roundScores[mid] > maxRoundScore) {
+                        maxRoundScore = roundScores[mid];
+                        roundWinnerId = mid;
+                    }
+                }
+                
+                const paramsText = getParamsString(brightness, contrast, blur, noise);
+                renderTestResult(activeFile, data, resultsContainer, modelTimes, paramsText, roundScores, roundWinnerId);
+            }
+            
+            // Calculate final averages and overall winner after all rounds
+            const summaryData = [];
+            for (let mid in modelScores) {
+                const scores = modelScores[mid];
+                const avgScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+                
+                const times = modelTimes[mid] || [];
+                const avgTime = times.length > 0 ? (times.reduce((a, b) => a + b, 0) / times.length) : 0;
+                
+                const m = modelsData.find(x => x.id == mid);
+                const mName = m ? m.name : 'Unknown Model';
+                
+                summaryData.push({
+                    id: mid,
+                    name: mName,
+                    avgScore: parseFloat(avgScore.toFixed(1)),
+                    avgTime: parseFloat(avgTime.toFixed(0)),
+                    scores: scores
+                });
+            }
+            
+            // Sort by score descending
+            summaryData.sort((a, b) => b.avgScore - a.avgScore);
+            const overallWinnerId = summaryData.length > 0 ? summaryData[0].id : null;
+            
+            if (summaryData.length > 0) {
+                renderExperimentSummary(summaryData, overallWinnerId, resultsContainer);
+            }
+            
+        } catch(e) {
+            alert("Lỗi test: " + e.message);
+        } finally {
+            btn.innerHTML = ogText;
+            btn.disabled = false;
+        }
+    }
+    
+    function renderTestResult(file, results, container, modelTimes, paramsText, roundScores, roundWinnerId) {
+        const fileUrl = URL.createObjectURL(file);
+        
+        const block = document.createElement('div');
+        block.className = 'border border-border rounded bg-surface overflow-hidden';
+        
+        const header = document.createElement('div');
+        header.className = 'bg-panel px-4 py-2 border-b border-border font-semibold text-content flex justify-between items-center';
+        header.innerHTML = `
+            <div class="flex items-center gap-2">
+                <i class="fa-regular fa-image text-content-muted"></i> 
+                <span>${file.name}</span>
+                ${paramsText ? `<span class="text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-full font-mono font-semibold">${paramsText}</span>` : ''}
+            </div>
+        `;
+        block.appendChild(header);
+        
+        const grid = document.createElement('div');
+        grid.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4';
+        
+        for(let modelId in results) {
+            const m = modelsData.find(x => x.id == modelId);
+            const mName = m ? m.name : 'Unknown Model';
+            const res = results[modelId];
+            
+            const col = document.createElement('div');
+            col.className = 'flex flex-col gap-2 bg-panel border border-border p-2 rounded shadow-sm';
+            
+            const title = document.createElement('div');
+            title.className = 'font-bold text-sm text-center text-primary py-1 border-b border-border flex flex-col items-center gap-1';
+            
+            const scoreVal = roundScores && roundScores[modelId] !== undefined ? roundScores[modelId] : 0;
+            const isWinner = roundWinnerId && roundWinnerId == modelId;
+            
+            title.innerHTML = `
+                <span>${mName}</span>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-surface border border-border text-content-muted font-mono font-bold">Score: ${scoreVal}</span>
+                    ${isWinner ? `<span class="text-[10px] bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 px-1.5 py-0.5 rounded font-bold animate-pulse flex items-center gap-0.5"><i class="fa-solid fa-trophy text-yellow-500"></i> Lượt tốt nhất</span>` : ''}
+                </div>
+            `;
+            col.appendChild(title);
+            
+            if(res.error) {
+                const err = document.createElement('div');
+                err.className = 'text-red-500 text-xs text-center p-4 bg-red-500/10 rounded';
+                err.textContent = res.error;
+                col.appendChild(err);
+            } else {
+                // We have predictions. Let's draw them on canvas.
+                const wrapper = document.createElement('div');
+                wrapper.className = 'relative w-full aspect-square bg-black rounded overflow-hidden flex items-center justify-center';
+                
+                const canvas = document.createElement('canvas');
+                canvas.className = 'max-w-full max-h-full object-contain';
+                wrapper.appendChild(canvas);
+                
+                // Glowing zoom button inside the image container
+                const zoomBtn = document.createElement('button');
+                zoomBtn.className = 'absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-full bg-white/20 text-white border border-white/40 cursor-pointer backdrop-blur-sm transition-all duration-300 hover:bg-white/40 hover:scale-110 active:scale-95 shadow-lg';
+                zoomBtn.style.boxShadow = '0 0 12px rgba(255, 255, 255, 0.85), inset 0 0 6px rgba(255, 255, 255, 0.4)';
+                zoomBtn.style.textShadow = '0 0 4px #fff';
+                zoomBtn.title = 'Xem toàn ảnh';
+                zoomBtn.innerHTML = '<i class="fa-solid fa-expand text-white text-sm"></i>';
+                zoomBtn.onclick = () => zoomCanvas(canvas, mName);
+                wrapper.appendChild(zoomBtn);
+                
+                const img = new Image();
+                img.onload = () => {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    
+                    if(res.predictions) {
+                        res.predictions.forEach(p => {
+                            ctx.strokeStyle = '#00ff00';
+                            ctx.lineWidth = Math.max(2, img.width / 300);
+                            ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2]-p.bbox[0], p.bbox[3]-p.bbox[1]);
+                            
+                            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                            const txt = `${p.class_name} ${(p.confidence*100).toFixed(0)}%`;
+                            const fontSize = Math.max(12, img.width / 40);
+                            ctx.font = `${fontSize}px sans-serif`;
+                            const tw = ctx.measureText(txt).width;
+                            ctx.fillRect(p.bbox[0], p.bbox[1] - fontSize - 4, tw + 8, fontSize + 4);
+                            
+                            ctx.fillStyle = '#00ff00';
+                            ctx.fillText(txt, p.bbox[0] + 4, p.bbox[1] - 4);
+                        });
+                    }
+                };
+                img.src = fileUrl;
+                
+                col.appendChild(wrapper);
+                
+                const count = document.createElement('div');
+                count.className = 'text-xs text-center text-content-muted mt-1 font-mono';
+                
+                const times = modelTimes && modelTimes[modelId] ? modelTimes[modelId] : [];
+                const avgTime = times.length > 0 ? (times.reduce((a, b) => a + b, 0) / times.length) : null;
+                
+                let timeStr = '';
+                if (res.time_ms !== undefined) {
+                    timeStr = ` | <i class="fa-regular fa-clock text-primary mr-1"></i> Xử lý: <span class="font-bold text-content">${res.time_ms.toFixed(0)}</span> ms`;
+                    if (times.length > 1 && avgTime !== null) {
+                        timeStr += ` (Avg: <span class="font-bold text-content">${avgTime.toFixed(0)}</span> ms)`;
+                    }
+                }
+                
+                count.innerHTML = `<i class="fa-solid fa-bullseye text-primary mr-1"></i> Phát hiện: <span class="font-bold text-content">${res.predictions ? res.predictions.length : 0}</span> objects${timeStr}`;
+                col.appendChild(count);
+            }
+            grid.appendChild(col);
+        }
+        
+        block.appendChild(grid);
+        container.appendChild(block);
+    }
+
+    // Fullscreen Zoom Canvas Helpers
+    function zoomCanvas(sourceCanvas, modelName) {
+        const fsModal = document.getElementById('fullscreenModal');
+        const fsCanvas = document.getElementById('fullscreenCanvas');
+        const fsTitle = document.getElementById('fullscreenTitle');
+        
+        const fsCtx = fsCanvas.getContext('2d');
+        fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
+        
+        fsCanvas.width = sourceCanvas.width;
+        fsCanvas.height = sourceCanvas.height;
+        
+        fsCtx.drawImage(sourceCanvas, 0, 0);
+        
+        fsTitle.innerHTML = `<i class="fa-solid fa-brain text-primary"></i> <span>${modelName}</span>`;
+        
+        fsModal.classList.remove('hidden');
+        document.addEventListener('keydown', handleFullscreenEsc);
+    }
+    
+    function closeFullscreen() {
+        const fsModal = document.getElementById('fullscreenModal');
+        fsModal.classList.add('hidden');
+        document.removeEventListener('keydown', handleFullscreenEsc);
+    }
+    
+    function handleFullscreenEsc(e) {
+        if (e.key === 'Escape') {
+            closeFullscreen();
+        }
+    }
+
+    // Evaluation algorithms and summary rendering helpers
+    function calculateModelScore(predictions, timeMs) {
+        if (!predictions) return { total: 0, detection: 0, speed: 0 };
+        
+        // 1. Detection Score: Sum of confidences
+        const sumConfidence = predictions.reduce((sum, p) => sum + p.confidence, 0);
+        const detectionScore = sumConfidence * 30; // Scale factor: e.g. 3 objects * 0.8 conf * 30 = 72 pts
+        
+        // 2. Speed Score: 100 * (200 / (200 + timeMs)) -> 200ms gives 50 pts, 50ms gives 80 pts
+        const speedScore = 100 * (200 / (200 + timeMs));
+        
+        const finalScore = detectionScore + speedScore;
+        return {
+            total: parseFloat(finalScore.toFixed(1)),
+            detection: parseFloat(detectionScore.toFixed(1)),
+            speed: parseFloat(speedScore.toFixed(1))
+        };
+    }
+
+    function renderExperimentSummary(summaryData, overallWinnerId, container) {
+        const summaryCard = document.createElement('div');
+        summaryCard.className = 'border border-primary bg-primary/5 rounded p-6 shadow-xl space-y-4 mt-8';
+        summaryCard.innerHTML = `
+            <div class="flex items-center gap-3 border-b border-border pb-3">
+                <div class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary text-xl">
+                    <i class="fa-solid fa-square-poll-vertical"></i>
+                </div>
+                <div>
+                    <h3 class="text-lg font-bold text-content">Kết Quả Chung Cuộc & Đánh Giá</h3>
+                    <p class="text-xs text-content-muted">Điểm trung bình qua các lượt thử nghiệm (Công thức: Tổng confidence * 30 + Tốc độ phản hồi)</p>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Leaderboard Table -->
+                <div class="space-y-3">
+                    <h4 class="text-sm font-bold text-content flex items-center gap-2">
+                        <i class="fa-solid fa-ranking-star text-primary"></i> Bảng xếp hạng điểm số
+                    </h4>
+                    <div class="divide-y divide-border border border-border rounded overflow-hidden bg-panel">
+                        ${summaryData.map((s, index) => {
+                            const isWinner = s.id == overallWinnerId;
+                            return `
+                                <div class="flex items-center justify-between p-3.5 ${isWinner ? 'bg-primary/5 font-semibold' : ''}">
+                                    <div class="flex items-center gap-3">
+                                        <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${index === 0 ? 'bg-yellow-500 text-white' : index === 1 ? 'bg-slate-300 text-slate-800' : 'bg-slate-500 text-white'}">
+                                            ${index + 1}
+                                        </span>
+                                        <span class="text-sm text-content">${s.name}</span>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-sm font-bold text-primary">${s.avgScore} <span class="text-[10px] text-content-muted font-normal">điểm</span></div>
+                                        <div class="text-[10px] text-content-muted">Latency trung bình: ${s.avgTime} ms</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+                
+                <!-- Winner Summary Banner -->
+                <div class="flex flex-col justify-center items-center p-6 border border-yellow-500/20 bg-yellow-500/5 rounded-lg text-center relative overflow-hidden">
+                    <div class="absolute -right-6 -bottom-6 text-yellow-500/5 text-9xl transform -rotate-12 pointer-events-none">
+                        <i class="fa-solid fa-trophy"></i>
+                    </div>
+                    ${(() => {
+                        const winner = summaryData.find(s => s.id == overallWinnerId);
+                        if (!winner) return '<div class="text-content-muted italic">Không xác định được người chiến thắng</div>';
+                        return `
+                            <div class="w-16 h-16 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 text-3xl mb-3 animate-bounce shadow-lg shadow-yellow-500/10">
+                                <i class="fa-solid fa-crown"></i>
+                            </div>
+                            <h4 class="text-xs uppercase tracking-widest text-yellow-500 font-bold mb-1">Model Vượt Trội Nhất</h4>
+                            <div class="text-xl font-black text-content mb-2">${winner.name}</div>
+                            <p class="text-xs text-content-muted max-w-xs leading-relaxed">
+                                Với điểm số trung bình vượt trội là <span class="text-yellow-500 font-bold">${winner.avgScore}</span> qua các vòng thử nghiệm, kết hợp xuất sắc giữa tốc độ xử lý (${winner.avgTime}ms) và độ tin cậy của các phát hiện.
+                            </p>
+                        `;
+                    })()}
+                </div>
+            </div>
+        `;
+        container.appendChild(summaryCard);
+    }
+
+    // Tự động load danh sách model khi trang được tải xong
+    document.addEventListener('DOMContentLoaded', loadModels);
+</script>
+{% endblock %}

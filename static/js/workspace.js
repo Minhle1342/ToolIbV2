@@ -563,13 +563,18 @@ class Workspace {
         if (scope === 'project') {
             criteria.project_ids = [PROJECT_ID];
         } else if (scope === 'view') {
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlViewId = urlParams.get('view_id');
             const viewVal = document.getElementById('viewFilter').value;
-            if (!viewVal) {
+            if (!viewVal && !urlViewId) {
                 alert('Please select a specific View in the sidebar filter to export by View.');
                 return;
             }
-            // Mock View ID for now as per loadImages logic
-            criteria.view_id = 999;
+            if (urlViewId) {
+                criteria.view_id = urlViewId;
+            } else if (viewVal === 'my_view') {
+                criteria.view_id = 999;
+            }
         } else if (scope === 'current') {
             if (!currentImage) {
                 alert('No image selected.');
@@ -613,21 +618,92 @@ class Workspace {
                     if (updated) currentWorkspace.selectImage(updated);
                 }
 
-                // Construct Colab Snippet
-                const colabCode = `# HƯỚNG DẪN ĐÀO TẠO TRÊN GOOGLE COLAB:
-# 1. Nén thư mục '${result.export_path}' thành file dataset.zip
-# 2. Upload file exported_dataset.zip lên Google Colab
-# 3. Dán và chạy đoạn code sau:
+                const colabCode = `!pip install ultralytics
+# 1. KẾT NỐI GOOGLE DRIVE VÀ LẤY DỮ LIỆU TỐC ĐỘ CAO
+from google.colab import drive
+import os
+import yaml
+import shutil
+from google.colab import files
 
-!unzip -q exported_dataset.zip -d dataset
+print("=== HỆ THỐNG KHỞI TẠO ===")
+print("Đang yêu cầu quyền truy cập vào Google Drive của bạn...")
+# Bảng thông báo của Google sẽ hiện ra, bạn cấp quyền cho nó nhé
+drive.mount('/content/drive')
+
+# Đường dẫn tới file trên Google Drive (Mặc định bạn để ở thư mục ngoài cùng)
+drive_file_path = '/content/drive/MyDrive/exported_dataset.rar'
+local_file_path = '/content/exported_dataset.rar'
+
+# Bắt lỗi: Kiểm tra xem bạn đã up file lên Drive chưa
+if not os.path.exists(drive_file_path):
+    raise FileNotFoundError(f"Lỗi: Không tìm thấy file tại {drive_file_path}. Hãy mở Google Drive và tải file exported_dataset.rar lên trước nhé!")
+
+print("Đang chép file từ Google Drive sang Colab... (Tốc độ thường > 100MB/s)")
+# Chép file từ Drive vào bộ nhớ cực nhanh của Colab (nvme SSD)
+shutil.copy(drive_file_path, local_file_path)
+
+# Giải nén file
+print(f"Đã copy thành công! Đang giải nén {local_file_path} vào thư mục dataset/...")
+!unrar x -o+ "{local_file_path}" dataset/
+
+
+# 2. CÀI ĐẶT THƯ VIỆN
 !pip install ultralytics
 from ultralytics import YOLO
 
-# Khởi tạo mô hình
+
+# 3. TỰ ĐỘNG SỬA ĐƯỜNG DẪN TRONG DATA.YAML
+yaml_path = 'dataset/exported_dataset/data.yaml'
+
+if not os.path.exists(yaml_path):
+    raise FileNotFoundError(f"Không tìm thấy file data.yaml tại {yaml_path}. Bạn hãy kiểm tra lại cấu trúc file nén!")
+
+with open(yaml_path, 'r') as f:
+    data_cfg = yaml.safe_load(f)
+
+# Cập nhật đường dẫn chuẩn cho Colab
+base_dir = os.path.abspath('dataset/exported_dataset')
+data_cfg['path'] = base_dir
+data_cfg['train'] = 'images/train'
+data_cfg['val'] = 'images/test'
+
+with open(yaml_path, 'w') as f:
+    yaml.dump(data_cfg, f)
+
+print(f"Đã cập nhật data.yaml với path: {base_dir}")
+
+
+# 4. KHỞI TẠO MÔ HÌNH VÀ TRAINING
 model = YOLO('${yoloVersion}')
 
-# Bắt đầu training
-results = model.train(data='dataset/data.yaml', epochs=100, imgsz=640)`;
+results = model.train(
+    data=yaml_path,
+    epochs=200,
+    patience=50,
+    imgsz=1024,
+    batch=-1,
+    workers=8,
+    cache=True,
+    amp=True,
+    close_mosaic=10,
+    device=0,
+    mosaic=1.0,
+    mixup=0.15,
+    copy_paste=0.2,
+    auto_augment='randaugment'
+)
+
+
+# 5. XUẤT MÔ HÌNH SANG ĐỊNH DẠNG ONNX VÀ TẢI VỀ
+print("Đang xuất mô hình sang định dạng ONNX...")
+best_model_path = os.path.join(model.trainer.save_dir, 'weights/best.pt')
+best_model = YOLO(best_model_path)
+onnx_path = best_model.export(format='onnx', imgsz=1024, simplify=True)
+
+print(f"Đã xuất file tại: {onnx_path}. Đang chuẩn bị tải về máy cá nhân...")
+files.download(onnx_path)
+`;
 
                 document.getElementById('colabSnippetCode').textContent = colabCode;
                 document.getElementById('colabCodeModal').classList.remove('hidden');
@@ -1029,11 +1105,28 @@ const currentWorkspace = new Workspace();
 
 async function loadImages(fetchFromServer = true) {
     if (fetchFromServer || !currentWorkspace.allImages) {
-        const view = document.getElementById('viewFilter').value;
+        const viewFilterEl = document.getElementById('viewFilter');
+        
+        // Parse view_id from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlViewId = urlParams.get('view_id');
+        
+        if (urlViewId) {
+            viewFilterEl.value = 'my_view';
+            viewFilterEl.disabled = true;
+        }
+
+        const view = viewFilterEl.value;
         const flag = document.getElementById('flagFilter').value;
 
         const filters = { project_id: PROJECT_ID };
-        if (view) filters.view_id = 999;
+        
+        if (urlViewId) {
+            filters.view_id = urlViewId;
+        } else if (view === 'my_view') {
+            filters.view_id = 999; // existing mock fallback
+        }
+
         if (flag) {
             if (flag === 'Labeled') {
                 filters.is_labeled = 'true';
@@ -1116,32 +1209,39 @@ function selectClass(id, el) {
     }
 }
 
-let currentAssignStats = null;
-
-async function updateAssignStatsDisplay() {
-    if (!currentAssignStats) return;
-    
-    const mode = document.querySelector('select[name="assign_mode"]').value;
-    const stats = currentAssignStats[mode];
-    
-    if (stats) {
-        const tpl = i18n.t('assigned_stats');
-        const text = tpl.replace('{assigned}', stats.assigned).replace('{unassigned}', stats.unassigned);
-        document.getElementById('assignStatsDisplay').innerText = text;
-    }
-}
-
 async function openAssignModal() {
-    document.getElementById('assignModal').classList.remove('hidden');
     try {
-        currentAssignStats = await API.getAssignStats(PROJECT_ID);
-        updateAssignStatsDisplay();
+        const projectIdInput = document.querySelector('input[name="project_id"]');
+        if (!projectIdInput) return;
+        const projectId = projectIdInput.value;
+        const stats = await API.getAssignStats(projectId);
+        
+        if (stats.all.unassigned === 0) {
+            alert('Lỗi: Tổng ảnh chưa phân công hiện tại là 0.');
+            return;
+        }
+
+        document.getElementById('assignModal').classList.remove('hidden');
+        
+        const select = document.querySelector('select[name="assign_mode"]');
+        if (select) {
+            const optionBoth = select.querySelector('option[value="both"]');
+            const optionLabeled = select.querySelector('option[value="labeled"]');
+            const optionUnlabeled = select.querySelector('option[value="unlabeled"]');
+            
+            if (optionBoth) optionBoth.dataset.suffix = ` (${stats.all.assigned}/${stats.all.unassigned})`;
+            if (optionLabeled) optionLabeled.dataset.suffix = ` (${stats.labeled.assigned}/${stats.labeled.unassigned})`;
+            if (optionUnlabeled) optionUnlabeled.dataset.suffix = ` (${stats.unlabeled.assigned}/${stats.unlabeled.unassigned})`;
+            
+            // Reapply translations to update the visible text with suffixes
+            if (typeof applyTranslations === 'function') {
+                applyTranslations();
+            }
+        }
     } catch (err) {
-        console.error('Failed to get assign stats', err);
+        console.error("Failed to load assign stats", err);
     }
 }
-
-document.querySelector('select[name="assign_mode"]').addEventListener('change', updateAssignStatsDisplay);
 
 function closeModal(id) {
     document.getElementById(id).classList.add('hidden');
@@ -1151,21 +1251,59 @@ document.getElementById('assignForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
 
+    // Kiểm tra logic trước khi submit
+    const projectId = data.project_id;
+    const stats = await API.getAssignStats(projectId);
+    
+    let unassigned = 0;
+    if (data.assign_mode === 'labeled') {
+        unassigned = stats.labeled.unassigned;
+    } else if (data.assign_mode === 'unlabeled') {
+        unassigned = stats.unlabeled.unassigned;
+    } else {
+        unassigned = stats.all.unassigned;
+    }
+
+    if (unassigned === 0) {
+        alert('Lỗi: Tổng ảnh chưa phân công hiện tại là 0.');
+        return;
+    }
+
+    let requestedCount = parseInt(data.count, 10);
+    if (isNaN(requestedCount) || requestedCount <= 0) {
+        alert('Lỗi: Số lượng không hợp lệ.');
+        return;
+    }
+
+    // Nếu số lượng yêu cầu lớn hơn số lượng chưa phân công thì gán bằng số lượng chưa phân công
+    if (requestedCount > unassigned) {
+        requestedCount = unassigned;
+    }
+
     // 1. Create View
     const viewRes = await API.createView({ name: data.view_name, project_id: data.project_id });
 
     // 2. Assign
     const assignData = {
         view_id: viewRes.id,
-        count: data.count,
+        count: requestedCount,
         project_id: data.project_id,
         assign_mode: data.assign_mode
     };
 
-    const res = await API.assignView(assignData);
-    alert(res.message);
-    document.getElementById('assignModal').classList.add('hidden');
-    loadImages();
+    try {
+        const res = await API.assignView(assignData);
+        if (res.error) {
+            alert(res.error);
+        } else {
+            alert(res.message || `Phân công thành công ${res.assigned_count || data.count} ảnh.`);
+            document.getElementById('assignModal').classList.add('hidden');
+            loadImages();
+        }
+    } catch (err) {
+        console.error(err);
+        alert('Có lỗi xảy ra khi phân công.');
+    }
 });
 
 // Search Filter

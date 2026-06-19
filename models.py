@@ -66,3 +66,23 @@ class Image(db.Model):
             'flag_status': self.flag_status,
             'split_type': self.split_type
         }
+
+class AIModel(db.Model):
+    __tablename__ = 'ai_models'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    filename = db.Column(db.String(200), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'filename': self.filename,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat()
+        }

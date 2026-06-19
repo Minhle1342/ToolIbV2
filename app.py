@@ -34,6 +34,10 @@ def create_app():
     @app.route('/progress')
     def progress_page():
         return render_template('progress.html')
+
+    @app.route('/models-experiment')
+    def models_experiment_page():
+        return render_template('models_experiment.html')
     
     return app
 

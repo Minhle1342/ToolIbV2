@@ -79,23 +79,28 @@
                     p.views.forEach(v => {
                         const vPercent = v.total_images > 0 ? Math.round((v.labeled_images / v.total_images) * 100) : 0;
                         html += `
-                            <div class="bg-surface border border-border rounded p-4 flex flex-col justify-between">
+                            <div class="bg-surface border border-border rounded p-4 flex flex-col justify-between cursor-pointer hover:border-primary transition-colors group" onclick="window.location.href='/project/${p.id}?view_id=${v.id}'">
                                 <div class="flex justify-between items-center mb-3">
                                     <div class="font-medium text-content flex items-center gap-2">
                                         <i class="fa-solid fa-user-circle text-content-muted"></i> ${v.name}
                                     </div>
-                                    <span class="text-xs px-2 py-1 bg-panel border border-border rounded font-mono">
-                                        ${v.labeled_images}/${v.total_images}
-                                    </span>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-xs px-2 py-1 bg-panel border border-border rounded font-mono">
+                                            ${v.labeled_images}/${v.total_images}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div>
                                     <div class="flex justify-between text-xs text-content-muted mb-1">
                                         <span>Hoàn thành</span>
                                         <span>${vPercent}%</span>
                                     </div>
-                                    <div class="w-full bg-panel rounded-full h-1.5">
+                                    <div class="w-full bg-panel rounded-full h-1.5 mb-3">
                                         <div class="bg-secondary h-1.5 rounded-full" style="width: ${vPercent}%"></div>
                                     </div>
+                                    <button onclick="event.stopPropagation(); deleteView(${v.id}, '${v.name.replace(/'/g, "\\'")}')" class="w-full flex items-center justify-center gap-1 text-xs py-1.5 rounded bg-red-500/10 text-red-500 hover:bg-red-500/20 opacity-0 group-hover:opacity-100 transition-all focus:outline-none" title="Xóa phân công">
+                                        <i class="fa-solid fa-trash"></i> Xóa mục phân công này
+                                    </button>
                                 </div>
                             </div>
                         `;
@@ -137,5 +142,27 @@
             `;
         }
     });
+
+    async function deleteView(viewId, viewName) {
+        if (!confirm(`Bạn có chắc chắn muốn xóa phân công "${viewName}" không?\nCác ảnh trong phân công này sẽ trở về trạng thái chưa phân công.`)) {
+            return;
+        }
+        
+        try {
+            const res = await fetch(`/api/views/${viewId}`, {
+                method: 'DELETE'
+            });
+            
+            if (!res.ok) {
+                const data = await res.json();
+                throw new Error(data.error || 'Lỗi khi xóa phân công');
+            }
+            
+            // Reload page to refresh progress
+            window.location.reload();
+        } catch (e) {
+            alert('Lỗi: ' + e.message);
+        }
+    }
 </script>
 {% endblock %}

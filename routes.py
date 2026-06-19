@@ -2,16 +2,29 @@
 from flask import Blueprint, jsonify, request, current_app
 # pyrefly: ignore [missing-import]
 import flask
-from models import db, Project, View, Image
+from models import db, Project, View, Image, AIModel
 import os
 import utils
 from inference import YOLOInference
 
 # Initialize Inference Engine
-# Assuming the user places the model in 'models/yolov12s.onnx' or we ask for path.
-# For now, hardcode relative path 'models/yolo12s.onnx' in the CWD
-MODEL_PATH = os.path.join(os.getcwd(), 'models', 'yolo12s.onnx')
-inference_engine = YOLOInference(MODEL_PATH)
+inference_engine = None
+
+def get_inference_engine():
+    global inference_engine
+    if inference_engine is None:
+        active_model = AIModel.query.filter_by(is_active=True).first()
+        if active_model:
+            model_path = os.path.join(os.getcwd(), 'models', active_model.filename)
+            if os.path.exists(model_path):
+                inference_engine = YOLOInference(model_path)
+        else:
+            # Fallback to default if no active model is set
+            model_path = os.path.join(os.getcwd(), 'models', 'yolo12s.onnx')
+            if os.path.exists(model_path):
+                inference_engine = YOLOInference(model_path)
+    return inference_engine
+
 
 api_bp = Blueprint('api', __name__)
 
@@ -141,26 +154,6 @@ def upload_folder():
         'count': saved_count
     })
 
-@api_bp.route('/projects/<int:project_id>/assign-stats', methods=['GET'])
-def get_assign_stats(project_id):
-    # Total
-    total_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None).count()
-    total_unassigned = Image.query.filter_by(project_id=project_id, view_id=None).count()
-    
-    # Labeled
-    labeled_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None, Image.is_labeled == True).count()
-    labeled_unassigned = Image.query.filter_by(project_id=project_id, view_id=None, is_labeled=True).count()
-    
-    # Unlabeled
-    unlabeled_assigned = Image.query.filter(Image.project_id == project_id, Image.view_id != None, Image.is_labeled == False).count()
-    unlabeled_unassigned = Image.query.filter_by(project_id=project_id, view_id=None, is_labeled=False).count()
-    
-    return jsonify({
-        'both': {'assigned': total_assigned, 'unassigned': total_unassigned},
-        'labeled': {'assigned': labeled_assigned, 'unassigned': labeled_unassigned},
-        'unlabeled': {'assigned': unlabeled_assigned, 'unassigned': unlabeled_unassigned}
-    })
-
 @api_bp.route('/projects/<int:project_id>/upload', methods=['POST'])
 def upload_project_images(project_id):
     project = Project.query.get_or_404(project_id)
@@ -213,7 +206,25 @@ def assign_view():
         data.get('project_id'),
         data.get('assign_mode', 'both')
     )
-    return jsonify({'message': f'Assigned {count} images to view.'})
+    if count == 0:
+        return jsonify({'error': 'Lỗi: Tổng ảnh chưa phân công hiện tại là 0 hoặc không có ảnh nào phù hợp để phân công.'}), 400
+    return jsonify({'message': f'Phân công thành công {count} ảnh.', 'assigned_count': count})
+
+@api_bp.route('/views/<int:view_id>', methods=['DELETE'])
+def delete_view(view_id):
+    view = View.query.get_or_404(view_id)
+    try:
+        # Unassign all images belonging to this view
+        images = Image.query.filter_by(view_id=view.id).all()
+        for img in images:
+            img.view_id = None
+        
+        db.session.delete(view)
+        db.session.commit()
+        return jsonify({'message': 'View deleted successfully'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
 
 # --- Images & Labels ---
 @api_bp.route('/images', methods=['GET'])
@@ -400,7 +411,11 @@ def auto_label(image_id):
     # Construct full image path
     image_path = os.path.join(project.root_path, image.filename)
     
-    result = inference_engine.predict(image_path)
+    engine = get_inference_engine()
+    if not engine:
+        return jsonify({'error': 'No active AI model found or model file missing.'}), 400
+    
+    result = engine.predict(image_path)
     
     if 'error' in result:
         return jsonify(result), 400
@@ -439,3 +454,244 @@ def get_progress():
             
         res.append(p_data)
     return jsonify(res)
+
+@api_bp.route('/projects/<int:project_id>/assign-stats', methods=['GET'])
+def get_project_assign_stats(project_id):
+    project = Project.query.get_or_404(project_id)
+    
+    # Labeled (With Bounding Box)
+    labeled_total = Image.query.filter_by(project_id=project.id, is_labeled=True).count()
+    unassigned_labeled = Image.query.filter_by(project_id=project.id, view_id=None, is_labeled=True).count()
+    assigned_labeled = labeled_total - unassigned_labeled
+    
+    # Unlabeled (Without Bounding Box)
+    unlabeled_total = Image.query.filter_by(project_id=project.id, is_labeled=False).count()
+    unassigned_unlabeled = Image.query.filter_by(project_id=project.id, view_id=None, is_labeled=False).count()
+    assigned_unlabeled = unlabeled_total - unassigned_unlabeled
+    
+    # Total
+    total_images = labeled_total + unlabeled_total
+    unassigned_total = unassigned_labeled + unassigned_unlabeled
+    assigned_total = assigned_labeled + assigned_unlabeled
+    
+    return jsonify({
+        'all': {'assigned': assigned_total, 'unassigned': unassigned_total},
+        'labeled': {'assigned': assigned_labeled, 'unassigned': unassigned_labeled},
+        'unlabeled': {'assigned': assigned_unlabeled, 'unassigned': unassigned_unlabeled}
+    })
+
+# --- AI Models ---
+@api_bp.route('/models/files', methods=['GET'])
+def get_model_files():
+    models_dir = os.path.join(os.getcwd(), 'models')
+    if not os.path.exists(models_dir):
+        return jsonify([])
+    
+    files = [f for f in os.listdir(models_dir) if f.endswith('.onnx')]
+    return jsonify(files)
+
+@api_bp.route('/models', methods=['GET'])
+def get_models():
+    # Auto sync onnx files in models/ folder with database
+    models_dir = os.path.join(os.getcwd(), 'models')
+    if os.path.exists(models_dir):
+        onnx_files = [f for f in os.listdir(models_dir) if f.endswith('.onnx')]
+        db_changed = False
+        for filename in onnx_files:
+            existing = AIModel.query.filter_by(filename=filename).first()
+            if not existing:
+                name = os.path.splitext(filename)[0]
+                if name.lower().startswith('yolo'):
+                    name = 'YOLO' + name[4:]
+                else:
+                    name = name.capitalize()
+                
+                new_model = AIModel(
+                    name=name,
+                    filename=filename,
+                    description=f"Auto-discovered model file {filename}",
+                    is_active=False
+                )
+                db.session.add(new_model)
+                db_changed = True
+        
+        if db_changed:
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"Error auto-syncing models: {e}")
+        
+        # Ensure at least one model is active if models exist
+        if AIModel.query.count() > 0:
+            active_exists = AIModel.query.filter_by(is_active=True).first()
+            if not active_exists:
+                default_model = AIModel.query.filter_by(filename='yolo12s.onnx').first()
+                if default_model:
+                    default_model.is_active = True
+                else:
+                    first_model = AIModel.query.first()
+                    if first_model:
+                        first_model.is_active = True
+                try:
+                    db.session.commit()
+                except Exception as e:
+                    db.session.rollback()
+                    print(f"Error setting active model: {e}")
+
+    models = AIModel.query.order_by(AIModel.created_at.desc()).all()
+    return jsonify([m.to_dict() for m in models])
+
+@api_bp.route('/models', methods=['POST'])
+def add_model():
+    data = request.json
+    try:
+        name = data.get('name', '').strip()
+        filename = data.get('filename', '').strip()
+        
+        if not name or not filename:
+            return jsonify({'error': 'Tên hiển thị và Tên File không được để trống.'}), 400
+            
+        if AIModel.query.filter_by(filename=filename).first():
+            return jsonify({'error': 'File model này đã tồn tại trong danh sách. Vui lòng chọn file khác hoặc sửa model hiện tại.'}), 400
+            
+        new_model = AIModel(
+            name=name,
+            description=data.get('description', ''),
+            filename=filename
+        )
+        # If it's the first model, make it active
+        if AIModel.query.count() == 0:
+            new_model.is_active = True
+        db.session.add(new_model)
+        db.session.commit()
+        return jsonify(new_model.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 400
+
+@api_bp.route('/models/<int:model_id>', methods=['PUT'])
+def update_model(model_id):
+    m = AIModel.query.get_or_404(model_id)
+    data = request.json
+    try:
+        if 'name' in data: m.name = data['name'].strip()
+        if 'description' in data: m.description = data['description']
+        if 'filename' in data: 
+            new_filename = data['filename'].strip()
+            # Check uniqueness excluding self
+            existing = AIModel.query.filter(AIModel.filename == new_filename, AIModel.id != model_id).first()
+            if existing:
+                return jsonify({'error': 'File model này đã được gán cho một model khác trong danh sách.'}), 400
+            m.filename = new_filename
+            
+        if not m.name or not m.filename:
+            return jsonify({'error': 'Tên hiển thị và Tên File không được để trống.'}), 400
+            
+        db.session.commit()
+        return jsonify(m.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': f'Database error: {str(e)}'}), 400
+
+@api_bp.route('/models/<int:model_id>', methods=['DELETE'])
+def delete_model(model_id):
+    m = AIModel.query.get_or_404(model_id)
+    try:
+        was_active = m.is_active
+        db.session.delete(m)
+        db.session.commit()
+        if was_active:
+            global inference_engine
+            inference_engine = None
+        return jsonify({'message': 'Deleted'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+@api_bp.route('/models/<int:model_id>/activate', methods=['POST'])
+def activate_model(model_id):
+    m = AIModel.query.get_or_404(model_id)
+    try:
+        # Deactivate all
+        AIModel.query.update({AIModel.is_active: False})
+        m.is_active = True
+        db.session.commit()
+        # Reset inference engine
+        global inference_engine
+        inference_engine = None
+        return jsonify(m.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+@api_bp.route('/models/test', methods=['POST'])
+def test_models():
+    if 'image' not in request.files:
+        return jsonify({'error': 'No image uploaded'}), 400
+        
+    image_file = request.files['image']
+    model_ids = request.form.get('model_ids') # comma separated
+    if not model_ids:
+        return jsonify({'error': 'No models selected'}), 400
+        
+    import tempfile
+    import uuid
+    temp_dir = tempfile.gettempdir()
+    temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{image_file.filename}")
+    image_file.save(temp_path)
+    
+    results = {}
+    try:
+        for mid in model_ids.split(','):
+            if not mid.strip(): continue
+            m = AIModel.query.get(int(mid.strip()))
+            if m:
+                m_path = os.path.join(os.getcwd(), 'models', m.filename)
+                if os.path.exists(m_path):
+                    try:
+                        import time
+                        engine = YOLOInference(m_path)
+                        start_time = time.time()
+                        pred = engine.predict(temp_path)
+                        duration_ms = (time.time() - start_time) * 1000
+                        
+                        if pred.get('success') and 'boxes' in pred:
+                            import cv2
+                            img = cv2.imread(temp_path)
+                            img_h, img_w = img.shape[:2]
+                            
+                            predictions = []
+                            for box in pred['boxes']:
+                                cx = box['x']
+                                cy = box['y']
+                                bw = box['w']
+                                bh = box['h']
+                                
+                                x_min = int((cx - bw / 2) * img_w)
+                                y_min = int((cy - bh / 2) * img_h)
+                                x_max = int((cx + bw / 2) * img_w)
+                                y_max = int((cy + bh / 2) * img_h)
+                                
+                                class_id = box['class_id']
+                                class_name = engine.class_names.get(class_id, f"Class {class_id}")
+                                
+                                predictions.append({
+                                    'bbox': [x_min, y_min, x_max, y_max],
+                                    'class_name': class_name,
+                                    'confidence': box['conf']
+                                })
+                            results[m.id] = {'success': True, 'predictions': predictions, 'time_ms': round(duration_ms, 2)}
+                        else:
+                            res_dict = dict(pred)
+                            res_dict['time_ms'] = round(duration_ms, 2)
+                            results[m.id] = res_dict
+                    except Exception as e:
+                        results[m.id] = {'error': str(e)}
+                else:
+                    results[m.id] = {'error': 'Model file not found'}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+            
+    return jsonify(results)

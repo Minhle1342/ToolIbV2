@@ -50,7 +50,6 @@ const translations = {
         "view_name": "View Name",
         "number_images": "Number of Images",
         "assign_mode": "Assign Mode",
-        "assigned_stats": "Assigned: {assigned} / Unassigned: {unassigned}",
         "cancel": "Cancel",
         "shortcuts": "Keyboard Shortcuts",
         "export_dataset": "Export Dataset",
@@ -153,7 +152,6 @@ const translations = {
         "view_name": "Tên View",
         "number_images": "Số lượng ảnh",
         "assign_mode": "Chế độ phân công",
-        "assigned_stats": "Đã phân công: {assigned} / Chưa phân công: {unassigned}",
         "cancel": "Hủy",
         "shortcuts": "Phím tắt",
         "export_dataset": "Xuất Dữ liệu",
@@ -237,7 +235,11 @@ function applyTranslations() {
     document.querySelectorAll('[data-i18n]').forEach(el => {
         const key = el.getAttribute('data-i18n');
         if (dict[key]) {
-            el.textContent = dict[key];
+            let text = dict[key];
+            if (el.dataset.suffix) {
+                text += el.dataset.suffix;
+            }
+            el.textContent = text;
         }
     });
 

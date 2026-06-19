@@ -244,7 +244,6 @@
                     <option value="labeled" data-i18n="filter_labeled">Labeled</option>
                     <option value="unlabeled" data-i18n="filter_unlabeled">Unlabeled</option>
                 </select>
-                <div id="assignStatsDisplay" class="mt-2 text-xs text-content-muted"></div>
             </div>
             <div class="flex justify-end gap-2 mt-6">
                 <button type="button"
@@ -325,14 +324,6 @@
         setTimeout(() => {
             if (typeof editor !== 'undefined') editor.resizeCanvas();
         }, 300);
-    }
-
-    function closeModal(id) {
-        document.getElementById(id).classList.add('hidden');
-    }
-
-    function openAssignModal() {
-        document.getElementById('assignModal').classList.remove('hidden');
     }
 
 
@@ -510,6 +501,7 @@
                     <option value="yolov9c.pt">YOLOv9 (yolov9c.pt)</option>
                     <option value="yolov10n.pt">YOLOv10 (yolov10n.pt)</option>
                     <option value="yolo11n.pt">YOLO11 (yolo11n.pt)</option>
+                    <option value="yolo12s.pt">YOLOv12 (yolo12s.pt)</option>
                 </select>
                 <div class="mt-2 p-2 bg-sidebar rounded border border-border text-xs font-mono text-content-muted"
                     id="exportPreview">
@@ -532,12 +524,12 @@
 
 <!-- Colab Code Modal -->
 <div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="colabCodeModal">
-    <div class="bg-panel rounded-lg shadow-xl w-full max-w-2xl p-6 border border-border">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-4xl p-6 border border-border">
         <h2 class="text-xl font-bold text-content mb-4"><i class="fa-brands fa-google text-yellow-500 mr-2"></i><span data-i18n="colab_title">Google Colab Training Code</span></h2>
         <p class="text-sm text-content-muted mb-4" data-i18n="export_success">Export thành công! Hãy nén thư mục dataset, upload lên Colab và dùng đoạn code dưới đây để train YOLO.</p>
         
         <div class="relative bg-sidebar rounded border border-border">
-            <pre class="p-4 text-sm font-mono text-content-muted overflow-x-auto whitespace-pre-wrap"><code id="colabSnippetCode"></code></pre>
+            <pre class="p-4 text-sm font-mono text-content-muted overflow-x-auto overflow-y-auto max-h-[55vh] whitespace-pre-wrap"><code id="colabSnippetCode"></code></pre>
             <button onclick="navigator.clipboard.writeText(document.getElementById('colabSnippetCode').textContent); const og = this.innerHTML; this.innerHTML='<i class=\'fa-solid fa-check\'></i> ' + (currentLang === 'vi' ? 'Đã sao chép!' : 'Copied!'); setTimeout(() => this.innerHTML=og, 2000);" 
                     class="absolute top-2 right-2 px-2 py-1 bg-surface hover:bg-panel border border-border rounded text-xs text-content transition-colors">
                 <i class="fa-solid fa-copy"></i> <span data-i18n="btn_copy">Copy</span>

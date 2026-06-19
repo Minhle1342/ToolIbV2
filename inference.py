@@ -8,6 +8,9 @@ class YOLOInference:
         self.model_path = model_path
         self.session = None
         self.input_name = None
+        self.class_names = {}
+        self.input_width = 640
+        self.input_height = 640
         self.ensure_session()
 
     def ensure_session(self):
@@ -15,10 +18,35 @@ class YOLOInference:
             try:
                 self.session = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
                 self.input_name = self.session.get_inputs()[0].name
+                
+                # Try to get input shape dynamically from model
+                try:
+                    input_shape = self.session.get_inputs()[0].shape
+                    if len(input_shape) == 4:
+                        h = input_shape[2]
+                        w = input_shape[3]
+                        if isinstance(h, int) and h > 0:
+                            self.input_height = h
+                        if isinstance(w, int) and w > 0:
+                            self.input_width = w
+                        print(f"Dynamic input shape detected: {self.input_width}x{self.input_height}")
+                except Exception as shape_err:
+                    print(f"Warning: Could not get input shape dynamically: {shape_err}")
+                
+                # Load class names from model metadata
+                try:
+                    meta = self.session.get_modelmeta().custom_metadata_map
+                    if 'names' in meta:
+                        import ast
+                        self.class_names = ast.literal_eval(meta['names'])
+                except Exception as meta_err:
+                    print(f"Warning: Could not load class names from model metadata: {meta_err}")
             except Exception as e:
                 print(f"Error loading ONNX session: {e}")
 
-    def preprocess(self, image_path, target_size=(1280, 1280)):
+    def preprocess(self, image_path, target_size=None):
+        if target_size is None:
+            target_size = (self.input_width, self.input_height)
         # Load image
         img = cv2.imread(image_path)
         if img is None:
@@ -85,9 +113,9 @@ class YOLOInference:
         filtered_classes = classes[mask]
         
         # Convert to XYWH (center to top-left) and Rescale
-        # Model coords are in 1280x1280
-        sx = orig_w / 1280.0
-        sy = orig_h / 1280.0
+        # Model coords are in self.input_width x self.input_height
+        sx = orig_w / float(self.input_width)
+        sy = orig_h / float(self.input_height)
         
         for i in range(len(filtered_boxes)):
             cx, cy, w, h = filtered_boxes[i]
