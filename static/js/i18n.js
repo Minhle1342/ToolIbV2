@@ -34,6 +34,8 @@ const translations = {
         "no_image": "No Image",
         "tool_flag": "Flag Image (F)",
         "btn_saved": "Saved",
+        "btn_saving": "Saving...",
+        "auto_save": "Auto Save",
 
         // Workspace - Sidebar Right
         "inspection": "Inspection",
@@ -136,6 +138,8 @@ const translations = {
         "no_image": "Chưa có ảnh",
         "tool_flag": "Gắn cờ (F)",
         "btn_saved": "Đã lưu",
+        "btn_saving": "Đang lưu...",
+        "auto_save": "Tự động lưu",
 
         // Workspace - Sidebar Right
         "inspection": "Chi tiết",

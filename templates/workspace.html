@@ -140,6 +140,10 @@
                 onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)" data-i18n-title="tool_flag">
                 <i class="fa-regular fa-flag text-lg"></i>
             </button>
+            <div class="flex items-center gap-1.5 ml-3 mr-1 select-none">
+                <input type="checkbox" id="autoSaveToggle" class="rounded border-border bg-panel text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer" onchange="currentWorkspace.toggleAutoSave(this.checked)">
+                <label for="autoSaveToggle" class="text-xs text-content-muted cursor-pointer font-medium" data-i18n="auto_save">Auto Save</label>
+            </div>
             <button class="bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2"
                 onclick="currentWorkspace.save()"><span data-i18n="btn_saved" id="btnSavedText">Saved</span></button>
         </div>

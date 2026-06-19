@@ -84,6 +84,23 @@ class Workspace {
                 editor.redo();
             }
         });
+
+        // Setup Auto Save
+        this.isAutoSave = localStorage.getItem('autoSaveEnabled') === 'true';
+        this.autoSaveTimeout = null;
+
+        // Initialize Auto Save Checkbox
+        const autoSaveToggle = document.getElementById('autoSaveToggle');
+        if (autoSaveToggle) {
+            autoSaveToggle.checked = this.isAutoSave;
+        }
+
+        // Set callback on editor state change
+        editor.onStateChange = () => {
+            if (this.isAutoSave) {
+                this.triggerAutoSaveDebounced();
+            }
+        };
     }
 
     async loadProjectInfo() {
@@ -203,6 +220,7 @@ class Workspace {
 
         // Wait, Fabric Image.fromURL loads the image.
         editor.canvas.clear();
+        editor.loading = true;
 
         // 1. Get Labels first?
         const labels = await API.getLabel(image.id);
@@ -212,7 +230,11 @@ class Workspace {
         // Fabric handles it.
 
         fabric.Image.fromURL(url, (img) => {
-            if (!img) { alert('Failed to load image'); return; }
+            if (!img) { 
+                editor.loading = false;
+                alert('Failed to load image'); 
+                return; 
+            }
             editor.loadImage(img);
             editor.loadBoxes(labels);
 
@@ -226,6 +248,7 @@ class Workspace {
 
             // Update Inspection View with Image Metadata
             this.updateImageStats(img, labels.length);
+            editor.loading = false;
         });
     }
 
@@ -344,14 +367,22 @@ class Workspace {
         if (!currentImage) return;
 
         const btn = document.querySelector('button[onclick="currentWorkspace.save()"]');
-        let originalText = 'Saved';
+        const btnSpan = document.getElementById('btnSavedText');
+
+        let originalText = btnSpan ? btnSpan.textContent : 'Saved';
+        let originalI18n = btnSpan ? btnSpan.getAttribute('data-i18n') : 'btn_saved';
         let originalClasses = 'bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2';
         if (btn) {
-            originalText = btn.textContent;
             originalClasses = btn.className;
         }
 
         try {
+            if (silent && btnSpan && btn) {
+                btnSpan.setAttribute('data-i18n', 'btn_saving');
+                btnSpan.textContent = typeof window.t === 'function' ? window.t('btn_saving') : 'Saving...';
+                btn.className = 'bg-primary/70 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2 cursor-wait';
+            }
+
             const boxes = editor.getBoxesYOLO();
 
             const data = {
@@ -382,21 +413,29 @@ class Workspace {
                 }
             }
 
-            if (!silent && btn) {
-                btn.textContent = 'Success!';
-                btn.className = 'bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-4 py-1.5 rounded ml-2';
-                setTimeout(() => {
-                    btn.textContent = originalText;
+            if (btnSpan && btn) {
+                if (silent) {
+                    btnSpan.setAttribute('data-i18n', originalI18n);
+                    btnSpan.textContent = originalText;
                     btn.className = originalClasses;
-                }, 1000);
+                } else {
+                    btnSpan.textContent = 'Success!';
+                    btn.className = 'bg-green-500 hover:bg-green-600 text-white text-sm font-medium px-4 py-1.5 rounded ml-2';
+                    setTimeout(() => {
+                        btnSpan.setAttribute('data-i18n', originalI18n);
+                        btnSpan.textContent = originalText;
+                        btn.className = originalClasses;
+                    }, 1000);
+                }
             }
         } catch (error) {
             console.error('Save error:', error);
-            if (!silent && btn) {
-                btn.textContent = 'Failed!';
+            if (btnSpan && btn) {
+                btnSpan.textContent = 'Failed!';
                 btn.className = 'bg-red-500 hover:bg-red-600 text-white text-sm font-medium px-4 py-1.5 rounded ml-2';
                 setTimeout(() => {
-                    btn.textContent = originalText;
+                    btnSpan.setAttribute('data-i18n', originalI18n);
+                    btnSpan.textContent = originalText;
                     btn.className = originalClasses;
                 }, 1000);
             }
@@ -404,6 +443,20 @@ class Workspace {
                 alert('Save failed: ' + (error.message || 'Unknown error'));
             }
         }
+    }
+
+    toggleAutoSave(checked) {
+        this.isAutoSave = checked;
+        localStorage.setItem('autoSaveEnabled', checked ? 'true' : 'false');
+    }
+
+    triggerAutoSaveDebounced() {
+        if (this.autoSaveTimeout) {
+            clearTimeout(this.autoSaveTimeout);
+        }
+        this.autoSaveTimeout = setTimeout(() => {
+            this.save(true);
+        }, 1200); // 1.2s debounce
     }
 
     async autoLabel() {

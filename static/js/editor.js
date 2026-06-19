@@ -25,6 +25,8 @@ class Editor {
         this.redoStack = [];
         this.historyProcessing = false;
         this.maxHistory = 50;
+        this.onStateChange = null;
+        this.loading = false;
 
         // Colors mapping
         this.colors = [
@@ -524,8 +526,17 @@ class Editor {
     updateSelectionInfo(obj) {
         if (!obj) return;
 
+        // Resolve display object (first element if multiple selection)
+        let displayObj = obj;
+        if (obj.type === 'activeSelection' && typeof obj.getObjects === 'function') {
+            const objs = obj.getObjects();
+            if (objs && objs.length > 0) {
+                displayObj = objs[0];
+            }
+        }
+
         // Update Right Sidebar
-        const clsName = this.classes.find(c => c.id === obj.classId)?.name || 'Unknown';
+        const clsName = this.classes.find(c => c.id === displayObj.classId)?.name || 'Unknown';
         document.getElementById('selectionInfo').innerHTML = `
             <div class="mb-2">
                 <label class="block text-xs text-gray-500 mb-0.5">Class</label>
@@ -748,6 +759,7 @@ class Editor {
                 this.onSelect({ selected: [activeObjects[0]] });
             }
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
+            this.saveState();
         }
     }
 
@@ -783,10 +795,14 @@ class Editor {
 
                     // If this was the last one, maintain selection of new objects
                     if (newObjects.length === activeObjects.length) {
-                        const sel = new fabric.ActiveSelection(newObjects, {
-                            canvas: this.canvas,
-                        });
-                        this.canvas.setActiveObject(sel);
+                        if (newObjects.length === 1) {
+                            this.canvas.setActiveObject(newObjects[0]);
+                        } else {
+                            const sel = new fabric.ActiveSelection(newObjects, {
+                                canvas: this.canvas,
+                            });
+                            this.canvas.setActiveObject(sel);
+                        }
                         this.canvas.requestRenderAll();
                         this.sortBoxesByArea();
 
@@ -848,6 +864,10 @@ class Editor {
         this.history.push(state);
         if (this.history.length > this.maxHistory) this.history.shift();
         this.redoStack = []; // Clear redo
+
+        if (!this.loading && typeof this.onStateChange === 'function') {
+            this.onStateChange();
+        }
     }
 
     undo() {
@@ -885,6 +905,10 @@ class Editor {
 
             if (this.canvas.backgroundImage) {
                 this.backgroundImage = this.canvas.backgroundImage;
+            }
+
+            if (!this.loading && typeof this.onStateChange === 'function') {
+                this.onStateChange();
             }
         });
     }
