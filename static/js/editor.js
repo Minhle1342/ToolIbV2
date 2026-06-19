@@ -40,6 +40,7 @@ class Editor {
         this.focusClassId = null;
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCtx = this.overlayCanvas.getContext('2d');
+        this.showSequenceNumbers = false;
 
         this.initEvents();
         this.resizeCanvas();
@@ -512,6 +513,81 @@ class Editor {
                 ctx.drawImage(offCanvas, 0, 0);
                 ctx.restore();
             }
+
+            if (this.showSequenceNumbers) {
+                const ctx = opt.ctx || this.canvas.contextContainer;
+                if (!ctx) return;
+
+                ctx.save();
+
+                const rects = this.canvas.getObjects('rect');
+                const rectsByClass = {};
+                rects.forEach(rect => {
+                    const cid = rect.classId;
+                    if (cid === undefined || cid === null) return;
+                    if (!rectsByClass[cid]) {
+                        rectsByClass[cid] = [];
+                    }
+                    rectsByClass[cid].push(rect);
+                });
+
+                Object.keys(rectsByClass).forEach(cid => {
+                    const classId = parseInt(cid);
+                    if (this.focusClassId !== null && classId !== this.focusClassId) {
+                        return;
+                    }
+                    const list = rectsByClass[cid];
+                    // Sort top-to-bottom, then left-to-right
+                    list.sort((a, b) => a.top - b.top || a.left - b.left);
+
+                    const cls = this.classes.find(c => c.id === classId) || { color: '#00C2FF' };
+                    const badgeColor = cls.color;
+
+                    list.forEach((rect, index) => {
+                        const bound = rect.getBoundingRect();
+                        const numText = (index + 1).toString();
+
+                        ctx.font = 'bold 11px sans-serif';
+                        const textWidth = ctx.measureText(numText).width;
+                        const badgeHeight = 16;
+                        const badgeWidth = Math.max(badgeHeight, textWidth + 8);
+
+                        const x = bound.left;
+                        const y = bound.top;
+
+                        ctx.fillStyle = badgeColor;
+                        ctx.beginPath();
+                        const radius = 3;
+                        if (ctx.roundRect) {
+                            ctx.roundRect(x, y, badgeWidth, badgeHeight, radius);
+                        } else {
+                            ctx.rect(x, y, badgeWidth, badgeHeight);
+                        }
+                        ctx.fill();
+
+                        ctx.strokeStyle = '#ffffff';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+
+                        let isLight = false;
+                        if (badgeColor.startsWith('#')) {
+                            const hex = badgeColor.substring(1);
+                            const r = parseInt(hex.substring(0, 2), 16);
+                            const g = parseInt(hex.substring(2, 4), 16);
+                            const b = parseInt(hex.substring(4, 6), 16);
+                            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                            if (brightness > 180) isLight = true;
+                        }
+                        ctx.fillStyle = isLight ? '#000000' : '#ffffff';
+
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(numText, x + badgeWidth / 2, y + badgeHeight / 2);
+                    });
+                });
+
+                ctx.restore();
+            }
         });
     }
 
@@ -735,6 +811,12 @@ class Editor {
                 btn.classList.remove('text-red-500');
             }
         }
+    }
+
+    toggleSequenceNumbers() {
+        this.showSequenceNumbers = !this.showSequenceNumbers;
+        this.canvas.requestRenderAll();
+        return this.showSequenceNumbers;
     }
 
     setActiveClass(id) {

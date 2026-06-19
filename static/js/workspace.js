@@ -128,6 +128,7 @@ class Workspace {
                      <div class="w-3 h-3 rounded-full shadow-sm flex-shrink-0" style="background-color: ${editor.colors[idx % 20]}"></div>
                      <span class="truncate group-hover:text-content transition-colors" title="${cls}">${cls}</span>
                 </div>
+                <span class="class-count-badge text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hidden" data-class-count-id="${idx}">0</span>
             </div>
         `).join('');
         editor.setClasses(projectClasses);
@@ -297,11 +298,11 @@ class Workspace {
                     this.allImages.splice(currentIndex, 1);
                 }
 
-                this.renderImageList(this.allImages);
+                await loadImages(false);
 
                 if (this.allImages.length > 0) {
                     const nextIndex = Math.min(currentIndex, this.allImages.length - 1);
-                    this.loadImage(this.allImages[nextIndex].id);
+                    await this.selectImage(this.allImages[nextIndex]);
                 } else {
                     currentImage = null;
                     if (editor) editor.clearCanvas();
@@ -361,6 +362,25 @@ class Workspace {
 
     toggleIsolateMode() {
         if (typeof editor !== 'undefined') editor.toggleIsolateMode();
+    }
+
+    toggleSequenceNumbers() {
+        if (typeof editor !== 'undefined') {
+            const active = editor.toggleSequenceNumbers();
+            const btn = document.getElementById('btnShowSequenceNumbers');
+            if (btn) {
+                if (active) {
+                    btn.classList.add('text-blue-500');
+                    btn.classList.remove('text-content-muted');
+                } else {
+                    btn.classList.remove('text-blue-500');
+                    btn.classList.add('text-content-muted');
+                }
+            }
+            if (typeof updateClassListVisibility === 'function') {
+                updateClassListVisibility();
+            }
+        }
     }
 
     async save(silent = false) {
@@ -546,7 +566,7 @@ class Workspace {
             if (currentImage && unlabeledImages.find(img => img.id === currentImage.id)) {
                 const updatedImg = this.allImages.find(img => img.id === currentImage.id);
                 if (updatedImg.is_labeled) {
-                    this.loadImage(currentImage.id);
+                    await this.selectImage(updatedImg);
                 }
             }
         } catch (e) {
@@ -1369,19 +1389,41 @@ function updateClassListVisibility() {
     const boxes = editor.getBoxesYOLO();
     const presentClassIds = new Set(boxes.map(b => b.class_id));
 
+    // Calculate count for each class
+    const classCounts = {};
+    boxes.forEach(b => {
+        const cid = b.class_id;
+        classCounts[cid] = (classCounts[cid] || 0) + 1;
+    });
+
     const searchInput = document.getElementById('classSearch');
     const term = searchInput ? searchInput.value.toLowerCase() : '';
 
+    const showSeq = editor.showSequenceNumbers;
+
     document.querySelectorAll('.class-item').forEach(el => {
         const classId = parseInt(el.getAttribute('data-class-id'));
-        const text = el.innerText.toLowerCase();
-        const matchesSearch = text.includes(term);
+        const classNameSpan = el.querySelector('span');
+        const classNameText = classNameSpan ? classNameSpan.innerText.toLowerCase() : el.innerText.toLowerCase();
+        const matchesSearch = classNameText.includes(term);
         const isPresent = presentClassIds.has(classId);
 
         if (isPresent && matchesSearch) {
             el.style.display = 'flex';
         } else {
             el.style.display = 'none';
+        }
+
+        // Update badge count and visibility
+        const badge = el.querySelector('.class-count-badge');
+        if (badge) {
+            const count = classCounts[classId] || 0;
+            badge.innerText = count;
+            if (showSeq && count > 0) {
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
         }
     });
 

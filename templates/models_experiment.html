@@ -144,15 +144,12 @@
             </div>
             <div>
                 <label class="block text-sm font-medium text-content-muted mb-1">Tên File (.onnx)</label>
-                <div class="flex gap-2">
-                    <select id="modelFilename" class="w-full bg-panel border border-border rounded px-3 py-2 text-content focus:border-primary focus:outline-none">
-                        <option value="">-- Chọn file .onnx --</option>
-                    </select>
-                    <button type="button" onclick="loadModelFiles()" class="px-3 py-2 bg-surface border border-border rounded hover:bg-panel text-content-muted" title="Làm mới danh sách">
-                        <i class="fa-solid fa-sync-alt"></i>
-                    </button>
+                <input type="file" id="modelFile" accept=".onnx" class="w-full bg-panel border border-border rounded px-3 py-2 text-content focus:border-primary focus:outline-none">
+                <div id="currentFilenameWrapper" class="hidden mt-2 text-xs text-content-muted flex items-center gap-1.5">
+                    <span>File hiện tại:</span>
+                    <span id="currentFilename" class="font-mono bg-surface px-2 py-0.5 rounded border border-border text-content text-[11px]"></span>
                 </div>
-                <p class="text-xs text-content-muted mt-1">Lưu ý: File phải được đặt trong thư mục <code class="bg-surface px-1">models/</code> của dự án.</p>
+                <p class="text-xs text-content-muted mt-1">Tải lên file model .onnx trực tiếp từ máy tính của bạn.</p>
             </div>
             <div>
                 <label class="block text-sm font-medium text-content-muted mb-1">Mô tả (tùy chọn)</label>
@@ -194,30 +191,6 @@
         modelsData = await res.json();
         renderModelsList();
         renderCompareOptions();
-        await loadModelFiles();
-    }
-    
-    async function loadModelFiles() {
-        try {
-            const res = await fetch('/api/models/files');
-            const files = await res.json();
-            const select = document.getElementById('modelFilename');
-            const currentVal = select.value;
-            
-            select.innerHTML = '<option value="">-- Chọn file .onnx --</option>';
-            files.forEach(f => {
-                const opt = document.createElement('option');
-                opt.value = f;
-                opt.textContent = f;
-                select.appendChild(opt);
-            });
-            
-            if (files.includes(currentVal)) {
-                select.value = currentVal;
-            }
-        } catch (e) {
-            console.error("Lỗi tải danh sách file:", e);
-        }
     }
     
     function renderModelsList() {
@@ -272,10 +245,10 @@
         document.getElementById('modalTitle').textContent = 'Thêm Model';
         document.getElementById('modelId').value = '';
         document.getElementById('modelName').value = '';
-        document.getElementById('modelFilename').value = '';
+        document.getElementById('modelFile').value = '';
         document.getElementById('modelDesc').value = '';
+        document.getElementById('currentFilenameWrapper').classList.add('hidden');
         document.getElementById('modelModal').classList.remove('hidden');
-        loadModelFiles();
     }
     
     function editModel(id) {
@@ -284,12 +257,13 @@
         document.getElementById('modalTitle').textContent = 'Sửa Model';
         document.getElementById('modelId').value = m.id;
         document.getElementById('modelName').value = m.name;
-        document.getElementById('modelFilename').value = m.filename;
+        document.getElementById('modelFile').value = '';
         document.getElementById('modelDesc').value = m.description;
+        
+        document.getElementById('currentFilename').textContent = m.filename;
+        document.getElementById('currentFilenameWrapper').classList.remove('hidden');
+        
         document.getElementById('modelModal').classList.remove('hidden');
-        loadModelFiles().then(() => {
-            document.getElementById('modelFilename').value = m.filename;
-        });
     }
     
     function closeModal() {
@@ -298,11 +272,26 @@
     
     async function saveModel() {
         const id = document.getElementById('modelId').value;
-        const payload = {
-            name: document.getElementById('modelName').value,
-            filename: document.getElementById('modelFilename').value,
-            description: document.getElementById('modelDesc').value
-        };
+        const name = document.getElementById('modelName').value.trim();
+        const description = document.getElementById('modelDesc').value;
+        const fileInput = document.getElementById('modelFile');
+        
+        if (!name) {
+            alert("Vui lòng nhập tên hiển thị.");
+            return;
+        }
+        
+        if (!id && fileInput.files.length === 0) {
+            alert("Vui lòng chọn file .onnx để tải lên.");
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('name', name);
+        formData.append('description', description);
+        if (fileInput.files.length > 0) {
+            formData.append('file', fileInput.files[0]);
+        }
         
         const method = id ? 'PUT' : 'POST';
         const url = id ? '/api/models/' + id : '/api/models';
@@ -310,10 +299,12 @@
         try {
             const res = await fetch(url, {
                 method,
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(payload)
+                body: formData
             });
-            if(!res.ok) throw new Error((await res.json()).error);
+            if(!res.ok) {
+                const errData = await res.json();
+                throw new Error(errData.error || 'Có lỗi xảy ra');
+            }
             closeModal();
             loadModels();
         } catch(e) {

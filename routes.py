@@ -544,20 +544,39 @@ def get_models():
 
 @api_bp.route('/models', methods=['POST'])
 def add_model():
-    data = request.json
+    from werkzeug.utils import secure_filename
     try:
-        name = data.get('name', '').strip()
-        filename = data.get('filename', '').strip()
+        name = request.form.get('name', '').strip()
+        description = request.form.get('description', '').strip()
         
-        if not name or not filename:
-            return jsonify({'error': 'Tên hiển thị và Tên File không được để trống.'}), 400
+        if 'file' not in request.files:
+            return jsonify({'error': 'Không tìm thấy file model tải lên.'}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'Vui lòng chọn file .onnx.'}), 400
+            
+        if not file.filename.endswith('.onnx'):
+            return jsonify({'error': 'Định dạng file không hợp lệ. Chỉ chấp nhận file .onnx.'}), 400
+            
+        filename = secure_filename(file.filename)
+        if not filename:
+            filename = file.filename
+            
+        if not name:
+            return jsonify({'error': 'Tên hiển thị không được để trống.'}), 400
             
         if AIModel.query.filter_by(filename=filename).first():
             return jsonify({'error': 'File model này đã tồn tại trong danh sách. Vui lòng chọn file khác hoặc sửa model hiện tại.'}), 400
             
+        models_dir = os.path.join(os.getcwd(), 'models')
+        os.makedirs(models_dir, exist_ok=True)
+        file_path = os.path.join(models_dir, filename)
+        file.save(file_path)
+        
         new_model = AIModel(
             name=name,
-            description=data.get('description', ''),
+            description=description,
             filename=filename
         )
         # If it's the first model, make it active
@@ -572,18 +591,50 @@ def add_model():
 
 @api_bp.route('/models/<int:model_id>', methods=['PUT'])
 def update_model(model_id):
+    from werkzeug.utils import secure_filename
     m = AIModel.query.get_or_404(model_id)
-    data = request.json
     try:
-        if 'name' in data: m.name = data['name'].strip()
-        if 'description' in data: m.description = data['description']
-        if 'filename' in data: 
-            new_filename = data['filename'].strip()
+        if request.is_json:
+            data = request.json
+            name = data.get('name', '').strip()
+            description = data.get('description', '')
+            filename_val = data.get('filename', '').strip()
+            file_uploaded = None
+        else:
+            name = request.form.get('name', '').strip()
+            description = request.form.get('description', '')
+            file_uploaded = request.files.get('file')
+            filename_val = None
+            
+        if name:
+            m.name = name
+        if description is not None:
+            m.description = description
+            
+        if file_uploaded:
+            if not file_uploaded.filename.endswith('.onnx'):
+                return jsonify({'error': 'Định dạng file không hợp lệ. Chỉ chấp nhận file .onnx.'}), 400
+                
+            filename = secure_filename(file_uploaded.filename)
+            if not filename:
+                filename = file_uploaded.filename
+                
             # Check uniqueness excluding self
-            existing = AIModel.query.filter(AIModel.filename == new_filename, AIModel.id != model_id).first()
+            existing = AIModel.query.filter(AIModel.filename == filename, AIModel.id != model_id).first()
             if existing:
                 return jsonify({'error': 'File model này đã được gán cho một model khác trong danh sách.'}), 400
-            m.filename = new_filename
+                
+            models_dir = os.path.join(os.getcwd(), 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            file_path = os.path.join(models_dir, filename)
+            file_uploaded.save(file_path)
+            
+            m.filename = filename
+        elif filename_val:
+            existing = AIModel.query.filter(AIModel.filename == filename_val, AIModel.id != model_id).first()
+            if existing:
+                return jsonify({'error': 'File model này đã được gán cho một model khác trong danh sách.'}), 400
+            m.filename = filename_val
             
         if not m.name or not m.filename:
             return jsonify({'error': 'Tên hiển thị và Tên File không được để trống.'}), 400
