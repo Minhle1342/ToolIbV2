@@ -9,10 +9,12 @@ Tài liệu này tổng hợp toàn bộ các phím tắt (Hotkeys) trong trình
 | Phím tắt | Chức năng | Hướng dẫn sử dụng |
 | :--- | :--- | :--- |
 | <kbd>D</kbd> | **Chế độ Vẽ (Draw Mode)** | Chuyển con trỏ thành bút để kéo vẽ BBox mới trên ảnh. |
-| <kbd>S</kbd> hoặc <kbd>V</kbd> | **Chế độ Chọn (Select Mode)** | Chuyển về con trỏ chuột để chọn, di chuyển, phóng to/thu nhỏ hoặc xoay BBox đã vẽ. |
+| <kbd>V</kbd> | **Chế độ Chọn (Select Mode)** | Chuyển về con trỏ chuột để chọn, di chuyển, phóng to/thu nhỏ hoặc xoay BBox đã vẽ. |
+| <kbd>R</kbd> | **Chế độ Auto Label Region** | Kéo chọn một vùng (Region) trên ảnh để hệ thống tự động nhận diện và sinh BBox bên trong vùng đó. |
 | **Giữ <kbd>Space</kbd> + Kéo chuột** | **Di chuyển ảnh (Pan)** | Giữ phím Space (hoặc phím <kbd>Alt</kbd>) và kéo chuột để di chuyển vùng nhìn khi ảnh đang Zoom lớn. |
 | <kbd>Ctrl</kbd> + **Lăn chuột** | **Phóng to / Thu nhỏ** | Cuộn chuột lên để Phóng to (Zoom In), cuộn chuột xuống để Thu nhỏ (Zoom Out) ảnh. |
-| <kbd>~</kbd> hoặc <kbd>`</kbd> | **Hiện/Ẩn danh sách phím tắt** | Nhấn phím Backquote (phím nằm ngay dưới phím Esc) để bật/tắt bảng tra cứu nhanh phím tắt. |
+| <kbd>~</kbd> hoặc <kbd>`</kbd> | **Hiện danh sách phím tắt** | Nhấn phím Backquote (phím nằm ngay dưới phím Esc) để bật bảng tra cứu nhanh phím tắt. |
+| <kbd>Esc</kbd> | **Đóng bảng phím tắt** | Đóng bảng danh sách phím tắt. |
 
 ---
 

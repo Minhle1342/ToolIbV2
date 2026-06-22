@@ -44,13 +44,14 @@ class YOLOInference:
             except Exception as e:
                 print(f"Error loading ONNX session: {e}")
 
-    def preprocess(self, image_path, target_size=None):
+    def preprocess(self, image_path=None, target_size=None, img=None):
         if target_size is None:
             target_size = (self.input_width, self.input_height)
         # Load image
-        img = cv2.imread(image_path)
         if img is None:
-            raise ValueError(f"Could not load image: {image_path}")
+            img = cv2.imread(image_path)
+            if img is None:
+                raise ValueError(f"Could not load image: {image_path}")
 
         h, w = img.shape[:2]
         
@@ -65,13 +66,52 @@ class YOLOInference:
         
         return blob, (w, h)
 
-    def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45):
+    def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45, region=None):
         self.ensure_session()
         if not self.session:
             return {'error': f'Model not found at {self.model_path}. Please ensure the file exists.'}
 
+        img = cv2.imread(image_path)
+        if img is None:
+            return {'error': f"Could not load image: {image_path}"}
+            
+        full_h, full_w = img.shape[:2]
+        offset_x = 0
+        offset_y = 0
+        
+        if region:
+            r_x = float(region.get('x', 0))
+            r_y = float(region.get('y', 0))
+            r_w = float(region.get('w', 1.0))
+            r_h = float(region.get('h', 1.0))
+            
+            # Treat as normalized if values are <= 1.0 (since normalized coords are 0.0-1.0)
+            if r_x <= 1.0 and r_y <= 1.0 and r_w <= 1.0 and r_h <= 1.0:
+                rx = int(max(0, r_x * full_w))
+                ry = int(max(0, r_y * full_h))
+                rw = int(r_w * full_w)
+                rh = int(r_h * full_h)
+            else:
+                rx = int(max(0, r_x))
+                ry = int(max(0, r_y))
+                rw = int(r_w)
+                rh = int(r_h)
+            
+            rx = min(rx, full_w - 1)
+            ry = min(ry, full_h - 1)
+            rw = min(rw, full_w - rx)
+            rh = min(rh, full_h - ry)
+            
+            if rw > 0 and rh > 0:
+                img = img[ry:ry+rh, rx:rx+rw]
+                offset_x = rx
+                offset_y = ry
+
         # 1. Preprocess
-        input_tensor, (orig_w, orig_h) = self.preprocess(image_path)
+        try:
+            input_tensor, (orig_w, orig_h) = self.preprocess(img=img)
+        except Exception as e:
+            return {'error': str(e)}
         
         # 2. Inference
         outputs = self.session.run(None, {self.input_name: input_tensor})
@@ -120,10 +160,6 @@ class YOLOInference:
         for i in range(len(filtered_boxes)):
             cx, cy, w, h = filtered_boxes[i]
             
-            # Un-squeeze coords
-            # x_center * sx, y_center * sy ... 
-            # Wait, if we squeezed the image, we just scale back independently.
-            
             # Convert center-wh to top-left-wh
             x = (cx - w/2)
             y = (cy - h/2)
@@ -147,12 +183,17 @@ class YOLOInference:
                 x, y, w, h = boxes[i]
                 
                 # Convert Top-Left Absolute to Center Normalized
-                # x, y, w, h are currently in pixels relative to orig_w, orig_h
+                # x, y, w, h are currently in pixels relative to orig_w, orig_h (cropped region)
                 
-                cx = (x + w / 2) / orig_w
-                cy = (y + h / 2) / orig_h
-                nw = w / orig_w
-                nh = h / orig_h
+                abs_x = x + offset_x
+                abs_y = y + offset_y
+                abs_w = w
+                abs_h = h
+                
+                cx = (abs_x + abs_w / 2) / full_w
+                cy = (abs_y + abs_h / 2) / full_h
+                nw = abs_w / full_w
+                nh = abs_h / full_h
 
                 results.append({
                     'class_id': class_ids[i],

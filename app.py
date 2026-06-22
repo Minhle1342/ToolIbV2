@@ -12,6 +12,10 @@ def create_app():
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'yolo_labeling.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
+    # Increase maximum upload limit to 10GB for large datasets
+    app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024
+    app.config['MAX_FORM_PARTS'] = 100000  # Allow large number of files
+    
     # Initialize DB
     db.init_app(app)
     

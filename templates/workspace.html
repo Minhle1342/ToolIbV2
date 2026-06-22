@@ -9,12 +9,12 @@
         <div class="p-4 border-b border-border space-y-3">
             <div class="flex justify-between items-center">
                 <div class="flex items-center gap-2 sidebar-content">
-                    <h3 class="font-semibold text-content" data-i18n="images">Images</h3>
-                    <div class="relative group">
+                    <h3 class="font-semibold text-content"><span data-i18n="images">Images</span> <span id="totalImageCount" class="text-sm font-normal text-content-muted"></span></h3>
+                    <div class="relative" id="uploadDropdownContainer">
                         <button class="text-primary hover:text-blue-500 rounded text-xs px-2 py-1 bg-surface border border-border transition-colors" title="Upload Images" data-i18n-title="upload_images">
                             <i class="fa-solid fa-upload"></i>
                         </button>
-                        <div class="absolute left-0 mt-1 hidden group-hover:flex flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-32 overflow-hidden">
+                        <div id="uploadDropdownMenu" class="absolute left-0 mt-1 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-32 overflow-hidden">
                             <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-primary transition-colors flex items-center gap-2" onclick="document.getElementById('imageUploadInput').click()">
                                 <i class="fa-solid fa-file-image w-4 text-center"></i> <span data-i18n="upload_files">Files</span>
                             </button>
@@ -30,6 +30,14 @@
                     title="Toggle Image List">
                     <i class="fa-solid fa-chevron-left sidebar-icon"></i>
                 </button>
+            </div>
+
+            <!-- Upload Progress Bar (Hidden by default) -->
+            <div id="uploadProgressContainer" class="hidden space-y-1 sidebar-content">
+                <div class="w-full bg-surface border border-border rounded overflow-hidden h-1.5">
+                    <div id="uploadProgressBar" class="h-full bg-primary transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="uploadProgressText" class="text-[10px] text-content-muted text-center" data-i18n="uploading">Uploading... 0%</div>
             </div>
 
             <div class="space-y-2 sidebar-content">
@@ -70,9 +78,16 @@
             </div>
         </div>
 
-        <!-- Scrollable List -->
-        <div class="flex-1 overflow-y-auto min-h-0 bg-surface" id="imageList">
-            <!-- Items injected by JS -->
+        <!-- Scrollable List Wrapper -->
+        <div class="flex-1 min-h-0 relative bg-surface">
+            <!-- Scrollable List -->
+            <div class="h-full overflow-y-auto" id="imageList">
+                <!-- Items injected by JS -->
+            </div>
+            <!-- Scroll to active button -->
+            <button id="btnScrollToActive" class="absolute top-2 right-4 bg-primary text-white p-2 w-8 h-8 flex items-center justify-center rounded-full shadow-md opacity-50 hover:opacity-100 transition-all z-10 hidden" onclick="currentWorkspace.scrollToActiveImage()" title="Cuộn đến ảnh đang chọn">
+                <i class="fa-solid fa-location-crosshairs"></i>
+            </button>
         </div>
     </div>
 
@@ -115,9 +130,30 @@
                 </div>
             </div>
 
-            <button id="btnShowSequenceNumbers" class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
-                title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers" onclick="currentWorkspace.toggleSequenceNumbers()">
-                <i class="fa-solid fa-list-ol text-lg"></i>
+            <button id="btnAutoLabelRegion" class="p-2 text-content-muted hover:text-purple-400 rounded hover:bg-panel transition-colors"
+                title="Auto Label Region (R)" data-i18n-title="tool_auto_region" onclick="editor.setMode('auto_label_region')">
+                <i class="fa-solid fa-crop-simple text-lg"></i>
+            </button>
+            <div class="relative">
+                <button id="btnShowSequenceNumbers" class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
+                    title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers" onclick="document.getElementById('sequenceDropdown').classList.toggle('hidden')">
+                    <i class="fa-solid fa-list-ol text-lg"></i>
+                </button>
+                <div id="sequenceDropdown" class="absolute left-0 mt-2 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('class')">
+                        <i class="fa-solid fa-layer-group w-4 text-center"></i> <span data-i18n="seq_class">By Class</span>
+                    </button>
+                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('column')">
+                        <i class="fa-solid fa-columns w-4 text-center"></i> <span data-i18n="seq_column">By Column</span>
+                    </button>
+                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-red-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('none')">
+                        <i class="fa-solid fa-eye-slash w-4 text-center"></i> <span data-i18n="seq_off">Turn Off</span>
+                    </button>
+                </div>
+            </div>
+            <button id="btnHideBoxes" class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel transition-colors"
+                title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes" onclick="currentWorkspace.toggleBoxesVisibility()">
+                <i class="fa-solid fa-eye text-lg"></i>
             </button>
 
             <div class="w-px h-6 bg-border mx-2"></div>
@@ -137,7 +173,6 @@
 
             <div class="w-px h-6 bg-border mx-2"></div>
 
-            <span id="currentFileName" class="text-sm text-content-muted font-mono truncate max-w-xs" data-i18n="no_image">No Image</span>
 
             <div class="w-px h-6 bg-border mx-2 ml-auto"></div>
 

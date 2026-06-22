@@ -158,6 +158,8 @@ def upload_folder():
 def upload_project_images(project_id):
     project = Project.query.get_or_404(project_id)
     files = request.files.getlist('files')
+    skip_sync = request.form.get('skip_sync', 'false').lower() == 'true'
+    
     saved_count = 0
     for file in files:
         if file.filename:
@@ -168,7 +170,7 @@ def upload_project_images(project_id):
                 file.save(dest_path)
                 saved_count += 1
                 
-    if saved_count > 0:
+    if saved_count > 0 and not skip_sync:
         try:
             utils.scan_and_sync_images(project)
         except Exception as scan_err:
@@ -415,7 +417,13 @@ def auto_label(image_id):
     if not engine:
         return jsonify({'error': 'No active AI model found or model file missing.'}), 400
     
-    result = engine.predict(image_path)
+    region = None
+    if request.is_json:
+        data = request.get_json()
+        if data and 'region' in data:
+            region = data['region']
+
+    result = engine.predict(image_path, region=region)
     
     if 'error' in result:
         return jsonify(result), 400

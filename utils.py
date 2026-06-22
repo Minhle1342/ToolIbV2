@@ -21,26 +21,25 @@ def scan_and_sync_images(project):
     if not os.path.exists(project.root_path):
         return 0
 
-    # Auto-generate classes.txt from data.yaml if it exists and classes.txt doesn't
+    # Auto-generate or overwrite classes.txt from data.yaml if it exists
     classes_file = os.path.join(project.root_path, 'classes.txt')
-    if not os.path.exists(classes_file):
-        for yaml_name in ['data.yaml', 'data.yml']:
-            yaml_path = os.path.join(project.root_path, yaml_name)
-            if os.path.exists(yaml_path):
-                try:
-                    with open(yaml_path, 'r', encoding='utf-8') as f:
-                        data = yaml.safe_load(f)
-                        if data and 'names' in data:
-                            names = data['names']
-                            if isinstance(names, dict):
-                                names = [str(names[k]) for k in sorted(names.keys())]
-                            elif isinstance(names, list):
-                                names = [str(n) for n in names]
-                            with open(classes_file, 'w', encoding='utf-8') as cf:
-                                cf.write('\n'.join(names))
-                            break
-                except Exception as e:
-                    print(f"Error parsing {yaml_name}: {e}")
+    for yaml_name in ['data.yaml', 'data.yml']:
+        yaml_path = os.path.join(project.root_path, yaml_name)
+        if os.path.exists(yaml_path):
+            try:
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f)
+                    if data and 'names' in data:
+                        names = data['names']
+                        if isinstance(names, dict):
+                            names = [str(names[k]) for k in sorted(names.keys())]
+                        elif isinstance(names, list):
+                            names = [str(n) for n in names]
+                        with open(classes_file, 'w', encoding='utf-8') as cf:
+                            cf.write('\n'.join(names))
+                        break
+            except Exception as e:
+                print(f"Error parsing {yaml_name}: {e}")
 
     existing_images = set(img.filename for img in project.images)
     new_images_count = 0
@@ -215,14 +214,15 @@ def export_dataset(criteria, splits=None, format='yolo'):
         src_label_path = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
         
         if os.path.exists(src_img_path) and os.path.exists(src_label_path):
-            # Check if label file has at least one bounding box
+            # Check if label file has at least one bounding box and count them
             has_boxes = False
+            box_count = 0
             try:
                 with open(src_label_path, 'r') as f:
                     for line in f:
                         if line.strip():
                             has_boxes = True
-                            break
+                            box_count += 1
             except Exception:
                 pass
 
@@ -231,27 +231,34 @@ def export_dataset(criteria, splits=None, format='yolo'):
                     'image_obj': img,
                     'img_path': src_img_path,
                     'label_path': src_label_path,
-                    'filename': f"{img.project_id}_{img.filename}" # Prefix to avoid collision
+                    'filename': f"{img.project_id}_{img.filename}", # Prefix to avoid collision
+                    'box_count': box_count
                 })
 
     if not all_images:
         return {'status': 'error', 'message': 'No valid labeled images found.'}
 
-    # 4. Filter empty labels? (Optional)
-    
-    # Shuffle and Split
-    random.shuffle(all_images)
+    # Calculate split sizes exactly like frontend
     total_images = len(all_images)
-    
     train_pct = splits.get('train', 0) / 100.0
     val_pct = splits.get('val', 0) / 100.0
     
-    train_idx = int(total_images * train_pct)
-    val_idx = train_idx + int(total_images * val_pct)
+    train_count = round(total_images * train_pct)
+    val_count = round(total_images * val_pct)
+    test_count = total_images - train_count - val_count
     
-    train_set = all_images[:train_idx]
-    val_set = all_images[train_idx:val_idx]
-    test_set = all_images[val_idx:]
+    # Sort images by bounding box count in descending order
+    all_images.sort(key=lambda x: x['box_count'], reverse=True)
+    
+    # Top `test_count` images go to test_set
+    test_set = all_images[:test_count]
+    remaining_images = all_images[test_count:]
+    
+    # Shuffle the remaining images for train and val to keep them random
+    random.shuffle(remaining_images)
+    
+    train_set = remaining_images[:train_count]
+    val_set = remaining_images[train_count:]
 
     def copy_files(dataset, split_name):
         if not dataset:

@@ -39,11 +39,10 @@ class Workspace {
                 editor.setMode('draw');
             }
             if (e.key.toLowerCase() === 'v') editor.setMode('select');
+            if (e.key.toLowerCase() === 'r') editor.setMode('auto_label_region');
             if (e.key.toLowerCase() === 'f') this.toggleFlag();
             if (e.key.toLowerCase() === 'l') this.toggleLockBox();
             if (e.key.toLowerCase() === 'h') this.toggleImageVisibility();
-            if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
-
             if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
             if (e.key.toLowerCase() === 'a') editor.toggleStickyMove();
 
@@ -174,7 +173,6 @@ class Workspace {
 
     async selectImage(image) {
         currentImage = image;
-        document.getElementById('currentFileName').textContent = image.filename;
 
         // Update Split Type Select
         const select = document.getElementById('splitTypeSelect');
@@ -194,14 +192,18 @@ class Workspace {
 
         // Update Active Item in List
         document.querySelectorAll('.image-item').forEach(el => {
-            el.classList.remove('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
-            el.classList.add('bg-surface', 'text-content-muted');
+            el.classList.remove('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold', 'bg-panel', 'border-l-2', 'border-primary', 'text-primary');
+            el.classList.add('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
         });
         const el = document.getElementById(`img-${image.id}`);
         if (el) {
-            el.classList.remove('bg-surface', 'text-content-muted');
-            el.classList.add('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
+            el.classList.remove('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
+            el.classList.add('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold');
         }
+
+        // Show scroll-to-active button
+        const scrollBtn = document.getElementById('btnScrollToActive');
+        if (scrollBtn) scrollBtn.classList.remove('hidden');
 
         // Update Flag Button
         this.updateFlagButton();
@@ -251,6 +253,14 @@ class Workspace {
             this.updateImageStats(img, labels.length);
             editor.loading = false;
         });
+    }
+
+    scrollToActiveImage() {
+        if (!currentImage) return;
+        const el = document.getElementById(`img-${currentImage.id}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
     }
 
     updateImageStats(img, boxCount) {
@@ -364,9 +374,9 @@ class Workspace {
         if (typeof editor !== 'undefined') editor.toggleIsolateMode();
     }
 
-    toggleSequenceNumbers() {
+    setSequenceMode(mode) {
         if (typeof editor !== 'undefined') {
-            const active = editor.toggleSequenceNumbers();
+            const active = editor.setSequenceMode(mode);
             const btn = document.getElementById('btnShowSequenceNumbers');
             if (btn) {
                 if (active) {
@@ -379,6 +389,29 @@ class Workspace {
             }
             if (typeof updateClassListVisibility === 'function') {
                 updateClassListVisibility();
+            }
+        }
+    }
+
+    toggleBoxesVisibility() {
+        if (typeof editor !== 'undefined') {
+            const active = editor.toggleBoxesVisibility();
+            const btn = document.getElementById('btnHideBoxes');
+            if (btn) {
+                const icon = btn.querySelector('i');
+                if (!active) {
+                    btn.classList.add('text-red-500');
+                    btn.classList.remove('text-content-muted');
+                    if (icon) {
+                        icon.className = 'fa-solid fa-eye-slash text-lg';
+                    }
+                } else {
+                    btn.classList.remove('text-red-500');
+                    btn.classList.add('text-content-muted');
+                    if (icon) {
+                        icon.className = 'fa-solid fa-eye text-lg';
+                    }
+                }
             }
         }
     }
@@ -503,6 +536,49 @@ class Workspace {
         }
     }
 
+    async autoLabelRegion(region) {
+        if (!currentImage) return;
+
+        const btn = document.getElementById('btnAutoLabelRegion');
+        let icon = null;
+        let originalClass = '';
+        if (btn) {
+            icon = btn.querySelector('i');
+            if (icon) {
+                originalClass = icon.className;
+                icon.className = 'fa-solid fa-spinner fa-spin text-lg';
+            }
+            btn.disabled = true;
+        }
+
+        try {
+            // Need to convert region to normalized coordinates relative to image
+            const normRegion = {
+                x: region.x / editor.imageWidth,
+                y: region.y / editor.imageHeight,
+                w: region.w / editor.imageWidth,
+                h: region.h / editor.imageHeight
+            };
+
+            const data = await API.autoLabel(currentImage.id, normRegion);
+            if (data.success) {
+                if (data.boxes.length > 0) {
+                    // Add the new boxes to the existing boxes
+                    data.boxes.forEach(box => {
+                        editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, true);
+                    });
+                    editor.saveState();
+                    if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
+                }
+            }
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            if (icon) icon.className = originalClass;
+            if (btn) btn.disabled = false;
+        }
+    }
+
     async autoLabelAll() {
         if (!this.allImages) return;
 
@@ -523,45 +599,69 @@ class Workspace {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         btn.disabled = true;
 
+        const progressContainer = document.getElementById('uploadProgressContainer');
+        const progressBar = document.getElementById('uploadProgressBar');
+        const progressText = document.getElementById('uploadProgressText');
+
+        if (progressContainer) {
+            progressContainer.classList.remove('hidden');
+            if (progressBar) progressBar.style.width = '0%';
+            if (progressText) progressText.innerText = `Auto Labeling... 0/${unlabeledImages.length}`;
+        }
+
         let successCount = 0;
         let failCount = 0;
+        let processedCount = 0;
 
         try {
             for (const img of unlabeledImages) {
                 try {
                     const data = await API.autoLabel(img.id);
-                    if (data.success && data.boxes && data.boxes.length > 0) {
-                        const saveData = {
-                            image_id: img.id,
-                            labels: data.boxes,
-                            flag_status: img.flag_status || false
-                        };
-                        const saveResult = await API.saveLabel(saveData);
-                        if (saveResult.success) {
-                            successCount++;
-                            img.classes = Array.from(new Set(data.boxes.map(b => b.class_id))).sort((a, b) => a - b);
-                            img.is_labeled = true;
+                    if (data.success || data.boxes) {
+                        if (data.boxes && data.boxes.length > 0) {
+                            const saveData = {
+                                image_id: img.id,
+                                labels: data.boxes,
+                                flag_status: img.flag_status || false
+                            };
+                            const saveResult = await API.saveLabel(saveData);
+                            if (saveResult.message || saveResult.success) {
+                                successCount++;
+                                img.classes = Array.from(new Set(data.boxes.map(b => b.class_id))).sort((a, b) => a - b);
+                                img.is_labeled = true;
 
-                            const el = document.getElementById(`img-${img.id}`);
-                            if (el) {
-                                const checkIcon = el.querySelector('.fa-regular.fa-circle');
-                                if (checkIcon) {
-                                    checkIcon.className = 'fa-solid fa-check text-secondary';
+                                const el = document.getElementById(`img-${img.id}`);
+                                if (el) {
+                                    const checkIcon = el.querySelector('.fa-regular.fa-circle');
+                                    if (checkIcon) {
+                                        checkIcon.className = 'fa-solid fa-check text-secondary';
+                                    }
                                 }
+                            } else {
+                                failCount++;
                             }
                         } else {
-                            failCount++;
+                            // Inference successful but no objects found
+                            successCount++;
                         }
                     } else {
-                        // Empty boxes or failed inference, optionally count as fail
+                        // Failed inference
+                        failCount++;
                     }
                 } catch (err) {
                     console.error(`Failed to auto-label image ${img.id}:`, err);
                     failCount++;
                 }
+
+                processedCount++;
+                if (progressContainer) {
+                    const percentComplete = Math.round((processedCount / unlabeledImages.length) * 100);
+                    if (progressBar) progressBar.style.width = percentComplete + '%';
+                    if (progressText) progressText.innerText = `Auto Labeling... ${processedCount}/${unlabeledImages.length} (${percentComplete}%)`;
+                }
             }
 
-            alert(`Auto-labeled and saved ${successCount} images. ${failCount > 0 ? `Failed on ${failCount} images.` : ''}`);
+            alert(`Quá trình gán nhãn tự động hoàn tất.\nThành công: ${successCount} ảnh.\n${failCount > 0 ? `Thất bại: ${failCount} ảnh.` : ''}`);
 
             if (currentImage && unlabeledImages.find(img => img.id === currentImage.id)) {
                 const updatedImg = this.allImages.find(img => img.id === currentImage.id);
@@ -572,6 +672,9 @@ class Workspace {
         } catch (e) {
             alert("An error occurred during bulk auto-labeling: " + e.message);
         } finally {
+            if (progressContainer) {
+                progressContainer.classList.add('hidden');
+            }
             btn.innerHTML = originalHtml;
             btn.disabled = false;
         }
@@ -840,6 +943,40 @@ files.download(onnx_path)
         });
     }
 
+    /**
+     * Apply a class (by index) to all selected bounding box objects.
+     * Supports both single and multi-selection via getActiveObjects().
+     */
+    _applyClassToObjects(classIdx) {
+        if (typeof editor === 'undefined' || !editor.canvas) return;
+
+        const selectedObjects = editor.canvas.getActiveObjects();
+        if (!selectedObjects || selectedObjects.length === 0) return;
+
+        const color = editor.colors[classIdx % 20];
+        const className = projectClasses[classIdx];
+
+        selectedObjects.forEach(obj => {
+            if (obj.type !== 'rect') return; // Only update bounding boxes
+            obj.classId = classIdx;
+            obj.set('stroke', color);
+            if (obj.__labelTag) {
+                obj.__labelTag.set('fill', color);
+            }
+            if (obj.__labelText) {
+                obj.__labelText.set('text', className);
+            }
+        });
+
+        editor.canvas.renderAll();
+        // Show info for the first selected object
+        if (selectedObjects.length === 1) {
+            editor.updateSelectionInfo(selectedObjects[0]);
+        }
+        if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
+        this.save(true);
+    }
+
     async addNewClassFromSelection() {
         const input = document.getElementById('newClassInput');
         if (!input) return;
@@ -850,7 +987,7 @@ files.download(onnx_path)
             return;
         }
 
-        // Validate if a bounding box is selected
+        // Validate if at least one bounding box is selected
         if (typeof editor === 'undefined' || !editor.canvas || !editor.canvas.getActiveObject()) {
             alert('Vui lòng chọn hoặc vẽ một bounding box trước khi thêm class mới!');
             return;
@@ -859,21 +996,8 @@ files.download(onnx_path)
         // Check if class already exists (case insensitive)
         const existingClassIdx = projectClasses.findIndex(c => c.toLowerCase() === newClassName.toLowerCase());
         if (existingClassIdx !== -1) {
-            // Assign to existing class
-            const active = editor.canvas.getActiveObject();
-            if (active) {
-                active.classId = existingClassIdx;
-                active.set('stroke', editor.colors[existingClassIdx % 20]);
-                if (active.__labelTag) {
-                    active.__labelTag.set('fill', editor.colors[existingClassIdx % 20]);
-                }
-                if (active.__labelText) {
-                    active.__labelText.set('text', projectClasses[existingClassIdx]);
-                }
-                editor.canvas.renderAll();
-                editor.updateSelectionInfo(active);
-                this.save(true);
-            }
+            // Assign all selected boxes to the existing class
+            this._applyClassToObjects(existingClassIdx);
             input.value = '';
             return;
         }
@@ -905,26 +1029,8 @@ files.download(onnx_path)
 
             const newClassIdx = projectClasses.length - 1;
 
-            // If an object is selected, update its class to the newly added class
-            if (typeof editor !== 'undefined' && editor.canvas) {
-                const active = editor.canvas.getActiveObject();
-                if (active) {
-                    active.classId = newClassIdx;
-                    active.set('stroke', editor.colors[newClassIdx % 20]);
-
-                    // Update label tag background if it exists
-                    if (active.__labelTag) {
-                        active.__labelTag.set('fill', editor.colors[newClassIdx % 20]);
-                    }
-                    if (active.__labelText) {
-                        active.__labelText.set('text', projectClasses[newClassIdx]);
-                    }
-
-                    editor.canvas.renderAll();
-                    editor.updateSelectionInfo();
-                    this.save(true); // auto save
-                }
-            }
+            // Assign all selected boxes to the newly added class
+            this._applyClassToObjects(newClassIdx);
 
             input.value = '';
 
@@ -985,6 +1091,38 @@ files.download(onnx_path)
         const files = event.target.files;
         if (!files || files.length === 0) return;
 
+        // Lấy danh sách tên file đang có trong dự án
+        const existingFilenames = new Set((this.allImages || []).map(img => img.filename));
+        const isFolderUpload = event.target.id === 'folderUploadInput';
+
+        let addedFiles = [];
+        let skippedCount = 0;
+
+        const duplicateSuffixRegex = /\(\d+\)\.[a-zA-Z0-9]+$/;
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            
+            // Bỏ qua các file có đuôi (1), (2)... (được coi là file trùng)
+            if (duplicateSuffixRegex.test(file.name)) {
+                skippedCount++;
+                continue;
+            }
+
+            // Nếu là upload folder và file đã tồn tại (trùng tên), thì bỏ qua
+            if (isFolderUpload && existingFilenames.has(file.name)) {
+                skippedCount++;
+                continue;
+            }
+            addedFiles.push(file);
+        }
+
+        if (addedFiles.length === 0) {
+            alert(`Đã bỏ qua ${skippedCount} file vì đã tồn tại trong dự án. Không có file mới nào để tải lên.`);
+            event.target.value = ''; // reset input
+            return;
+        }
+
         // Find the main upload button icon to show spinner
         const btn = document.querySelector('button[title="Upload Images"]');
         const originalHtml = btn ? btn.innerHTML : '';
@@ -993,29 +1131,86 @@ files.download(onnx_path)
             btn.disabled = true;
         }
 
-        const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-            formData.append('files', files[i]);
+        const progressContainer = document.getElementById('uploadProgressContainer');
+        const progressBar = document.getElementById('uploadProgressBar');
+        const progressText = document.getElementById('uploadProgressText');
+        
+        if (progressContainer) {
+            progressContainer.classList.remove('hidden');
+            if (progressBar) progressBar.style.width = '0%';
+            if (progressText) progressText.innerText = 'Uploading... 0%';
         }
 
         try {
-            const res = await fetch(`/api/projects/${PROJECT_ID}/upload`, {
-                method: 'POST',
-                body: formData
-            });
+            const CHUNK_SIZE = 50;
+            let totalUploadedChunks = 0;
+            const totalChunks = Math.ceil(addedFiles.length / CHUNK_SIZE);
+            let totalBytes = addedFiles.reduce((acc, f) => acc + f.size, 0);
+            let uploadedBytesBeforeCurrentChunk = 0;
 
-            if (!res.ok) throw new Error('Upload failed');
-            const data = await res.json();
+            for (let i = 0; i < addedFiles.length; i += CHUNK_SIZE) {
+                const chunk = addedFiles.slice(i, i + CHUNK_SIZE);
+                const formData = new FormData();
+                let currentChunkBytes = 0;
+                for (let file of chunk) {
+                    formData.append('files', file);
+                    currentChunkBytes += file.size;
+                }
+                formData.append('skip_sync', 'true');
 
-            // alert(`Tải lên thành công ${data.count} file.`);
+                await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', `/api/projects/${PROJECT_ID}/upload`, true);
+                    
+                    xhr.upload.onprogress = (event) => {
+                        if (event.lengthComputable && totalBytes > 0) {
+                            const currentTotalLoaded = uploadedBytesBeforeCurrentChunk + event.loaded;
+                            const percentComplete = Math.min(100, Math.round((currentTotalLoaded / totalBytes) * 100));
+                            if (progressBar) progressBar.style.width = percentComplete + '%';
+                            if (progressText) progressText.innerText = `Uploading chunk ${totalUploadedChunks + 1}/${totalChunks}... ${percentComplete}%`;
+                        }
+                    };
+
+                    xhr.onload = async () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            uploadedBytesBeforeCurrentChunk += currentChunkBytes;
+                            totalUploadedChunks++;
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            reject(new Error('Upload failed with status ' + xhr.status));
+                        }
+                    };
+
+                    xhr.onerror = () => reject(new Error('Upload failed due to network error'));
+                    xhr.send(formData);
+                });
+            }
+
+            if (progressText) progressText.innerText = 'Syncing database...';
+            try {
+                const syncResponse = await fetch(`/api/projects/scan/${PROJECT_ID}`, { method: 'POST' });
+                if (!syncResponse.ok) {
+                    console.error('Failed to sync database after upload', await syncResponse.text());
+                }
+            } catch (err) {
+                console.error('Error triggering sync:', err);
+            }
+
             await loadImages(true);
             await this.loadProjectInfo(); // Reload classes in case dataset files like classes.txt or data.yaml were uploaded
+            
+            if (skippedCount > 0) {
+                alert(`Đã tải lên ${addedFiles.length} file. Đã bỏ qua ${skippedCount} file (do trùng tên hoặc đuôi (1), (2)).`);
+            }
         } catch (e) {
             alert('Lỗi tải ảnh: ' + e.message);
         } finally {
             if (btn) {
                 btn.innerHTML = originalHtml;
                 btn.disabled = false;
+            }
+            if (progressContainer) {
+                progressContainer.classList.add('hidden');
             }
             event.target.value = ''; // reset input
         }
@@ -1214,6 +1409,11 @@ async function loadImages(fetchFromServer = true) {
         currentWorkspace.allImages = images;
     }
 
+    const totalImageCountEl = document.getElementById('totalImageCount');
+    if (totalImageCountEl) {
+        totalImageCountEl.innerText = `(${currentWorkspace.allImages ? currentWorkspace.allImages.length : 0})`;
+    }
+
     // Read active class filters
     const checkboxes = document.querySelectorAll('.class-filter-checkbox');
     const selectedClasses = Array.from(checkboxes)
@@ -1233,8 +1433,11 @@ async function loadImages(fetchFromServer = true) {
     if (filteredImages.length === 0) {
         container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc nhãn</div>';
     } else {
-        container.innerHTML = filteredImages.map(img => `
-            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-colors bg-surface text-content-muted image-item" 
+        container.innerHTML = filteredImages.map(img => {
+            const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
+            const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
+            return `
+            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses}" 
                  id="img-${img.id}" 
                  onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}'})">
                 <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
@@ -1243,7 +1446,8 @@ async function loadImages(fetchFromServer = true) {
                     ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}
                 </div>
             </div>
-        `).join('');
+            `;
+        }).join('');
     }
 
     currentWorkspace.imageList = filteredImages;
@@ -1560,4 +1764,25 @@ function initSplitSlider() {
     updateUI();
 }
 
-document.addEventListener('DOMContentLoaded', initSplitSlider);
+document.addEventListener('DOMContentLoaded', () => {
+    initSplitSlider();
+
+    const dropdownContainer = document.getElementById('uploadDropdownContainer');
+    const dropdownMenu = document.getElementById('uploadDropdownMenu');
+    let hideTimeout;
+
+    if (dropdownContainer && dropdownMenu) {
+        dropdownContainer.addEventListener('mouseenter', () => {
+            clearTimeout(hideTimeout);
+            dropdownMenu.classList.remove('hidden');
+            dropdownMenu.classList.add('flex');
+        });
+
+        dropdownContainer.addEventListener('mouseleave', () => {
+            hideTimeout = setTimeout(() => {
+                dropdownMenu.classList.add('hidden');
+                dropdownMenu.classList.remove('flex');
+            }, 1500); // 1.5s delay
+        });
+    }
+});

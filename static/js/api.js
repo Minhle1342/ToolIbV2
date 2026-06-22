@@ -70,9 +70,13 @@ class startAPI {
         return await res.json();
     }
 
-    async autoLabel(imageId) {
+    async autoLabel(imageId, region = null) {
+        const body = region ? JSON.stringify({ region }) : null;
+        const headers = region ? { 'Content-Type': 'application/json' } : {};
         const res = await fetch(`/api/autolabel/${imageId}`, {
-            method: 'POST'
+            method: 'POST',
+            headers: headers,
+            body: body
         });
         if (!res.ok) {
             const err = await res.json();

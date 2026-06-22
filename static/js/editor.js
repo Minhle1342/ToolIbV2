@@ -40,7 +40,8 @@ class Editor {
         this.focusClassId = null;
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCtx = this.overlayCanvas.getContext('2d');
-        this.showSequenceNumbers = false;
+        this.sequenceMode = 'none';
+        this.showBoxes = true;
 
         this.initEvents();
         this.resizeCanvas();
@@ -149,7 +150,10 @@ class Editor {
             transparentCorners: false,
             cornerColor: 'white',
             cornerSize: 8,
-            classId: classId
+            classId: classId,
+            visible: this.showBoxes,
+            evented: this.showBoxes,
+            selectable: this.showBoxes && (this.currentMode === 'select')
         });
 
         // Z-Index Logic: Small boxes on top
@@ -165,19 +169,23 @@ class Editor {
         this.currentMode = mode;
         this.canvas.selection = (mode === 'select');
 
-        if (mode === 'draw') {
+        if (mode === 'draw' || mode === 'auto_label_region') {
             this.canvas.discardActiveObject();
             this.canvas.requestRenderAll();
         }
 
         // Update UI buttons
         document.querySelectorAll('.btn-tool').forEach(b => b.classList.remove('active'));
-        if (mode === 'draw') document.getElementById('btnDraw').classList.add('active');
-        if (mode === 'select') document.getElementById('btnSelect').classList.add('active');
+        const btnDraw = document.getElementById('btnDraw');
+        const btnSelect = document.getElementById('btnSelect');
+        const btnRegion = document.getElementById('btnAutoLabelRegion');
+        if (btnDraw) btnDraw.classList.toggle('active', mode === 'draw');
+        if (btnSelect) btnSelect.classList.toggle('active', mode === 'select');
+        if (btnRegion) btnRegion.classList.toggle('active', mode === 'auto_label_region');
 
-        this.canvas.defaultCursor = mode === 'draw' ? 'crosshair' : 'default';
+        this.canvas.defaultCursor = (mode === 'draw' || mode === 'auto_label_region') ? 'crosshair' : 'default';
         this.canvas.forEachObject(o => {
-            if (o.type === 'rect') o.selectable = (mode === 'select');
+            if (o.type === 'rect') o.selectable = (mode === 'select' && this.showBoxes);
         });
     }
 
@@ -195,23 +203,55 @@ class Editor {
         magCanvas.style.display = 'block';
         magPlaceholder.style.display = 'none';
 
-        // Source dimensions (from original image)
-        const sX = obj.left;
-        const sY = obj.top;
-        const sW = obj.width * obj.scaleX;
-        const sH = obj.height * obj.scaleY;
+        // Scaled dimensions of the bounding box
+        const sW = Math.abs(obj.width * obj.scaleX);
+        const sH = Math.abs(obj.height * obj.scaleY);
 
-        // Target canvas dimensions
-        const tW = magCanvas.width = 300; // Fixed resolution for zoom
-        const tH = magCanvas.height = 300;
+        if (sW <= 0 || sH <= 0) {
+            magCanvas.width = 300;
+            magCanvas.height = 300;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, 300, 300);
+            return;
+        }
 
+        // Adjust canvas dimensions dynamically to preserve the aspect ratio of the bounding box
+        const maxDim = 300;
+        let tW = maxDim;
+        let tH = maxDim;
+        if (sW > sH) {
+            tH = Math.round(maxDim * (sH / sW));
+        } else {
+            tW = Math.round(maxDim * (sW / sH));
+        }
+
+        magCanvas.width = tW;
+        magCanvas.height = tH;
+
+        // Fill with black background
         ctx.fillStyle = '#000';
         ctx.fillRect(0, 0, tW, tH);
 
         const imgElement = this.backgroundImage._element;
         if (!imgElement) return;
 
-        ctx.drawImage(imgElement, sX, sY, sW, sH, 0, 0, tW, tH);
+        // Get the center of the bounding box (in original image coordinates)
+        const center = obj.getCenterPoint();
+        const theta = (obj.angle || 0) * Math.PI / 180;
+
+        ctx.save();
+        // Translate magnifier context origin to the center of the magnifier canvas
+        ctx.translate(tW / 2, tH / 2);
+        // Scale magnifier context to fit the bounding box dimensions
+        ctx.scale(tW / sW, tH / sH);
+        // Rotate magnifier context back by -theta to align the rotated bounding box upright
+        ctx.rotate(-theta);
+        // Translate magnifier context back relative to the bounding box center in image coordinates
+        ctx.translate(-center.x, -center.y);
+
+        // Draw the full original image (browser handles clipping to magnifier canvas area automatically)
+        ctx.drawImage(imgElement, 0, 0);
+        ctx.restore();
     }
 
     sortBoxesByArea() {
@@ -235,6 +275,16 @@ class Editor {
     }
 
     initEvents() {
+        // Prevent middle click autoscroll on the canvas element
+        if (this.canvas.upperCanvasEl) {
+            this.canvas.upperCanvasEl.addEventListener('mousedown', (e) => {
+                if (e.button === 1) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, { passive: false });
+        }
+
         this.canvas.on('mouse:down', (opt) => {
             if (this.isStickyMode && this.stickyObj) {
                 this.toggleStickyMove(); // Click to drop
@@ -242,14 +292,14 @@ class Editor {
             }
 
             const evt = opt.e;
-            if (evt.altKey === true || this.isSpacePressed === true) {
+            if (evt.altKey === true || this.isSpacePressed === true || evt.button === 1) {
                 this.isPanning = true;
                 this.canvas.selection = false;
                 this.lastPosX = evt.clientX;
                 this.lastPosY = evt.clientY;
-            } else if (this.currentMode === 'draw') {
+            } else if (this.currentMode === 'draw' || this.currentMode === 'auto_label_region') {
                 // If user clicks on an existing box, switch to select mode
-                if (opt.target && opt.target.type === 'rect') {
+                if (this.currentMode === 'draw' && opt.target && opt.target.type === 'rect') {
                     this.setMode('select');
                     this.canvas.setActiveObject(opt.target);
                     // Manually fire selection event to update Inspector
@@ -262,7 +312,8 @@ class Editor {
                 this.origX = pointer.x;
                 this.origY = pointer.y;
 
-                const cls = this.classes.find(c => c.id === this.currentClassId) || { color: 'red' };
+                const strokeColor = this.currentMode === 'auto_label_region' ? '#a855f7' : (this.classes.find(c => c.id === this.currentClassId) || { color: 'red' }).color;
+                const strokeDashArray = this.currentMode === 'auto_label_region' ? [5, 5] : null;
 
                 this.rect = new fabric.Rect({
                     left: this.origX,
@@ -272,11 +323,12 @@ class Editor {
                     width: pointer.x - this.origX,
                     height: pointer.y - this.origY,
                     angle: 0,
-                    fill: 'rgba(0,0,0,0)',
-                    stroke: cls.color,
+                    fill: this.currentMode === 'auto_label_region' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(0,0,0,0)',
+                    stroke: strokeColor,
+                    strokeDashArray: strokeDashArray,
                     strokeWidth: 2 / this.getZoom(),
                     selectable: false, // temporarily false
-                    classId: this.currentClassId
+                    classId: this.currentMode === 'auto_label_region' ? null : this.currentClassId
                 });
                 this.canvas.add(this.rect);
             }
@@ -349,12 +401,26 @@ class Editor {
                 if (this.rect.width < 5 || this.rect.height < 5) {
                     this.canvas.remove(this.rect);
                 } else {
-                    this.sortBoxesByArea();
-                    // Auto-switch to select mode
-                    this.setMode('select');
-                    // Auto-select the new box
-                    this.canvas.setActiveObject(this.rect);
-                    this.onSelect({ selected: [this.rect] });
+                    if (this.currentMode === 'auto_label_region') {
+                        const region = {
+                            x: this.rect.left,
+                            y: this.rect.top,
+                            w: this.rect.width,
+                            h: this.rect.height
+                        };
+                        this.canvas.remove(this.rect);
+                        this.setMode('select');
+                        if (typeof currentWorkspace !== 'undefined' && currentWorkspace.autoLabelRegion) {
+                            currentWorkspace.autoLabelRegion(region);
+                        }
+                    } else {
+                        this.sortBoxesByArea();
+                        // Auto-switch to select mode
+                        this.setMode('select');
+                        // Auto-select the new box
+                        this.canvas.setActiveObject(this.rect);
+                        this.onSelect({ selected: [this.rect] });
+                    }
                 }
                 this.rect = null;
             }
@@ -461,6 +527,14 @@ class Editor {
             }
         });
 
+        this.canvas.on('object:rotating', (e) => {
+            if (e.target && e.target.type === 'rect') {
+                const obj = e.target;
+                this.renderMagnifier(obj);
+                this.updateSelectionInfo(obj);
+            }
+        });
+
         // History Hooks and Visibility Updates
         this.canvas.on('object:added', (e) => {
             if (e.target && e.target.type === 'rect' && !this.historyProcessing) this.saveState();
@@ -514,77 +588,206 @@ class Editor {
                 ctx.restore();
             }
 
-            if (this.showSequenceNumbers) {
+            if (this.sequenceMode && this.sequenceMode !== 'none' && this.showBoxes) {
                 const ctx = opt.ctx || this.canvas.contextContainer;
                 if (!ctx) return;
 
                 ctx.save();
+                const rects = this.canvas.getObjects('rect').filter(r => 
+                    r.classId !== undefined && 
+                    r.classId !== null && 
+                    (this.focusClassId === null || r.classId === this.focusClassId)
+                );
 
-                const rects = this.canvas.getObjects('rect');
-                const rectsByClass = {};
-                rects.forEach(rect => {
-                    const cid = rect.classId;
-                    if (cid === undefined || cid === null) return;
-                    if (!rectsByClass[cid]) {
-                        rectsByClass[cid] = [];
+                const drawBadge = (numText, badgeColor, x, y, badgeTitle = null) => {
+                    ctx.font = 'bold 11px sans-serif';
+                    const textWidth = ctx.measureText(numText).width;
+                    const badgeHeight = 16;
+                    const badgeWidth = Math.max(badgeHeight, textWidth + 8);
+
+                    ctx.fillStyle = badgeColor;
+                    ctx.beginPath();
+                    const radius = 3;
+                    if (ctx.roundRect) {
+                        ctx.roundRect(x, y, badgeWidth, badgeHeight, radius);
+                    } else {
+                        ctx.rect(x, y, badgeWidth, badgeHeight);
                     }
-                    rectsByClass[cid].push(rect);
-                });
+                    ctx.fill();
 
-                Object.keys(rectsByClass).forEach(cid => {
-                    const classId = parseInt(cid);
-                    if (this.focusClassId !== null && classId !== this.focusClassId) {
-                        return;
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    let isLight = false;
+                    if (badgeColor.startsWith('#')) {
+                        const hex = badgeColor.substring(1);
+                        const r = parseInt(hex.substring(0, 2), 16);
+                        const g = parseInt(hex.substring(2, 4), 16);
+                        const b = parseInt(hex.substring(4, 6), 16);
+                        const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+                        if (brightness > 180) isLight = true;
                     }
-                    const list = rectsByClass[cid];
-                    // Sort top-to-bottom, then left-to-right
-                    list.sort((a, b) => a.top - b.top || a.left - b.left);
+                    ctx.fillStyle = isLight ? '#000000' : '#ffffff';
 
-                    const cls = this.classes.find(c => c.id === classId) || { color: '#00C2FF' };
-                    const badgeColor = cls.color;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(numText, x + badgeWidth / 2, y + badgeHeight / 2);
 
-                    list.forEach((rect, index) => {
-                        const bound = rect.getBoundingRect();
-                        const numText = (index + 1).toString();
-
+                    if (badgeTitle) {
+                        ctx.save();
                         ctx.font = 'bold 11px sans-serif';
-                        const textWidth = ctx.measureText(numText).width;
-                        const badgeHeight = 16;
-                        const badgeWidth = Math.max(badgeHeight, textWidth + 8);
+                        const titleWidth = ctx.measureText(badgeTitle).width;
+                        const titlePad = 6;
+                        const titleHeight = 18;
+                        const titleY = y - titleHeight - 4; // Margin bottom 4px
+                        
+                        // Shadow for a premium look
+                        ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+                        ctx.shadowBlur = 4;
+                        ctx.shadowOffsetX = 0;
+                        ctx.shadowOffsetY = 2;
 
-                        const x = bound.left;
-                        const y = bound.top;
-
-                        ctx.fillStyle = badgeColor;
+                        ctx.fillStyle = '#FF8C00'; // Vibrant Dark Orange
                         ctx.beginPath();
-                        const radius = 3;
                         if (ctx.roundRect) {
-                            ctx.roundRect(x, y, badgeWidth, badgeHeight, radius);
+                            ctx.roundRect(x, titleY, titleWidth + titlePad * 2, titleHeight, 4);
                         } else {
-                            ctx.rect(x, y, badgeWidth, badgeHeight);
+                            ctx.rect(x, titleY, titleWidth + titlePad * 2, titleHeight);
                         }
                         ctx.fill();
 
-                        ctx.strokeStyle = '#ffffff';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
+                        // Reset shadow for text
+                        ctx.shadowColor = 'transparent';
+                        ctx.shadowBlur = 0;
+                        
+                        ctx.fillStyle = '#ffffff';
+                        ctx.fillText(badgeTitle, x + titleWidth / 2 + titlePad, titleY + titleHeight / 2);
+                        ctx.restore();
+                    }
+                };
 
-                        let isLight = false;
-                        if (badgeColor.startsWith('#')) {
-                            const hex = badgeColor.substring(1);
-                            const r = parseInt(hex.substring(0, 2), 16);
-                            const g = parseInt(hex.substring(2, 4), 16);
-                            const b = parseInt(hex.substring(4, 6), 16);
-                            const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-                            if (brightness > 180) isLight = true;
-                        }
-                        ctx.fillStyle = isLight ? '#000000' : '#ffffff';
-
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.fillText(numText, x + badgeWidth / 2, y + badgeHeight / 2);
+                if (this.sequenceMode === 'class') {
+                    const rectsByClass = {};
+                    rects.forEach(rect => {
+                        const cid = rect.classId;
+                        if (!rectsByClass[cid]) rectsByClass[cid] = [];
+                        rectsByClass[cid].push(rect);
                     });
-                });
+
+                    Object.keys(rectsByClass).forEach(cid => {
+                        const classId = parseInt(cid);
+                        const list = rectsByClass[cid];
+                        list.sort((a, b) => a.top - b.top || a.left - b.left);
+                        const cls = this.classes.find(c => c.id === classId) || { color: '#00C2FF' };
+                        
+                        list.forEach((rect, index) => {
+                            const bound = rect.getBoundingRect();
+                            drawBadge((index + 1).toString(), cls.color, bound.left, bound.top);
+                        });
+                    });
+                } else if (this.sequenceMode === 'column') {
+                    // Thuật toán Graph-based Connected Components (Thành phần liên thông)
+                    const n = rects.length;
+                    const adj = Array.from({ length: n }, () => []);
+                    
+                    for (let i = 0; i < n; i++) {
+                        for (let j = i + 1; j < n; j++) {
+                            const r1 = rects[i];
+                            const r2 = rects[j];
+                            
+                            // Giao thoa trục X
+                            const minX1 = r1.left;
+                            const maxX1 = r1.left + r1.width;
+                            const minX2 = r2.left;
+                            const maxX2 = r2.left + r2.width;
+                            const overlapX = Math.max(0, Math.min(maxX1, maxX2) - Math.max(minX1, minX2));
+                            const overlapRatioX1 = overlapX / r1.width;
+                            const overlapRatioX2 = overlapX / r2.width;
+                            
+                            // Giao thoa trục Y
+                            const minY1 = r1.top;
+                            const maxY1 = r1.top + r1.height;
+                            const minY2 = r2.top;
+                            const maxY2 = r2.top + r2.height;
+                            const overlapY = Math.max(0, Math.min(maxY1, maxY2) - Math.max(minY1, minY2));
+                            const overlapRatioY1 = overlapY / r1.height;
+                            const overlapRatioY2 = overlapY / r2.height;
+                            
+                            // Điều kiện nối cạnh (chung cột):
+                            // 1. Giao thoa X > 30%
+                            // 2. KHÔNG giao thoa Y quá lớn (<= 50%) để tránh gộp các box nằm ngang hàng (cùng 1 row)
+                            if (Math.max(overlapRatioX1, overlapRatioX2) > 0.3) {
+                                if (Math.max(overlapRatioY1, overlapRatioY2) <= 0.5) {
+                                    adj[i].push(j);
+                                    adj[j].push(i);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Duyệt đồ thị tìm các Connected Components
+                    const visited = new Array(n).fill(false);
+                    const columns = [];
+                    
+                    for (let i = 0; i < n; i++) {
+                        if (!visited[i]) {
+                            const compRects = [];
+                            const queue = [i];
+                            visited[i] = true;
+                            
+                            while (queue.length > 0) {
+                                const curr = queue.shift();
+                                compRects.push(rects[curr]);
+                                
+                                for (const neighbor of adj[curr]) {
+                                    if (!visited[neighbor]) {
+                                        visited[neighbor] = true;
+                                        queue.push(neighbor);
+                                    }
+                                }
+                            }
+                            
+                            const minX = Math.min(...compRects.map(r => r.left));
+                            const maxX = Math.max(...compRects.map(r => r.left + r.width));
+                            columns.push({ rects: compRects, minX, maxX });
+                        }
+                    }
+                    
+                    columns.sort((a, b) => a.minX - b.minX);
+                    let globalIndex = 1;
+                    
+                    columns.forEach((col, colIndex) => {
+                        col.rects.sort((a, b) => a.top - b.top);
+                        
+                        // Optionally draw a column bounding box (like the image shows a big orange/green box)
+                        if (col.rects.length > 0) {
+                            const minY = Math.min(...col.rects.map(r => r.getBoundingRect().top));
+                            const maxY = Math.max(...col.rects.map(r => {
+                                const b = r.getBoundingRect();
+                                return b.top + b.height;
+                            }));
+                            // Subtle background fill
+                            ctx.fillStyle = 'rgba(255, 140, 0, 0.05)';
+                            ctx.fillRect(col.minX, minY, col.maxX - col.minX, maxY - minY);
+                            
+                            // Dashed vivid border
+                            ctx.strokeStyle = '#FF8C00'; // Dark Orange
+                            ctx.lineWidth = 2;
+                            ctx.setLineDash([6, 4]); // 6px dash, 4px gap
+                            ctx.strokeRect(col.minX, minY, col.maxX - col.minX, maxY - minY);
+                            ctx.setLineDash([]); // reset dash
+                        }
+
+                        col.rects.forEach((rect, idx) => {
+                            const bound = rect.getBoundingRect();
+                            const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
+                            const badgeTitle = idx === 0 ? `Col ${colIndex + 1}` : null;
+                            drawBadge(globalIndex.toString(), cls.color, bound.left, bound.top, badgeTitle);
+                            globalIndex++;
+                        });
+                    });
+                }
 
                 ctx.restore();
             }
@@ -680,11 +883,12 @@ class Editor {
         this.canvas.getObjects().forEach(obj => {
             if (obj.type !== 'rect') return;
 
-            // Fabric coords (top-left) to Normalized Center
-            const x_tl = obj.left;
-            const y_tl = obj.top;
-            const w = obj.width * obj.scaleX;
-            const h = obj.height * obj.scaleY;
+            // Fabric coords (top-left) to Normalized Center, handling rotation
+            const rect = obj.getBoundingRect(true);
+            const x_tl = rect.left;
+            const y_tl = rect.top;
+            const w = rect.width;
+            const h = rect.height;
 
             const cx = (x_tl + w / 2) / this.imageWidth;
             const cy = (y_tl + h / 2) / this.imageHeight;
@@ -748,27 +952,21 @@ class Editor {
                 // Dim or hide others
                 if (activeObjects.includes(obj)) {
                     obj.opacity = 1;
-                    obj.selectable = true;
-                    obj.evented = true;
+                    obj.selectable = this.showBoxes && (this.currentMode === 'select');
+                    obj.evented = this.showBoxes;
+                    obj.visible = this.showBoxes;
                 } else {
-                    obj.opacity = 0.05; // Ghost them instead of full hide? User asked to "hide all... to see trash".
-                    // User said "hide all... to look for trash" in prev request, but that was "Hide Image".
-                    // Now user says "hide keys outside selected bbox".
-                    // "ẩn tất cả bbox ngoài bbox đang được tôi chọn".
-                    // So fully hide or extremely faint.
-                    // Let's go with 0.1 opacity so user knows they exist but they don't clutter? 
-                    // Or 0 (invisible). 
-                    // "ẩn" implies invisible. But if invisible, user might create duplicate on top.
-                    // Let's set opacity 0 for now as requested.
                     obj.opacity = 0;
                     obj.selectable = false;
                     obj.evented = false;
+                    obj.visible = false;
                 }
             } else {
                 // Restore All
                 obj.opacity = 1;
-                obj.selectable = true;
-                obj.evented = true;
+                obj.selectable = this.showBoxes && (this.currentMode === 'select');
+                obj.evented = this.showBoxes;
+                obj.visible = this.showBoxes;
             }
         });
 
@@ -813,10 +1011,38 @@ class Editor {
         }
     }
 
-    toggleSequenceNumbers() {
-        this.showSequenceNumbers = !this.showSequenceNumbers;
+    setSequenceMode(mode) {
+        this.sequenceMode = mode;
         this.canvas.requestRenderAll();
-        return this.showSequenceNumbers;
+        return mode !== 'none';
+    }
+
+    toggleBoxesVisibility() {
+        this.showBoxes = !this.showBoxes;
+        if (!this.showBoxes && this.isIsolationMode) {
+            // Turn off isolation mode if we are hiding boxes
+            this.isIsolationMode = false;
+            const btn = document.getElementById('btnIsolate');
+            if (btn) {
+                btn.classList.remove('text-yellow-500');
+                btn.classList.add('text-gray-400');
+            }
+        }
+        this.canvas.forEachObject(obj => {
+            if (obj.type === 'rect') {
+                obj.set({
+                    visible: this.showBoxes,
+                    opacity: 1, // Reset opacity in case it was isolated
+                    evented: this.showBoxes,
+                    selectable: this.showBoxes && (this.currentMode === 'select')
+                });
+            }
+        });
+        if (!this.showBoxes) {
+            this.canvas.discardActiveObject();
+        }
+        this.canvas.requestRenderAll();
+        return this.showBoxes;
     }
 
     setActiveClass(id) {
