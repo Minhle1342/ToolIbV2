@@ -19,6 +19,7 @@ class Editor {
         this.rect = null;
         this.imageWidth = 0;
         this.imageHeight = 0;
+        this._loadSequence = 0; // Guard against stale image load callbacks
 
         // Undo/Redo API
         this.history = [];
@@ -151,6 +152,8 @@ class Editor {
             cornerColor: 'white',
             cornerSize: 8,
             classId: classId,
+            lockRotation: true,
+            hasRotatingPoint: false,
             visible: this.showBoxes,
             evented: this.showBoxes,
             selectable: this.showBoxes && (this.currentMode === 'select')

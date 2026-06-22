@@ -227,14 +227,23 @@ class Workspace {
         editor.canvas.clear();
         editor.loading = true;
 
+        // Increment load sequence to guard against stale callbacks
+        const loadSeq = ++editor._loadSequence;
+
         // 1. Get Labels first?
         const labels = await API.getLabel(image.id);
+
+        // Check if user already switched to another image
+        if (loadSeq !== editor._loadSequence) return;
 
         // 2. Load Image
         // We need to fetch image dimensions first or let Fabric handle it.
         // Fabric handles it.
 
         fabric.Image.fromURL(url, (img) => {
+            // GUARD: If the user clicked another image while this was loading, discard
+            if (loadSeq !== editor._loadSequence) return;
+
             if (!img) { 
                 editor.loading = false;
                 alert('Failed to load image'); 
