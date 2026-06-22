@@ -894,15 +894,18 @@ class Editor {
         this.canvas.getObjects().forEach(obj => {
             if (obj.type !== 'rect') return;
 
-            // Fabric coords (top-left) to Normalized Center, handling rotation
-            const rect = obj.getBoundingRect(true);
-            const x_tl = rect.left;
-            const y_tl = rect.top;
-            const w = rect.width;
-            const h = rect.height;
+            // IMPORTANT: Use calcTransformMatrix() to get ABSOLUTE canvas coords.
+            // getBoundingRect(true) returns WRONG coords when objects are inside
+            // an activeSelection group (multi-select), causing bounding box drift on save.
+            const matrix = obj.calcTransformMatrix();
+            const w = obj.width * obj.scaleX;
+            const h = obj.height * obj.scaleY;
 
-            const cx = (x_tl + w / 2) / this.imageWidth;
-            const cy = (y_tl + h / 2) / this.imageHeight;
+            // Transform center point (0,0 in object space) to absolute canvas coords
+            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+
+            const cx = center.x / this.imageWidth;
+            const cy = center.y / this.imageHeight;
             const nw = w / this.imageWidth;
             const nh = h / this.imageHeight;
 
