@@ -41,6 +41,7 @@ class Workspace {
             if (e.key.toLowerCase() === 'v') editor.setMode('select');
             if (e.key.toLowerCase() === 'r') editor.setMode('auto_label_region');
             if (e.key.toLowerCase() === 'f') this.toggleFlag();
+            if (e.key.toLowerCase() === 'g') this.toggleReview();
             if (e.key.toLowerCase() === 'l') this.toggleLockBox();
             if (e.key.toLowerCase() === 'h') this.toggleImageVisibility();
             if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
@@ -207,6 +208,7 @@ class Workspace {
 
         // Update Flag Button
         this.updateFlagButton();
+        this.updateReviewButton();
 
         // Load into Canvas
         // Image URL: We need a route to serve the raw image.
@@ -355,10 +357,51 @@ class Workspace {
         const btn = document.getElementById('btnFlag');
         if (currentImage.flag_status === 'Flagged') {
             btn.classList.add('text-red-500');
-            btn.classList.remove('text-gray-400');
+            btn.classList.remove('text-content-muted');
         } else {
             btn.classList.remove('text-red-500');
-            btn.classList.add('text-gray-400');
+            btn.classList.add('text-content-muted');
+        }
+    }
+
+    toggleReview() {
+        if (!currentImage) return;
+        currentImage.is_reviewed = !currentImage.is_reviewed;
+        this.updateReviewButton();
+        this.save(true);
+
+        // Update list icon
+        const el = document.getElementById(`img-${currentImage.id}`);
+        if (el) {
+            const iconContainer = el.querySelector('.flex.items-center.gap-2');
+            if (currentImage.is_reviewed) {
+                if (!iconContainer.querySelector('.fa-circle-check')) {
+                    iconContainer.insertAdjacentHTML('afterbegin', '<i class="fa-solid fa-circle-check text-green-500"></i>');
+                }
+            } else {
+                const icon = iconContainer.querySelector('.fa-circle-check');
+                if (icon) icon.remove();
+            }
+        }
+
+        // Update allImages cache
+        if (this.allImages) {
+            const localImg = this.allImages.find(i => i.id === currentImage.id);
+            if (localImg) localImg.is_reviewed = currentImage.is_reviewed;
+        }
+    }
+
+    updateReviewButton() {
+        const btn = document.getElementById('btnReview');
+        if (!btn) return;
+        if (currentImage && currentImage.is_reviewed) {
+            btn.classList.add('text-green-500');
+            btn.classList.remove('text-content-muted');
+            btn.querySelector('i').className = 'fa-solid fa-circle-check text-lg';
+        } else {
+            btn.classList.remove('text-green-500');
+            btn.classList.add('text-content-muted');
+            btn.querySelector('i').className = 'fa-regular fa-circle-check text-lg';
         }
     }
 
@@ -442,7 +485,8 @@ class Workspace {
                 image_id: currentImage.id,
                 labels: boxes,
                 flag_status: currentImage.flag_status,
-                split_type: currentImage.split_type
+                split_type: currentImage.split_type,
+                is_reviewed: currentImage.is_reviewed || false
             };
 
             await API.saveLabel(data);
@@ -1574,6 +1618,10 @@ async function loadImages(fetchFromServer = true) {
                 filters.is_labeled = 'true';
             } else if (flag === 'Unlabeled') {
                 filters.is_labeled = 'false';
+            } else if (flag === 'Reviewed') {
+                filters.is_reviewed = 'true';
+            } else if (flag === 'NotReviewed') {
+                filters.is_reviewed = 'false';
             } else {
                 filters.flag_status = flag;
             }
@@ -1613,9 +1661,10 @@ async function loadImages(fetchFromServer = true) {
             return `
             <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses}" 
                  id="img-${img.id}" 
-                 onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}'})">
+                 onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}', is_reviewed: ${img.is_reviewed || false}})">
                 <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
                 <div class="flex items-center gap-2">
+                    ${img.is_reviewed ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : ''}
                     ${img.flag_status === 'Flagged' ? '<i class="fa-solid fa-flag text-red-500"></i>' : ''}
                     ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}
                 </div>

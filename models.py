@@ -48,6 +48,7 @@ class Image(db.Model):
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     view_id = db.Column(db.Integer, db.ForeignKey('views.id'), nullable=True)
     is_labeled = db.Column(db.Boolean, default=False)
+    is_reviewed = db.Column(db.Boolean, default=False)
     flag_status = db.Column(db.String(20), default='Normal') # Normal, Review, Error
     split_type = db.Column(db.String(20), default='train') # train, val, test
     
@@ -63,6 +64,7 @@ class Image(db.Model):
             'project_id': self.project_id,
             'view_id': self.view_id,
             'is_labeled': self.is_labeled,
+            'is_reviewed': self.is_reviewed,
             'flag_status': self.flag_status,
             'split_type': self.split_type
         }

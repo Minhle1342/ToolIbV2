@@ -53,6 +53,8 @@
                         class="w-full bg-surface border border-border text-sm rounded px-2 py-1 text-content">
                         <option value="" data-i18n="filter_all_status">All Status</option>
                         <option value="Flagged" data-i18n="filter_flagged">Flagged</option>
+                        <option value="Reviewed" data-i18n="filter_reviewed">Reviewed</option>
+                        <option value="NotReviewed" data-i18n="filter_not_reviewed">Not Reviewed</option>
                         <option value="Labeled" data-i18n="filter_labeled">Đã có Bounding Box</option>
                         <option value="Unlabeled" data-i18n="filter_unlabeled">Chưa có Bounding Box</option>
                     </select>
@@ -184,6 +186,10 @@
             <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel"
                 onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)" data-i18n-title="tool_flag">
                 <i class="fa-regular fa-flag text-lg"></i>
+            </button>
+            <button class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel"
+                onclick="currentWorkspace.toggleReview()" id="btnReview" title="Mark as Reviewed (G)">
+                <i class="fa-regular fa-circle-check text-lg"></i>
             </button>
             <div class="flex items-center gap-1.5 ml-3 mr-1 select-none">
                 <input type="checkbox" id="autoSaveToggle" class="rounded border-border bg-panel text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer" onchange="currentWorkspace.toggleAutoSave(this.checked)">

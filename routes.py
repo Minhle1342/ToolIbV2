@@ -261,6 +261,13 @@ def get_images():
         elif is_labeled.lower() == 'false':
             query = query.filter_by(is_labeled=False)
     
+    is_reviewed = request.args.get('is_reviewed')
+    if is_reviewed is not None:
+        if is_reviewed.lower() == 'true':
+            query = query.filter_by(is_reviewed=True)
+        elif is_reviewed.lower() == 'false':
+            query = query.filter_by(is_reviewed=False)
+    
     # Pagination could be added here
     images = query.all()
     result = []
@@ -288,6 +295,8 @@ def save_label():
         image.flag_status = data['flag_status']
     if 'split_type' in data:
         image.split_type = data['split_type']
+    if 'is_reviewed' in data:
+        image.is_reviewed = data['is_reviewed']
     
     db.session.commit()
     return jsonify({'message': 'Saved successfully'})
