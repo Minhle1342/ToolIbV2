@@ -105,6 +105,41 @@ class startAPI {
         const res = await fetch(`/api/projects/${projectId}/assign-stats`);
         return await res.json();
     }
+
+    async collectCrop(data) {
+        const res = await fetch('/api/collect-crop', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
+
+    async collectCropBatch(data) {
+        const res = await fetch('/api/collect-crop/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
+
+    async getCollectStats() {
+        const res = await fetch('/api/collect-crops/stats');
+        return await res.json();
+    }
+
+    async deleteCollectedClass(className) {
+        const res = await fetch(`/api/collect-crops/${encodeURIComponent(className)}`, {
+            method: 'DELETE'
+        });
+        return await res.json();
+    }
+
+    async getCollectedPreview(className) {
+        const res = await fetch(`/api/collect-crops/preview/${encodeURIComponent(className)}`);
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

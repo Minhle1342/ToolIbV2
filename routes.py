@@ -5,25 +5,37 @@ import flask
 from models import db, Project, View, Image, AIModel
 import os
 import utils
-from inference import YOLOInference
+from inference import YOLOInference, ClassificationInference
 
-# Initialize Inference Engine
+# Initialize Inference Engines
 inference_engine = None
+classifier_engine = None
 
 def get_inference_engine():
     global inference_engine
     if inference_engine is None:
-        active_model = AIModel.query.filter_by(is_active=True).first()
+        active_model = AIModel.query.filter_by(is_active=True, model_type='detection').first()
         if active_model:
             model_path = os.path.join(os.getcwd(), 'models', active_model.filename)
             if os.path.exists(model_path):
                 inference_engine = YOLOInference(model_path)
         else:
-            # Fallback to default if no active model is set
+            # Fallback to default if no active detection model is set
             model_path = os.path.join(os.getcwd(), 'models', 'yolo12s.onnx')
             if os.path.exists(model_path):
                 inference_engine = YOLOInference(model_path)
     return inference_engine
+
+def get_classifier_engine():
+    global classifier_engine
+    if classifier_engine is None:
+        active_cls_model = AIModel.query.filter_by(is_active=True, model_type='classification').first()
+        if active_cls_model:
+            model_path = os.path.join(os.getcwd(), 'models', active_cls_model.filename)
+            if os.path.exists(model_path):
+                classifier_engine = ClassificationInference(model_path)
+    return classifier_engine
+
 
 
 api_bp = Blueprint('api', __name__)
@@ -427,8 +439,288 @@ def auto_label(image_id):
     
     if 'error' in result:
         return jsonify(result), 400
+    
+    # --- Classifier re-labeling ---
+    # If a classifier is active, crop each detected box and re-classify
+    classifier = get_classifier_engine()
+    if classifier and result.get('success') and result.get('boxes'):
+        import cv2, sys
+        sys.stderr.write(f"[AutoLabel] Classifier ACTIVE - Re-classifying {len(result['boxes'])} boxes...\n")
+        sys.stderr.flush()
+        img = cv2.imread(image_path)
+        if img is not None:
+            img_h, img_w = img.shape[:2]
+            
+            for i, box in enumerate(result['boxes']):
+                # Convert normalized center coords to pixel coords
+                cx, cy, bw, bh = box['x'], box['y'], box['w'], box['h']
+                xmin = int((cx - bw / 2) * img_w)
+                ymin = int((cy - bh / 2) * img_h)
+                xmax = int((cx + bw / 2) * img_w)
+                ymax = int((cy + bh / 2) * img_h)
+                
+                # Clip to image boundaries
+                xmin = max(0, xmin)
+                ymin = max(0, ymin)
+                xmax = min(img_w, xmax)
+                ymax = min(img_h, ymax)
+                
+                if xmin >= xmax or ymin >= ymax:
+                    continue
+                
+                crop = img[ymin:ymax, xmin:xmax]
+                cls_result = classifier.predict(crop)
+                
+                if 'error' not in cls_result:
+                    old_class_id = box['class_id']
+                    box['class_id'] = cls_result['class_id']
+                    box['cls_confidence'] = cls_result['confidence']
+                    box['cls_class_name'] = cls_result['class_name']
+                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {cls_result['class_name']} ({cls_result['confidence']*100:.1f}%)\n")
+            sys.stderr.flush()
+        sys.stderr.write(f"[AutoLabel] Classifier done.\n")
+        sys.stderr.flush()
+    elif not classifier:
+        import sys
+        sys.stderr.write(f"[AutoLabel] No Classifier active - using YOLO classes only.\n")
+        sys.stderr.flush()
         
     return jsonify(result)
+
+# ============================================================
+# Crop & Collect for Classifier Retraining
+# ============================================================
+
+CROPS_DIR = os.path.join(os.getcwd(), 'classification_crops')
+
+@api_bp.route('/collect-crop', methods=['POST'])
+def collect_crop():
+    """Crop a bounding box region from an image and save it for classifier retraining."""
+    import cv2
+    from datetime import datetime as dt
+    
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    image_id = data.get('image_id')
+    box = data.get('box')  # {x, y, w, h} in YOLO normalized format
+    class_name = data.get('class_name', '').strip()
+    
+    if not image_id or not box or not class_name:
+        return jsonify({'error': 'image_id, box, and class_name are required'}), 400
+    
+    image = Image.query.get_or_404(image_id)
+    project = Project.query.get(image.project_id)
+    image_path = os.path.join(project.root_path, image.filename)
+    
+    img = cv2.imread(image_path)
+    if img is None:
+        return jsonify({'error': f'Could not load image: {image_path}'}), 400
+    
+    img_h, img_w = img.shape[:2]
+    
+    # Convert YOLO normalized to pixel coords
+    cx, cy, bw, bh = float(box['x']), float(box['y']), float(box['w']), float(box['h'])
+    xmin = int(max(0, (cx - bw / 2) * img_w))
+    ymin = int(max(0, (cy - bh / 2) * img_h))
+    xmax = int(min(img_w, (cx + bw / 2) * img_w))
+    ymax = int(min(img_h, (cy + bh / 2) * img_h))
+    
+    if xmin >= xmax or ymin >= ymax:
+        return jsonify({'error': 'Invalid bounding box dimensions'}), 400
+    
+    crop = img[ymin:ymax, xmin:xmax]
+    
+    # Save to classification_crops/<class_name>/
+    class_dir = os.path.join(CROPS_DIR, class_name)
+    os.makedirs(class_dir, exist_ok=True)
+    
+    timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+    # Use image filename stem + timestamp for uniqueness
+    img_stem = os.path.splitext(image.filename)[0].replace('/', '_').replace('\\', '_')
+    crop_filename = f"crop_{img_stem}_{timestamp}_{len(os.listdir(class_dir)):04d}.jpg"
+    crop_path = os.path.join(class_dir, crop_filename)
+    
+    cv2.imwrite(crop_path, crop)
+    
+    # Count total crops for this class
+    total_class = len([f for f in os.listdir(class_dir) if f.endswith(('.jpg', '.png', '.jpeg'))])
+    
+    return jsonify({
+        'success': True,
+        'class_name': class_name,
+        'filename': crop_filename,
+        'total_class_crops': total_class
+    })
+
+@api_bp.route('/collect-crop/batch', methods=['POST'])
+def collect_crop_batch():
+    """Crop all bounding boxes from an image and save them for classifier retraining."""
+    import cv2
+    from datetime import datetime as dt
+    
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+    
+    image_id = data.get('image_id')
+    boxes = data.get('boxes')  # [{class_name, x, y, w, h}, ...]
+    
+    if not image_id or not boxes:
+        return jsonify({'error': 'image_id and boxes are required'}), 400
+    
+    image = Image.query.get_or_404(image_id)
+    project = Project.query.get(image.project_id)
+    image_path = os.path.join(project.root_path, image.filename)
+    
+    img = cv2.imread(image_path)
+    if img is None:
+        return jsonify({'error': f'Could not load image: {image_path}'}), 400
+    
+    img_h, img_w = img.shape[:2]
+    timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
+    img_stem = os.path.splitext(image.filename)[0].replace('/', '_').replace('\\', '_')
+    
+    collected = 0
+    for i, box in enumerate(boxes):
+        class_name = box.get('class_name', '').strip()
+        if not class_name:
+            continue
+        
+        cx, cy, bw, bh = float(box['x']), float(box['y']), float(box['w']), float(box['h'])
+        xmin = int(max(0, (cx - bw / 2) * img_w))
+        ymin = int(max(0, (cy - bh / 2) * img_h))
+        xmax = int(min(img_w, (cx + bw / 2) * img_w))
+        ymax = int(min(img_h, (cy + bh / 2) * img_h))
+        
+        if xmin >= xmax or ymin >= ymax:
+            continue
+        
+        crop = img[ymin:ymax, xmin:xmax]
+        
+        class_dir = os.path.join(CROPS_DIR, class_name)
+        os.makedirs(class_dir, exist_ok=True)
+        
+        count = len(os.listdir(class_dir))
+        crop_filename = f"crop_{img_stem}_{timestamp}_{count:04d}_box{i}.jpg"
+        cv2.imwrite(os.path.join(class_dir, crop_filename), crop)
+        collected += 1
+    
+    return jsonify({
+        'success': True,
+        'collected': collected,
+        'total_boxes': len(boxes)
+    })
+
+@api_bp.route('/collect-crops/stats', methods=['GET'])
+def collect_crops_stats():
+    """Get statistics about collected crops."""
+    stats = {}
+    total = 0
+    
+    if os.path.exists(CROPS_DIR):
+        for class_name in sorted(os.listdir(CROPS_DIR)):
+            class_dir = os.path.join(CROPS_DIR, class_name)
+            if os.path.isdir(class_dir):
+                count = len([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
+                if count > 0:
+                    stats[class_name] = count
+                    total += count
+    
+    return jsonify({
+        'stats': stats,
+        'total': total,
+        'crops_dir': CROPS_DIR
+    })
+
+@api_bp.route('/collect-crops/export', methods=['POST'])
+def collect_crops_export():
+    """Export collected crops as a zip file organized into train/val splits."""
+    import zipfile
+    import random
+    import tempfile
+    
+    if not os.path.exists(CROPS_DIR):
+        return jsonify({'error': 'No crops collected yet'}), 400
+    
+    data = request.json or {}
+    val_ratio = data.get('val_ratio', 0.2)
+    
+    # Create zip in temp
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', prefix='cls_crops_')
+    tmp_path = tmp.name
+    tmp.close()
+    
+    try:
+        with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Write class_mapping.json
+            mapping_src = os.path.join(os.getcwd(), 'models', 'class_mapping.json')
+            if os.path.exists(mapping_src):
+                zf.write(mapping_src, 'class_mapping.json')
+            
+            for class_name in sorted(os.listdir(CROPS_DIR)):
+                class_dir = os.path.join(CROPS_DIR, class_name)
+                if not os.path.isdir(class_dir):
+                    continue
+                
+                files = [f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+                if not files:
+                    continue
+                
+                random.shuffle(files)
+                split_idx = max(1, int(len(files) * (1 - val_ratio)))
+                
+                train_files = files[:split_idx]
+                val_files = files[split_idx:]
+                
+                for f in train_files:
+                    zf.write(os.path.join(class_dir, f), f'train/{class_name}/{f}')
+                for f in val_files:
+                    zf.write(os.path.join(class_dir, f), f'val/{class_name}/{f}')
+        
+        return flask.send_file(tmp_path, as_attachment=True, download_name='classification_crops.zip', mimetype='application/zip')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/collect-crops/<class_name>', methods=['DELETE'])
+def delete_collected_class(class_name):
+    """Delete all collected crops for a specific class."""
+    import shutil
+    class_dir = os.path.join(CROPS_DIR, class_name)
+    
+    if not os.path.exists(class_dir):
+        return jsonify({'error': f'Class "{class_name}" not found in collected crops'}), 404
+    
+    count = len([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
+    shutil.rmtree(class_dir)
+    
+    return jsonify({'success': True, 'deleted_count': count, 'class_name': class_name})
+
+@api_bp.route('/collect-crops/preview/<class_name>', methods=['GET'])
+def preview_collected_class(class_name):
+    """Return a list of crop image paths for preview."""
+    class_dir = os.path.join(CROPS_DIR, class_name)
+    
+    if not os.path.exists(class_dir):
+        return jsonify({'error': f'Class "{class_name}" not found'}), 404
+    
+    files = sorted([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
+    
+    # Return only last 50 for preview
+    files = files[-50:]
+    
+    return jsonify({
+        'class_name': class_name,
+        'files': files,
+        'total': len(os.listdir(class_dir))
+    })
+
+@api_bp.route('/collect-crops/serve/<class_name>/<filename>')
+def serve_collected_crop(class_name, filename):
+    """Serve a collected crop image."""
+    class_dir = os.path.join(CROPS_DIR, class_name)
+    return flask.send_from_directory(class_dir, filename)
 
 @api_bp.route('/progress', methods=['GET'])
 def get_progress():
@@ -556,6 +848,7 @@ def add_model():
     try:
         name = request.form.get('name', '').strip()
         description = request.form.get('description', '').strip()
+        model_type = request.form.get('model_type', 'detection').strip()
         
         if 'file' not in request.files:
             return jsonify({'error': 'Không tìm thấy file model tải lên.'}), 400
@@ -582,10 +875,17 @@ def add_model():
         file_path = os.path.join(models_dir, filename)
         file.save(file_path)
         
+        # Also save class_mapping.json if uploaded (for classification models)
+        mapping_file = request.files.get('mapping_file')
+        if mapping_file and mapping_file.filename:
+            mapping_path = os.path.join(models_dir, 'class_mapping.json')
+            mapping_file.save(mapping_path)
+        
         new_model = AIModel(
             name=name,
             description=description,
-            filename=filename
+            filename=filename,
+            model_type=model_type
         )
         # If it's the first model, make it active
         if AIModel.query.count() == 0:
@@ -607,17 +907,29 @@ def update_model(model_id):
             name = data.get('name', '').strip()
             description = data.get('description', '')
             filename_val = data.get('filename', '').strip()
+            model_type = data.get('model_type', '').strip()
             file_uploaded = None
         else:
             name = request.form.get('name', '').strip()
             description = request.form.get('description', '')
             file_uploaded = request.files.get('file')
             filename_val = None
+            model_type = request.form.get('model_type', '').strip()
+            
+            # Save class_mapping.json if uploaded
+            mapping_file = request.files.get('mapping_file')
+            if mapping_file and mapping_file.filename:
+                models_dir = os.path.join(os.getcwd(), 'models')
+                os.makedirs(models_dir, exist_ok=True)
+                mapping_path = os.path.join(models_dir, 'class_mapping.json')
+                mapping_file.save(mapping_path)
             
         if name:
             m.name = name
         if description is not None:
             m.description = description
+        if model_type:
+            m.model_type = model_type
             
         if file_uploaded:
             if not file_uploaded.filename.endswith('.onnx'):
@@ -658,11 +970,16 @@ def delete_model(model_id):
     m = AIModel.query.get_or_404(model_id)
     try:
         was_active = m.is_active
+        was_type = m.model_type
         db.session.delete(m)
         db.session.commit()
         if was_active:
-            global inference_engine
-            inference_engine = None
+            if was_type == 'classification':
+                global classifier_engine
+                classifier_engine = None
+            else:
+                global inference_engine
+                inference_engine = None
         return jsonify({'message': 'Deleted'})
     except Exception as e:
         db.session.rollback()
@@ -672,13 +989,18 @@ def delete_model(model_id):
 def activate_model(model_id):
     m = AIModel.query.get_or_404(model_id)
     try:
-        # Deactivate all
-        AIModel.query.update({AIModel.is_active: False})
+        # Deactivate only models of the same type (detection OR classification)
+        # This allows YOLO and Classifier to be active simultaneously
+        AIModel.query.filter_by(model_type=m.model_type).update({AIModel.is_active: False})
         m.is_active = True
         db.session.commit()
-        # Reset inference engine
-        global inference_engine
-        inference_engine = None
+        # Reset the appropriate engine
+        if m.model_type == 'classification':
+            global classifier_engine
+            classifier_engine = None
+        else:
+            global inference_engine
+            inference_engine = None
         return jsonify(m.to_dict())
     except Exception as e:
         db.session.rollback()

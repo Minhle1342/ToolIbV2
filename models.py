@@ -75,6 +75,7 @@ class AIModel(db.Model):
     description = db.Column(db.String(500), nullable=True)
     filename = db.Column(db.String(200), nullable=False, unique=True)
     is_active = db.Column(db.Boolean, default=False)
+    model_type = db.Column(db.String(50), default='detection') # 'detection' or 'classification'
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def to_dict(self):
@@ -84,5 +85,6 @@ class AIModel(db.Model):
             'description': self.description,
             'filename': self.filename,
             'is_active': self.is_active,
+            'model_type': self.model_type,
             'created_at': self.created_at.isoformat()
         }

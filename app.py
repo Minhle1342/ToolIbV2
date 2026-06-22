@@ -49,4 +49,13 @@ if __name__ == '__main__':
     app = create_app()
     with app.app_context():
         db.create_all()  # Create tables if they don't exist
+        
+        # Safely upgrade existing db to add model_type if it doesn't exist
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE ai_models ADD COLUMN model_type VARCHAR(50) DEFAULT 'detection'"))
+                conn.commit()
+        except Exception:
+            pass # Column already exists
     app.run(debug=True, host='0.0.0.0', port=5000, threaded=True)

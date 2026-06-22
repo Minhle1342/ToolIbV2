@@ -158,6 +158,11 @@
 
             <div class="w-px h-6 bg-border mx-2"></div>
 
+            <button id="btnCollectAll" class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
+                title="Collect all box crops for classifier retraining" onclick="currentWorkspace.collectAllBoxes()">
+                <i class="fa-solid fa-scissors text-lg"></i>
+            </button>
+
             <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
                 onclick="editor.zoomIn()">
                 <i class="fa-solid fa-magnifying-glass-plus"></i>
@@ -229,6 +234,10 @@
             <button class="w-full mt-3 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs py-1.5 rounded hidden"
                 id="btnDeleteBox" onclick="editor.deleteSelected()" data-i18n="delete_box">
                 Delete Box (Del/Q)
+            </button>
+            <button class="w-full mt-2 bg-amber-700/50 hover:bg-amber-700 text-amber-200 text-xs py-1.5 rounded hidden flex items-center justify-center gap-1.5"
+                id="btnCollectCrop" onclick="currentWorkspace.collectCrop()" title="Collect this crop for classifier retraining">
+                <i class="fa-solid fa-scissors"></i> Collect Crop
             </button>
         </div>
 

@@ -512,6 +512,133 @@ class Workspace {
         }, 1200); // 1.2s debounce
     }
 
+    async collectCrop() {
+        if (!currentImage) return;
+
+        const selectedBoxes = editor.getSelectedBoxesInfo();
+        if (!selectedBoxes || selectedBoxes.length === 0) {
+            alert('Please select a bounding box first.');
+            return;
+        }
+
+        const btn = document.getElementById('btnCollectCrop');
+        let originalHtml = '';
+        if (btn) {
+            originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Collecting...';
+            btn.disabled = true;
+        }
+
+        try {
+            if (selectedBoxes.length === 1) {
+                // Single box — use single API for detailed feedback
+                const boxInfo = selectedBoxes[0];
+                const result = await API.collectCrop({
+                    image_id: currentImage.id,
+                    box: { x: boxInfo.x, y: boxInfo.y, w: boxInfo.w, h: boxInfo.h },
+                    class_name: boxInfo.class_name
+                });
+
+                if (result.success) {
+                    this.showToast(`Collected: ${result.class_name} (total: ${result.total_class_crops})`, 'success');
+                } else {
+                    alert(result.error || 'Failed to collect crop');
+                }
+            } else {
+                // Multiple boxes — use batch API
+                const result = await API.collectCropBatch({
+                    image_id: currentImage.id,
+                    boxes: selectedBoxes
+                });
+
+                if (result.success) {
+                    this.showToast(`Collected ${result.collected}/${result.total_boxes} selected crops`, 'success');
+                } else {
+                    alert(result.error || 'Failed to collect crops');
+                }
+            }
+
+            if (btn) {
+                btn.innerHTML = '<i class="fa-solid fa-check"></i> Collected!';
+                btn.classList.add('bg-green-600');
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.remove('bg-green-600');
+                    btn.disabled = false;
+                }, 1200);
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+            if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
+        }
+    }
+
+    async collectAllBoxes() {
+        if (!currentImage) return;
+
+        const boxes = editor.getAllBoxesWithClassNames();
+        if (!boxes || boxes.length === 0) {
+            alert('No bounding boxes on current image.');
+            return;
+        }
+
+        if (!confirm(`Collect crops for all ${boxes.length} boxes on this image?`)) {
+            return;
+        }
+
+        const btn = document.getElementById('btnCollectAll');
+        let originalHtml = '';
+        if (btn) {
+            originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            btn.disabled = true;
+        }
+
+        try {
+            const result = await API.collectCropBatch({
+                image_id: currentImage.id,
+                boxes: boxes
+            });
+
+            if (result.success) {
+                this.showToast(`Collected ${result.collected}/${result.total_boxes} crops`, 'success');
+            } else {
+                alert(result.error || 'Failed to collect crops');
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+        } finally {
+            if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
+        }
+    }
+
+    showToast(message, type = 'info') {
+        // Create a floating toast notification
+        const toast = document.createElement('div');
+        const bgColor = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+        toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${bgColor} text-white px-5 py-2.5 rounded-lg shadow-2xl text-sm font-medium z-[9999] transition-all duration-300 flex items-center gap-2`;
+        
+        const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info';
+        toast.innerHTML = `<i class="fa-solid ${icon}"></i> ${message}`;
+        
+        document.body.appendChild(toast);
+        
+        // Animate in
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(20px)';
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(-50%) translateY(0)';
+        });
+        
+        // Auto remove after 3s
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(-50%) translateY(20px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
     async autoLabel() {
         if (!currentImage) return;
 

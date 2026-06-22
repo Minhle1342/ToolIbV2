@@ -5,3 +5,4 @@ uploads/
 exported_dataset/
 models/
 yolo_labeling.db
+classification_crops/

@@ -1,4 +1,5 @@
 import os
+import json
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -205,3 +206,104 @@ class YOLOInference:
                 })
                 
         return {'success': True, 'boxes': results}
+
+
+class ClassificationInference:
+    """Inference engine for classification ONNX models (e.g. EfficientNet).
+    
+    Expects a class_mapping.json file next to the .onnx file with format:
+    {"0": "ClassName0", "1": "ClassName1", ...}
+    """
+    
+    # ImageNet normalization (must match training pipeline)
+    MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    
+    def __init__(self, model_path, mapping_path=None):
+        self.model_path = model_path
+        self.session = None
+        self.input_name = None
+        self.input_size = 224  # Default, will try to read from model
+        self.class_names = {}
+        
+        # Load class mapping
+        if mapping_path is None:
+            # Look for class_mapping.json next to the onnx file
+            mapping_path = os.path.join(os.path.dirname(model_path), 'class_mapping.json')
+        
+        if os.path.exists(mapping_path):
+            with open(mapping_path, 'r', encoding='utf-8') as f:
+                self.class_names = json.load(f)
+            print(f"[Classifier] Loaded {len(self.class_names)} classes from {mapping_path}")
+        else:
+            print(f"[Classifier] Warning: class_mapping.json not found at {mapping_path}")
+        
+        self._load_session()
+    
+    def _load_session(self):
+        if not os.path.exists(self.model_path):
+            print(f"[Classifier] Model file not found: {self.model_path}")
+            return
+            
+        try:
+            self.session = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
+            self.input_name = self.session.get_inputs()[0].name
+            
+            # Try to get input size from model
+            try:
+                input_shape = self.session.get_inputs()[0].shape
+                if len(input_shape) == 4:
+                    h = input_shape[2]
+                    if isinstance(h, int) and h > 0:
+                        self.input_size = h
+            except Exception:
+                pass
+                
+            print(f"[Classifier] Loaded model: {self.model_path} (input: {self.input_size}x{self.input_size})")
+        except Exception as e:
+            print(f"[Classifier] Error loading model: {e}")
+    
+    def predict(self, crop_bgr):
+        """Classify a cropped BGR image (numpy array).
+        
+        Args:
+            crop_bgr: numpy array in BGR format (as returned by cv2.imread or array slicing)
+            
+        Returns:
+            dict with 'class_id', 'class_name', 'confidence'
+        """
+        if self.session is None:
+            return {'error': 'Classifier model not loaded'}
+        
+        # Resize
+        img = cv2.resize(crop_bgr, (self.input_size, self.input_size))
+        
+        # BGR -> RGB, float32, normalize to 0-1
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255.0
+        
+        # ImageNet normalization
+        img = (img - self.MEAN) / self.STD
+        
+        # HWC -> CHW, add batch dimension
+        img = img.transpose(2, 0, 1)
+        img = np.expand_dims(img, axis=0)
+        
+        # Run inference
+        outputs = self.session.run(None, {self.input_name: img})
+        logits = outputs[0][0]  # Shape: (num_classes,)
+        
+        # Softmax
+        exp_logits = np.exp(logits - np.max(logits))
+        probs = exp_logits / exp_logits.sum()
+        
+        class_id = int(np.argmax(probs))
+        confidence = float(probs[class_id])
+        class_name = self.class_names.get(str(class_id), f"Class_{class_id}")
+        
+        return {
+            'class_id': class_id,
+            'class_name': class_name,
+            'confidence': confidence
+        }
+

@@ -834,6 +834,8 @@ class Editor {
             </div>
         `;
         document.getElementById('btnDeleteBox').style.display = 'block';
+        const btnCollect = document.getElementById('btnCollectCrop');
+        if (btnCollect) btnCollect.style.display = 'flex';
 
         // Update Lock Button State
         const btnLock = document.getElementById('btnLock');
@@ -853,6 +855,8 @@ class Editor {
     onDeselect() {
         document.getElementById('selectionInfo').innerHTML = 'Nothing selected';
         document.getElementById('btnDeleteBox').style.display = 'none';
+        const btnCollect = document.getElementById('btnCollectCrop');
+        if (btnCollect) btnCollect.style.display = 'none';
 
         const magCanvas = document.getElementById('magnifierCanvas');
         const magPlaceholder = document.getElementById('magPlaceholder');
@@ -897,6 +901,70 @@ class Editor {
 
             boxes.push({
                 class_id: obj.classId,
+                x: cx,
+                y: cy,
+                w: nw,
+                h: nh
+            });
+        });
+        return boxes;
+    }
+
+    getSelectedBoxesInfo() {
+        // Get info about ALL currently selected boxes (supports Ctrl+click multi-select)
+        const activeObjects = this.canvas.getActiveObjects();
+        if (!activeObjects || activeObjects.length === 0) return [];
+
+        const results = [];
+        activeObjects.forEach(obj => {
+            if (obj.type !== 'rect') return;
+
+            // IMPORTANT: When objects are in an activeSelection (multi-select),
+            // getBoundingRect() returns RELATIVE coords within the group.
+            // We must use calcTransformMatrix() to get ABSOLUTE canvas coords.
+            const matrix = obj.calcTransformMatrix();
+            const w = obj.width * obj.scaleX;
+            const h = obj.height * obj.scaleY;
+
+            // Transform the center point (0,0 in object space) to absolute coords
+            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+
+            const cx = center.x / this.imageWidth;
+            const cy = center.y / this.imageHeight;
+            const nw = w / this.imageWidth;
+            const nh = h / this.imageHeight;
+
+            const cls = this.classes.find(c => c.id === obj.classId);
+
+            results.push({
+                class_id: obj.classId,
+                class_name: cls ? cls.name : `Class_${obj.classId}`,
+                x: cx,
+                y: cy,
+                w: nw,
+                h: nh
+            });
+        });
+        return results;
+    }
+
+    getAllBoxesWithClassNames() {
+        // Get all boxes with class names (for batch collect)
+        const boxes = [];
+        this.canvas.getObjects().forEach(obj => {
+            if (obj.type !== 'rect') return;
+
+            const rect = obj.getBoundingRect(true);
+            const cx = (rect.left + rect.width / 2) / this.imageWidth;
+            const cy = (rect.top + rect.height / 2) / this.imageHeight;
+            const nw = rect.width / this.imageWidth;
+            const nh = rect.height / this.imageHeight;
+
+            const cls = this.classes.find(c => c.id === obj.classId);
+
+            boxes.push({
+                class_id: obj.classId,
+                class_name: cls ? cls.name : `Class_${obj.classId}`,
                 x: cx,
                 y: cy,
                 w: nw,
