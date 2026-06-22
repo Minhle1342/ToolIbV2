@@ -3,6 +3,7 @@ import json
 import cv2
 import numpy as np
 import onnxruntime as ort
+import utils
 
 class YOLOInference:
     def __init__(self, model_path):
@@ -50,7 +51,7 @@ class YOLOInference:
             target_size = (self.input_width, self.input_height)
         # Load image
         if img is None:
-            img = cv2.imread(image_path)
+            img = utils.imread_with_exif(image_path)
             if img is None:
                 raise ValueError(f"Could not load image: {image_path}")
 
@@ -72,7 +73,7 @@ class YOLOInference:
         if not self.session:
             return {'error': f'Model not found at {self.model_path}. Please ensure the file exists.'}
 
-        img = cv2.imread(image_path)
+        img = utils.imread_with_exif(image_path)
         if img is None:
             return {'error': f"Could not load image: {image_path}"}
             

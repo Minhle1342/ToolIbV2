@@ -456,7 +456,7 @@ def auto_label(image_id):
         import cv2, sys
         sys.stderr.write(f"[AutoLabel] Classifier ACTIVE - Re-classifying {len(result['boxes'])} boxes...\n")
         sys.stderr.flush()
-        img = cv2.imread(image_path)
+        img = utils.imread_with_exif(image_path)
         if img is not None:
             img_h, img_w = img.shape[:2]
             
@@ -520,7 +520,7 @@ def classify_boxes():
     project = Project.query.get(image.project_id)
     image_path = os.path.join(project.root_path, image.filename)
     
-    img = cv2.imread(image_path)
+    img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
         
@@ -577,7 +577,7 @@ def collect_crop():
     project = Project.query.get(image.project_id)
     image_path = os.path.join(project.root_path, image.filename)
     
-    img = cv2.imread(image_path)
+    img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
     
@@ -637,7 +637,7 @@ def collect_crop_batch():
     project = Project.query.get(image.project_id)
     image_path = os.path.join(project.root_path, image.filename)
     
-    img = cv2.imread(image_path)
+    img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
     
@@ -1102,7 +1102,7 @@ def test_models():
                         
                         if pred.get('success') and 'boxes' in pred:
                             import cv2
-                            img = cv2.imread(temp_path)
+                            img = utils.imread_with_exif(temp_path)
                             img_h, img_w = img.shape[:2]
                             
                             predictions = []

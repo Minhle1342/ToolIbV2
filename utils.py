@@ -1,15 +1,53 @@
 import os
 import glob
-from models import db, Image, Project
-
-import os
-import glob
 import shutil
 import yaml
 import random
 from models import db, Image, Project, View
 
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    cv2 = None
+    np = None
+
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp'}
+
+
+def imread_with_exif(image_path, flags=None):
+    """
+    Read an image with cv2 and apply EXIF orientation correction.
+    This ensures the image orientation matches what modern browsers display,
+    preventing bounding box drift for portrait/rotated photos.
+    """
+    if flags is not None:
+        img = cv2.imread(image_path, flags)
+    else:
+        img = cv2.imread(image_path)
+
+    if img is None:
+        return None
+
+    # Try to read EXIF orientation and rotate accordingly
+    try:
+        from PIL import Image as PILImage
+        pil_img = PILImage.open(image_path)
+        exif = pil_img.getexif()
+        orientation = exif.get(274)  # 274 = Orientation tag
+
+        if orientation == 3:       # 180 degrees
+            img = cv2.rotate(img, cv2.ROTATE_180)
+        elif orientation == 6:     # 90 degrees CW (portrait)
+            img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        elif orientation == 8:     # 90 degrees CCW
+            img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        # orientation 1 = normal, no rotation needed
+        # other values (2,4,5,7) involve mirroring, very rare
+    except Exception:
+        pass  # No EXIF or PIL not available — use image as-is
+
+    return img
 
 def scan_and_sync_images(project):
     """
