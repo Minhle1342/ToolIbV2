@@ -12,8 +12,9 @@ echo          Khởi động lại Team YOLO Labeling Hub
 echo ==========================================================
 echo.
 
-:: Bước 1: Tắt server cũ (nếu đang chạy)
-echo [BƯỚC 1] Đang tắt server cũ...
+:: Bước 1: Tắt server cũ và tunnel (nếu đang chạy)
+echo [BƯỚC 1] Đang tắt server cũ và Cloudflare Tunnel...
+taskkill /IM cloudflared.exe /F >nul 2>&1
 set "FOUND=0"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5000" ^| findstr "LISTENING"') do (
     set "FOUND=1"

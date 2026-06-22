@@ -9,6 +9,10 @@ echo               Dừng Team YOLO Labeling Hub
 echo ==========================================================
 echo.
 
+:: Tắt tiến trình Cloudflare Tunnel (cloudflared.exe) nếu đang chạy
+echo [INFO] Đang dừng Cloudflare Tunnel...
+taskkill /IM cloudflared.exe /F >nul 2>&1
+
 :: Tìm PID của tiến trình đang lắng nghe trên cổng 5000
 set "FOUND=0"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5000" ^| findstr "LISTENING"') do (
