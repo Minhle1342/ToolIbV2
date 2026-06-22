@@ -140,6 +140,15 @@ class startAPI {
         const res = await fetch(`/api/collect-crops/preview/${encodeURIComponent(className)}`);
         return await res.json();
     }
+
+    async classifyBoxes(data) {
+        const res = await fetch('/api/classify-boxes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

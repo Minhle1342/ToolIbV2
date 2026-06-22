@@ -573,6 +573,53 @@ class Workspace {
         }
     }
 
+    async classifySelectedBoxes() {
+        if (!currentImage) return;
+
+        const selectedBoxes = editor.getSelectedBoxesInfo();
+        if (!selectedBoxes || selectedBoxes.length === 0) {
+            alert('Please select a bounding box first.');
+            return;
+        }
+
+        const btn = document.getElementById('btnClassifySelected');
+        let originalHtml = '';
+        if (btn) {
+            originalHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Classifying...';
+            btn.disabled = true;
+        }
+
+        try {
+            const result = await API.classifyBoxes({
+                image_id: currentImage.id,
+                boxes: selectedBoxes
+            });
+
+            if (result.success) {
+                editor.updateActiveBoxesClasses(result.results);
+                this.showToast(`Classified ${selectedBoxes.length} box(es)`, 'success');
+                this.triggerAutoSaveDebounced();
+
+                if (btn) {
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> Classified!';
+                    btn.classList.add('bg-green-600');
+                    setTimeout(() => {
+                        btn.innerHTML = originalHtml;
+                        btn.classList.remove('bg-green-600');
+                        btn.disabled = false;
+                    }, 1200);
+                }
+            } else {
+                alert(result.error || 'Failed to classify boxes');
+                if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
+            }
+        } catch (e) {
+            alert('Error: ' + e.message);
+            if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
+        }
+    }
+
     async collectAllBoxes() {
         if (!currentImage) return;
 

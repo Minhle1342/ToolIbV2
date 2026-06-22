@@ -836,6 +836,8 @@ class Editor {
         document.getElementById('btnDeleteBox').style.display = 'block';
         const btnCollect = document.getElementById('btnCollectCrop');
         if (btnCollect) btnCollect.style.display = 'flex';
+        const btnClassify = document.getElementById('btnClassifySelected');
+        if (btnClassify) btnClassify.style.display = 'flex';
 
         // Update Lock Button State
         const btnLock = document.getElementById('btnLock');
@@ -857,6 +859,8 @@ class Editor {
         document.getElementById('btnDeleteBox').style.display = 'none';
         const btnCollect = document.getElementById('btnCollectCrop');
         if (btnCollect) btnCollect.style.display = 'none';
+        const btnClassify = document.getElementById('btnClassifySelected');
+        if (btnClassify) btnClassify.style.display = 'none';
 
         const magCanvas = document.getElementById('magnifierCanvas');
         const magPlaceholder = document.getElementById('magPlaceholder');
@@ -946,6 +950,41 @@ class Editor {
             });
         });
         return results;
+    }
+
+    updateActiveBoxesClasses(predictions) {
+        // predictions is an array of { class_id, class_name, confidence } matching the active objects order
+        const activeObjects = this.canvas.getActiveObjects();
+        if (!activeObjects || activeObjects.length !== predictions.length) return;
+
+        let changedCount = 0;
+        activeObjects.forEach((obj, idx) => {
+            if (obj.type !== 'rect') return;
+
+            const pred = predictions[idx];
+            if (pred && pred.class_id !== undefined && !pred.error) {
+                obj.classId = pred.class_id;
+                
+                // Update color
+                const cls = this.classes.find(c => c.id === pred.class_id);
+                if (cls) {
+                    obj.set({
+                        stroke: cls.color,
+                        cornerColor: cls.color,
+                        borderColor: cls.color
+                    });
+                    
+                    // Add confidence tooltip/label if needed
+                    obj.label = `${cls.name} (${(pred.confidence * 100).toFixed(1)}%)`;
+                }
+                changedCount++;
+            }
+        });
+
+        if (changedCount > 0) {
+            this.canvas.requestRenderAll();
+            this.updateSelectionInfo(this.canvas.getActiveObject());
+        }
     }
 
     getAllBoxesWithClassNames() {

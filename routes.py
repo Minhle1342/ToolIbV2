@@ -487,6 +487,60 @@ def auto_label(image_id):
         
     return jsonify(result)
 
+@api_bp.route('/classify-boxes', methods=['POST'])
+def classify_boxes():
+    """Classify specific bounding boxes on an image using the active Classifier model."""
+    import cv2
+    import sys
+    
+    data = request.json
+    if not data:
+        return jsonify({'error': 'No data provided'}), 400
+        
+    image_id = data.get('image_id')
+    boxes = data.get('boxes')  # list of {x, y, w, h} (YOLO format)
+    
+    if not image_id or not boxes:
+        return jsonify({'error': 'image_id and boxes are required'}), 400
+        
+    classifier = get_classifier_engine()
+    if not classifier:
+        return jsonify({'error': 'Không có mô hình Classifier nào đang active.'}), 400
+        
+    image = Image.query.get_or_404(image_id)
+    project = Project.query.get(image.project_id)
+    image_path = os.path.join(project.root_path, image.filename)
+    
+    img = cv2.imread(image_path)
+    if img is None:
+        return jsonify({'error': f'Could not load image: {image_path}'}), 400
+        
+    img_h, img_w = img.shape[:2]
+    results = []
+    
+    for i, box in enumerate(boxes):
+        cx, cy, bw, bh = box['x'], box['y'], box['w'], box['h']
+        xmin = int((cx - bw / 2) * img_w)
+        ymin = int((cy - bh / 2) * img_h)
+        xmax = int((cx + bw / 2) * img_w)
+        ymax = int((cy + bh / 2) * img_h)
+        
+        # Clip to image boundaries
+        xmin = max(0, xmin)
+        ymin = max(0, ymin)
+        xmax = min(img_w, xmax)
+        ymax = min(img_h, ymax)
+        
+        if xmin >= xmax or ymin >= ymax:
+            results.append({'error': 'Invalid bounds'})
+            continue
+            
+        crop = img[ymin:ymax, xmin:xmax]
+        cls_result = classifier.predict(crop)
+        results.append(cls_result)
+        
+    return jsonify({'success': True, 'results': results})
+
 # ============================================================
 # Crop & Collect for Classifier Retraining
 # ============================================================
