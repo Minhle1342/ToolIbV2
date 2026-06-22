@@ -841,6 +841,9 @@ class Editor {
         if (btnCollect) btnCollect.style.display = 'flex';
         const btnClassify = document.getElementById('btnClassifySelected');
         if (btnClassify) btnClassify.style.display = 'flex';
+        if (typeof toggleBottomPanel === 'function') {
+            toggleBottomPanel(true);
+        }
 
         // Update Lock Button State
         const btnLock = document.getElementById('btnLock');
@@ -864,6 +867,9 @@ class Editor {
         if (btnCollect) btnCollect.style.display = 'none';
         const btnClassify = document.getElementById('btnClassifySelected');
         if (btnClassify) btnClassify.style.display = 'none';
+        if (typeof toggleBottomPanel === 'function') {
+            toggleBottomPanel(false);
+        }
 
         const magCanvas = document.getElementById('magnifierCanvas');
         const magPlaceholder = document.getElementById('magPlaceholder');

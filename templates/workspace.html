@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 
 {% block content %}
+<style>
+    .fa-chevron-top::before {
+        content: "\f077" !important;
+    }
+    .fa-chevron-bottom::before {
+        content: "\f078" !important;
+    }
+</style>
 <div class="flex h-full overflow-hidden">
     <!-- Left Sidebar: Image List -->
     <div class="flex-none bg-sidebar border-r border-border flex flex-col transition-all duration-300 w-64"
@@ -208,6 +216,35 @@
                 <option value="test" class="bg-surface text-content">TEST</option>
             </select>
             <canvas id="c"></canvas>
+
+            <!-- Collapsible Action Bottom Panel for Selected Bounding Boxes -->
+            <div id="bottomBoxPanel" class="absolute bottom-0 left-0 right-0 z-20 bg-sidebar border-t border-border shadow-lg transition-transform duration-300 ease-in-out translate-y-full hidden">
+                <!-- Toggle Handle Button -->
+                <button id="btnToggleBottomPanel" class="absolute -top-6 left-1/2 -translate-x-1/2 bg-sidebar border-t border-x border-border px-4 py-1 rounded-t-md text-content-muted hover:text-content text-xs flex items-center justify-center shadow-md focus:outline-none" onclick="toggleBottomPanel()" title="Toggle Action Panel">
+                    <i id="bottomPanelChevron" class="fa-solid fa-chevron-top"></i>
+                </button>
+                <!-- Panel Content -->
+                <div class="p-3 flex items-center justify-center gap-3">
+                    <!-- Delete Box -->
+                    <button class="bg-red-900/50 hover:bg-red-900 text-red-200 text-xs px-4 py-2 rounded border border-red-700/30 flex items-center justify-center gap-1.5 transition-colors"
+                        id="btnDeleteBox" style="display: none;" onclick="editor.deleteSelected()">
+                        <i class="fa-solid fa-trash"></i>
+                        <span data-i18n="delete_box">Delete Box (Del/Q)</span>
+                    </button>
+                    <!-- Collect Crop -->
+                    <button class="bg-amber-700/50 hover:bg-amber-700 text-amber-200 text-xs px-4 py-2 rounded border border-amber-600/30 transition-colors flex items-center justify-center gap-1.5"
+                        id="btnCollectCrop" style="display: none;" onclick="currentWorkspace.collectCrop()" title="Collect this crop for classifier retraining">
+                        <i class="fa-solid fa-scissors"></i>
+                        <span>Collect Crop</span>
+                    </button>
+                    <!-- Classify Selected -->
+                    <button class="bg-blue-700/50 hover:bg-blue-700 text-blue-200 text-xs px-4 py-2 rounded border border-blue-600/30 transition-colors flex items-center justify-center gap-1.5"
+                        id="btnClassifySelected" style="display: none;" onclick="currentWorkspace.classifySelectedBoxes()" title="Classify the selected box(es)">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>Classify Selected</span>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -236,19 +273,6 @@
             <div id="selectionInfo" class="space-y-2 text-sm text-content-muted" data-i18n="nothing_selected">
                 Nothing selected
             </div>
-
-            <button class="w-full mt-3 bg-red-900/50 hover:bg-red-900 text-red-200 text-xs py-1.5 rounded hidden"
-                id="btnDeleteBox" onclick="editor.deleteSelected()" data-i18n="delete_box">
-                Delete Box (Del/Q)
-            </button>
-            <button class="w-full mt-2 bg-amber-700/50 hover:bg-amber-700 text-amber-200 text-xs py-1.5 rounded hidden flex items-center justify-center gap-1.5"
-                id="btnCollectCrop" onclick="currentWorkspace.collectCrop()" title="Collect this crop for classifier retraining">
-                <i class="fa-solid fa-scissors"></i> Collect Crop
-            </button>
-            <button class="w-full mt-2 bg-blue-700/50 hover:bg-blue-700 text-blue-200 text-xs py-1.5 rounded hidden flex items-center justify-center gap-1.5"
-                id="btnClassifySelected" onclick="currentWorkspace.classifySelectedBoxes()" title="Classify the selected box(es)">
-                <i class="fa-solid fa-wand-magic-sparkles"></i> Classify Selected
-            </button>
         </div>
 
         <!-- Class List Header -->
@@ -347,6 +371,41 @@
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
 
 <script>
+    function toggleBottomPanel(forceState) {
+        const panel = document.getElementById('bottomBoxPanel');
+        const chevron = document.getElementById('bottomPanelChevron');
+        if (!panel || !chevron) return;
+        
+        let toOpen;
+        if (typeof forceState !== 'undefined') {
+            toOpen = forceState;
+        } else {
+            toOpen = panel.classList.contains('translate-y-full');
+        }
+        
+        if (toOpen) {
+            panel.classList.remove('hidden');
+            // Force reflow
+            panel.offsetHeight;
+            panel.classList.remove('translate-y-full');
+            panel.classList.add('translate-y-0');
+            chevron.classList.remove('fa-chevron-top');
+            chevron.classList.add('fa-chevron-bottom');
+        } else {
+            panel.classList.remove('translate-y-0');
+            panel.classList.add('translate-y-full');
+            chevron.classList.remove('fa-chevron-bottom');
+            chevron.classList.add('fa-chevron-top');
+            
+            // Hide after transition
+            setTimeout(() => {
+                if (panel.classList.contains('translate-y-full')) {
+                    panel.classList.add('hidden');
+                }
+            }, 300);
+        }
+    }
+
     // Update JS injection logic for Tailwind Styles
     // Since workspace.js injects HTML strings, we need to update workspace.js too!
     // But first let's handle the sidebar toggle logic here which uses classes.
