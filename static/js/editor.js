@@ -964,8 +964,8 @@ class Editor {
             const w = Math.abs(obj.width * obj.scaleX);
             const h = Math.abs(obj.height * obj.scaleY);
 
-            // Transform true center point (width/2, height/2 in object space) to absolute canvas coords
-            const center = fabric.util.transformPoint({ x: obj.width / 2, y: obj.height / 2 }, matrix);
+            // Transform true center point (0,0 in object space) to absolute canvas coords
+            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
 
             const cx = center.x / this.imageWidth;
             const cy = center.y / this.imageHeight;
@@ -999,8 +999,8 @@ class Editor {
             const w = Math.abs(obj.width * obj.scaleX);
             const h = Math.abs(obj.height * obj.scaleY);
 
-            // Transform the true center point (width/2, height/2 in object space) to absolute coords
-            const center = fabric.util.transformPoint({ x: obj.width / 2, y: obj.height / 2 }, matrix);
+            // Transform the true center point (0,0 in object space) to absolute coords
+            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
 
             const cx = center.x / this.imageWidth;
             const cy = center.y / this.imageHeight;
