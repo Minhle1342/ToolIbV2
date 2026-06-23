@@ -123,7 +123,7 @@
     <!-- Main: Canvas -->
     <div class="flex-1 flex flex-col min-w-0 bg-app-bg relative">
         <!-- Toolbar -->
-        <div class="h-14 bg-sidebar border-b border-border flex items-center px-4 gap-2 shadow-sm z-10">
+        <div class="h-14 bg-sidebar border-b border-border flex items-center px-4 gap-2 shadow-sm z-30">
             <button class="p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
                 onclick="editor.setMode('draw')" title="Draw (D)" data-i18n-title="tool_draw" id="btnDraw">
                 <i class="fa-solid fa-pen text-lg"></i>
@@ -249,6 +249,37 @@
             </div>
             <button class="bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2"
                 onclick="currentWorkspace.save()"><span data-i18n="btn_saved" id="btnSavedText">Saved</span></button>
+        </div>
+
+        <!-- Collapsible Search Header -->
+        <div id="searchHeader" class="absolute top-14 left-0 right-0 bg-sidebar border-b border-border px-4 py-2 shadow-sm transition-transform duration-300 ease-in-out z-20 transform translate-y-0">
+            <!-- Toggle Handle Button (Hangs down onto the canvas) -->
+            <button id="btnToggleSearchHeader"
+                class="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-sidebar border-b border-x border-border px-4 py-1 rounded-b-md text-content-muted hover:text-content text-xs flex items-center justify-center shadow-md focus:outline-none z-30"
+                onclick="toggleSearchHeader()" title="Toggle Search Panel">
+                <i id="searchHeaderChevron" class="fa-solid fa-chevron-top"></i>
+            </button>
+            
+            <!-- Panel Content -->
+            <div id="searchHeaderContent" class="flex items-center gap-4 py-1">
+                <div class="flex items-center gap-2 flex-1 max-w-md relative">
+                    <span class="text-xs text-content-muted font-medium" data-i18n="search_image_label">Tìm kiếm ảnh:</span>
+                    <div class="relative flex-1">
+                        <input type="text" id="imageSearchInput" autocomplete="off"
+                            class="w-full bg-surface border border-border text-xs rounded px-3 py-1.5 text-content outline-none focus:border-primary transition-colors"
+                            placeholder="Nhập tên file ảnh..." data-i18n-placeholder="search_image_placeholder">
+                        <!-- Suggestions Container -->
+                        <div id="imageSearchSuggestions"
+                            class="absolute top-full left-0 w-full mt-1 bg-panel border border-border rounded shadow-lg z-50 hidden max-h-48 overflow-y-auto text-xs text-content">
+                        </div>
+                    </div>
+                    <button class="bg-primary hover:bg-blue-500 text-content-inv text-xs px-3 py-1.5 rounded transition-colors font-medium flex items-center gap-1.5"
+                        onclick="currentWorkspace.searchAndSelectImage()">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span data-i18n="btn_search">Tìm kiếm</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- Canvas -->

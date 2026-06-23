@@ -16,6 +16,7 @@ class Workspace {
 
         await this.loadProjectInfo();
         this.setupAutocomplete();
+        this.setupImageSearchAutocomplete();
         await loadImages();
 
         // Hotkeys
@@ -1272,6 +1273,99 @@ files.download(onnx_path)
         });
     }
 
+    setupImageSearchAutocomplete() {
+        const input = document.getElementById('imageSearchInput');
+        const suggestionsBox = document.getElementById('imageSearchSuggestions');
+        if (!input || !suggestionsBox) return;
+
+        const updateSuggestions = () => {
+            const val = input.value.trim().toLowerCase();
+            if (!val) {
+                suggestionsBox.classList.add('hidden');
+                return;
+            }
+
+            if (!this.allImages || this.allImages.length === 0) {
+                suggestionsBox.classList.add('hidden');
+                return;
+            }
+
+            const matches = this.allImages.filter(img => img.filename.toLowerCase().includes(val));
+            if (matches.length === 0) {
+                suggestionsBox.classList.add('hidden');
+                return;
+            }
+
+            const limit = 10;
+            const displayedMatches = matches.slice(0, limit);
+
+            suggestionsBox.innerHTML = '';
+            displayedMatches.forEach(img => {
+                const div = document.createElement('div');
+                div.className = 'px-3 py-2 cursor-pointer hover:bg-primary hover:text-content-inv text-left truncate border-b border-border last:border-b-0 flex items-center justify-between';
+                
+                const labelIcon = img.is_labeled 
+                    ? '<i class="fa-solid fa-check text-green-500 text-[10px]"></i>' 
+                    : '<i class="fa-regular fa-circle text-content-muted text-[10px]"></i>';
+
+                div.innerHTML = `<span class="truncate pr-2">${img.filename}</span>${labelIcon}`;
+                div.onmousedown = (e) => {
+                    e.preventDefault();
+                    input.value = img.filename;
+                    suggestionsBox.classList.add('hidden');
+                    this.selectImage(img);
+                };
+                suggestionsBox.appendChild(div);
+            });
+            suggestionsBox.classList.remove('hidden');
+        };
+
+        input.addEventListener('input', updateSuggestions);
+        input.addEventListener('focus', updateSuggestions);
+
+        input.addEventListener('blur', () => {
+            suggestionsBox.classList.add('hidden');
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                suggestionsBox.classList.add('hidden');
+                this.searchAndSelectImage();
+            }
+        });
+    }
+
+    searchAndSelectImage() {
+        const input = document.getElementById('imageSearchInput');
+        if (!input) return;
+        const val = input.value.trim().toLowerCase();
+        if (!val) {
+            alert('Vui lòng nhập tên file ảnh cần tìm!');
+            return;
+        }
+
+        if (!this.allImages || this.allImages.length === 0) {
+            alert('Không có ảnh nào trong project!');
+            return;
+        }
+
+        let matchedImg = this.allImages.find(img => img.filename.toLowerCase() === val);
+        if (!matchedImg) {
+            matchedImg = this.allImages.find(img => img.filename.toLowerCase().includes(val));
+        }
+
+        if (matchedImg) {
+            this.selectImage(matchedImg);
+            const imgEl = document.getElementById(`img-${matchedImg.id}`);
+            if (imgEl) {
+                imgEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        } else {
+            alert(`Không tìm thấy ảnh có tên gần giống "${input.value}"!`);
+        }
+    }
+
     /**
      * Apply a class (by index) to all selected bounding box objects.
      * Supports both single and multi-selection via getActiveObjects().
@@ -1858,6 +1952,33 @@ function closeModal(id) {
     document.getElementById(id).classList.add('hidden');
 }
 
+function toggleSearchHeader(forceState) {
+    const header = document.getElementById('searchHeader');
+    const chevron = document.getElementById('searchHeaderChevron');
+    if (!header || !chevron) return;
+
+    let toOpen;
+    if (typeof forceState !== 'undefined') {
+        toOpen = forceState;
+    } else {
+        toOpen = header.classList.contains('-translate-y-full');
+    }
+
+    if (toOpen) {
+        header.classList.remove('-translate-y-full');
+        header.classList.add('translate-y-0');
+        chevron.classList.remove('fa-chevron-bottom');
+        chevron.classList.add('fa-chevron-top');
+        localStorage.setItem('searchHeaderOpen', 'true');
+    } else {
+        header.classList.remove('translate-y-0');
+        header.classList.add('-translate-y-full');
+        chevron.classList.remove('fa-chevron-top');
+        chevron.classList.add('fa-chevron-bottom');
+        localStorage.setItem('searchHeaderOpen', 'false');
+    }
+}
+
 document.getElementById('assignForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
@@ -2100,6 +2221,12 @@ function initSplitSlider() {
 
 document.addEventListener('DOMContentLoaded', () => {
     initSplitSlider();
+
+    // Initialize Search Header state from localStorage
+    const searchHeaderOpen = localStorage.getItem('searchHeaderOpen');
+    if (searchHeaderOpen === 'false') {
+        toggleSearchHeader(false);
+    }
 
     const dropdownContainer = document.getElementById('uploadDropdownContainer');
     const dropdownMenu = document.getElementById('uploadDropdownMenu');

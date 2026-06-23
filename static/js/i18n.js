@@ -38,6 +38,9 @@ const translations = {
         "btn_saved": "Saved",
         "btn_saving": "Saving...",
         "auto_save": "Auto Save",
+        "search_image_label": "Search Image:",
+        "search_image_placeholder": "Enter filename...",
+        "btn_search": "Search",
 
         // Workspace - Sidebar Right
         "inspection": "Inspection",
@@ -144,6 +147,9 @@ const translations = {
         "btn_saved": "Đã lưu",
         "btn_saving": "Đang lưu...",
         "auto_save": "Tự động lưu",
+        "search_image_label": "Tìm kiếm ảnh:",
+        "search_image_placeholder": "Nhập tên file ảnh...",
+        "btn_search": "Tìm kiếm",
 
         // Workspace - Sidebar Right
         "inspection": "Chi tiết",
