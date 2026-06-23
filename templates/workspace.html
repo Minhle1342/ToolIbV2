@@ -5,6 +5,7 @@
     .fa-chevron-top::before {
         content: "\f077" !important;
     }
+
     .fa-chevron-bottom::before {
         content: "\f078" !important;
     }
@@ -17,22 +18,34 @@
         <div class="p-4 border-b border-border space-y-3">
             <div class="flex justify-between items-center">
                 <div class="flex items-center gap-2 sidebar-content">
-                    <h3 class="font-semibold text-content"><span data-i18n="images">Images</span> <span id="totalImageCount" class="text-sm font-normal text-content-muted"></span></h3>
+                    <h3 class="font-semibold text-content"><span data-i18n="images">Images</span> <span
+                            id="totalImageCount" class="text-sm font-normal text-content-muted"></span></h3>
                     <div class="relative" id="uploadDropdownContainer">
-                        <button class="text-primary hover:text-blue-500 rounded text-xs px-2 py-1 bg-surface border border-border transition-colors" title="Upload Images" data-i18n-title="upload_images">
+                        <button
+                            class="text-primary hover:text-blue-500 rounded text-xs px-2 py-1 bg-surface border border-border transition-colors"
+                            title="Upload Images" data-i18n-title="upload_images">
                             <i class="fa-solid fa-upload"></i>
                         </button>
-                        <div id="uploadDropdownMenu" class="absolute left-0 mt-1 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-32 overflow-hidden">
-                            <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-primary transition-colors flex items-center gap-2" onclick="document.getElementById('imageUploadInput').click()">
-                                <i class="fa-solid fa-file-image w-4 text-center"></i> <span data-i18n="upload_files">Files</span>
+                        <div id="uploadDropdownMenu"
+                            class="absolute left-0 mt-1 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-32 overflow-hidden">
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-primary transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('imageUploadInput').click()">
+                                <i class="fa-solid fa-file-image w-4 text-center"></i> <span
+                                    data-i18n="upload_files">Files</span>
                             </button>
-                            <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-primary transition-colors flex items-center gap-2" onclick="document.getElementById('folderUploadInput').click()">
-                                <i class="fa-solid fa-folder-open w-4 text-center"></i> <span data-i18n="upload_folder">Folder</span>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-primary transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('folderUploadInput').click()">
+                                <i class="fa-solid fa-folder-open w-4 text-center"></i> <span
+                                    data-i18n="upload_folder">Folder</span>
                             </button>
                         </div>
                     </div>
-                    <input type="file" id="imageUploadInput" class="hidden" multiple accept="image/*,.txt,.yaml,.yml" onchange="currentWorkspace.uploadImages(event)">
-                    <input type="file" id="folderUploadInput" class="hidden" webkitdirectory directory multiple onchange="currentWorkspace.uploadImages(event)">
+                    <input type="file" id="imageUploadInput" class="hidden" multiple accept="image/*,.txt,.yaml,.yml"
+                        onchange="currentWorkspace.uploadImages(event)">
+                    <input type="file" id="folderUploadInput" class="hidden" webkitdirectory directory multiple
+                        onchange="currentWorkspace.uploadImages(event)">
                 </div>
                 <button class="text-content-muted hover:text-content-inv" onclick="toggleSidebar('left')"
                     title="Toggle Image List">
@@ -43,9 +56,11 @@
             <!-- Upload Progress Bar (Hidden by default) -->
             <div id="uploadProgressContainer" class="hidden space-y-1 sidebar-content">
                 <div class="w-full bg-surface border border-border rounded overflow-hidden h-1.5">
-                    <div id="uploadProgressBar" class="h-full bg-primary transition-all duration-300" style="width: 0%"></div>
+                    <div id="uploadProgressBar" class="h-full bg-primary transition-all duration-300" style="width: 0%">
+                    </div>
                 </div>
-                <div id="uploadProgressText" class="text-[10px] text-content-muted text-center" data-i18n="uploading">Uploading... 0%</div>
+                <div id="uploadProgressText" class="text-[10px] text-content-muted text-center" data-i18n="uploading">
+                    Uploading... 0%</div>
             </div>
 
             <div class="space-y-2 sidebar-content">
@@ -68,8 +83,10 @@
                     </select>
                 </div>
                 <div class="space-y-1">
-                    <label class="text-[10px] font-semibold text-content-muted uppercase tracking-wider block" data-i18n="filter_by_classes">Filter by Classes</label>
-                    <div id="classFilterContainer" class="bg-surface border border-border rounded p-2 max-h-36 overflow-y-auto space-y-1 text-xs text-content-muted">
+                    <label class="text-[10px] font-semibold text-content-muted uppercase tracking-wider block"
+                        data-i18n="filter_by_classes">Filter by Classes</label>
+                    <div id="classFilterContainer"
+                        class="bg-surface border border-border rounded p-2 max-h-36 overflow-y-auto space-y-1 text-xs text-content-muted">
                         <span class="italic text-content-muted" data-i18n="loading_classes">Loading classes...</span>
                     </div>
                 </div>
@@ -95,7 +112,9 @@
                 <!-- Items injected by JS -->
             </div>
             <!-- Scroll to active button -->
-            <button id="btnScrollToActive" class="absolute top-2 right-4 bg-primary text-white p-2 w-8 h-8 flex items-center justify-center rounded-full shadow-md opacity-50 hover:opacity-100 transition-all z-10 hidden" onclick="currentWorkspace.scrollToActiveImage()" title="Cuộn đến ảnh đang chọn">
+            <button id="btnScrollToActive"
+                class="absolute top-2 right-4 bg-primary text-white p-2 w-8 h-8 flex items-center justify-center rounded-full shadow-md opacity-50 hover:opacity-100 transition-all z-10 hidden"
+                onclick="currentWorkspace.scrollToActiveImage()" title="Cuộn đến ảnh đang chọn">
                 <i class="fa-solid fa-location-crosshairs"></i>
             </button>
         </div>
@@ -117,58 +136,85 @@
             <div class="w-px h-6 bg-border mx-2"></div>
 
             <button class="p-2 text-content-muted hover:text-accent rounded hover:bg-panel transition-colors"
-                onclick="currentWorkspace.toggleLockBox()" title="Lock/Unlock Box (L)" data-i18n-title="tool_lock" id="btnLock">
+                onclick="currentWorkspace.toggleLockBox()" title="Lock/Unlock Box (L)" data-i18n-title="tool_lock"
+                id="btnLock">
                 <i class="fa-solid fa-lock-open text-lg"></i>
             </button>
             <button class="p-2 text-content-muted hover:text-secondary rounded hover:bg-panel transition-colors"
-                onclick="currentWorkspace.toggleImageVisibility()" title="Hide/Show Image (H)" data-i18n-title="tool_hide" id="btnHideImage">
+                onclick="currentWorkspace.toggleImageVisibility()" title="Hide/Show Image (H)"
+                data-i18n-title="tool_hide" id="btnHideImage">
                 <i class="fa-regular fa-image text-lg"></i>
             </button>
 
-        <div class="relative" id="autoLabelDropdownWrapper">
-                <button id="btnAutoLabelToggle" class="p-2 text-content-muted hover:text-purple-500 rounded hover:bg-panel transition-colors"
-                    title="Auto Label (Magic Wand)" data-i18n-title="tool_auto" onclick="document.getElementById('autoLabelDropdown').classList.toggle('hidden'); event.stopPropagation();">
+            <div class="relative" id="autoLabelDropdownWrapper">
+                <button id="btnAutoLabelToggle"
+                    class="p-2 text-content-muted hover:text-purple-500 rounded hover:bg-panel transition-colors"
+                    title="Auto Label (Magic Wand)" data-i18n-title="tool_auto"
+                    onclick="document.getElementById('autoLabelDropdown').classList.toggle('hidden'); event.stopPropagation();">
                     <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
                 </button>
-                <div id="autoLabelDropdown" class="absolute left-0 mt-8 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
-                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2" onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabel()">
-                        <i class="fa-solid fa-image w-4 text-center"></i> <span data-i18n="auto_current">Current Canvas</span>
+                <div id="autoLabelDropdown"
+                    class="absolute left-0 mt-8 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabel()">
+                        <i class="fa-solid fa-image w-4 text-center"></i> <span data-i18n="auto_current">Current
+                            Canvas</span>
                     </button>
-                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2" onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabelAll()">
-                        <i class="fa-solid fa-images w-4 text-center"></i> <span data-i18n="auto_all">All Unlabeled Images</span>
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabelAll()">
+                        <i class="fa-solid fa-images w-4 text-center"></i> <span data-i18n="auto_all">All Unlabeled
+                            Images</span>
                     </button>
                 </div>
             </div>
 
-            <button id="btnAutoLabelRegion" class="p-2 text-content-muted hover:text-purple-400 rounded hover:bg-panel transition-colors"
-                title="Auto Label Region (R)" data-i18n-title="tool_auto_region" onclick="editor.setMode('auto_label_region')">
+            <button id="btnAutoLabelRegion"
+                class="p-2 text-content-muted hover:text-purple-400 rounded hover:bg-panel transition-colors"
+                title="Auto Label Region (R)" data-i18n-title="tool_auto_region"
+                onclick="editor.setMode('auto_label_region')">
                 <i class="fa-solid fa-crop-simple text-lg"></i>
             </button>
             <div class="relative">
-                <button id="btnShowSequenceNumbers" class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
-                    title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers" onclick="document.getElementById('sequenceDropdown').classList.toggle('hidden')">
+                <button id="btnShowSequenceNumbers"
+                    class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
+                    title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers"
+                    onclick="document.getElementById('sequenceDropdown').classList.toggle('hidden')">
                     <i class="fa-solid fa-list-ol text-lg"></i>
                 </button>
-                <div id="sequenceDropdown" class="absolute left-0 mt-2 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
-                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('class')">
-                        <i class="fa-solid fa-layer-group w-4 text-center"></i> <span data-i18n="seq_class">By Class</span>
+                <div id="sequenceDropdown"
+                    class="absolute left-0 mt-2 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('class')">
+                        <i class="fa-solid fa-layer-group w-4 text-center"></i> <span data-i18n="seq_class">By
+                            Class</span>
                     </button>
-                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('column')">
-                        <i class="fa-solid fa-columns w-4 text-center"></i> <span data-i18n="seq_column">By Column</span>
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('column')">
+                        <i class="fa-solid fa-columns w-4 text-center"></i> <span data-i18n="seq_column">By
+                            Column</span>
                     </button>
-                    <button class="text-left px-3 py-2 hover:bg-surface text-content hover:text-red-500 transition-colors flex items-center gap-2" onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('none')">
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-red-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('none')">
                         <i class="fa-solid fa-eye-slash w-4 text-center"></i> <span data-i18n="seq_off">Turn Off</span>
                     </button>
                 </div>
             </div>
-            <button id="btnHideBoxes" class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel transition-colors"
-                title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes" onclick="currentWorkspace.toggleBoxesVisibility()">
+            <button id="btnHideBoxes"
+                class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel transition-colors"
+                title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes"
+                onclick="currentWorkspace.toggleBoxesVisibility()">
                 <i class="fa-solid fa-eye text-lg"></i>
             </button>
 
             <div class="w-px h-6 bg-border mx-2"></div>
 
-            <button id="btnCollectAll" class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
+            <button id="btnCollectAll"
+                class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
                 title="Collect all box crops for classifier retraining" onclick="currentWorkspace.collectAllBoxes()">
                 <i class="fa-solid fa-scissors text-lg"></i>
             </button>
@@ -186,11 +232,6 @@
                 <i class="fa-solid fa-compress"></i>
             </button>
 
-            <div class="w-px h-6 bg-border mx-2"></div>
-
-
-            <div class="w-px h-6 bg-border mx-2 ml-auto"></div>
-
             <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel"
                 onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)" data-i18n-title="tool_flag">
                 <i class="fa-regular fa-flag text-lg"></i>
@@ -200,8 +241,11 @@
                 <i class="fa-regular fa-circle-check text-lg"></i>
             </button>
             <div class="flex items-center gap-1.5 ml-3 mr-1 select-none">
-                <input type="checkbox" id="autoSaveToggle" class="rounded border-border bg-panel text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer" onchange="currentWorkspace.toggleAutoSave(this.checked)">
-                <label for="autoSaveToggle" class="text-xs text-content-muted cursor-pointer font-medium" data-i18n="auto_save">Auto Save</label>
+                <input type="checkbox" id="autoSaveToggle"
+                    class="rounded border-border bg-panel text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer"
+                    onchange="currentWorkspace.toggleAutoSave(this.checked)">
+                <label for="autoSaveToggle" class="text-xs text-content-muted cursor-pointer font-medium"
+                    data-i18n="auto_save">Auto Save</label>
             </div>
             <button class="bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2"
                 onclick="currentWorkspace.save()"><span data-i18n="btn_saved" id="btnSavedText">Saved</span></button>
@@ -210,7 +254,8 @@
         <!-- Canvas -->
         <div class="flex-1 overflow-hidden relative flex justify-center items-center bg-surface" id="canvasWrapper">
             <!-- Split Type Badge/Dropdown -->
-            <select id="splitTypeSelect" onchange="currentWorkspace.changeSplitType(this.value)" class="absolute top-4 right-4 px-3 py-1 pr-6 text-xs font-bold rounded-md shadow z-10 backdrop-blur-sm uppercase tracking-wider border cursor-pointer outline-none hover:opacity-80 transition-opacity hidden">
+            <select id="splitTypeSelect" onchange="currentWorkspace.changeSplitType(this.value)"
+                class="absolute top-4 right-4 px-3 py-1 pr-6 text-xs font-bold rounded-md shadow z-10 backdrop-blur-sm uppercase tracking-wider border cursor-pointer outline-none hover:opacity-80 transition-opacity hidden">
                 <option value="train" class="bg-surface text-content">TRAIN</option>
                 <option value="val" class="bg-surface text-content">VAL</option>
                 <option value="test" class="bg-surface text-content">TEST</option>
@@ -218,28 +263,36 @@
             <canvas id="c"></canvas>
 
             <!-- Collapsible Action Bottom Panel for Selected Bounding Boxes -->
-            <div id="bottomBoxPanel" class="absolute bottom-0 left-0 right-0 z-20 bg-sidebar border-t border-border shadow-lg transition-transform duration-300 ease-in-out translate-y-full hidden">
+            <div id="bottomBoxPanel"
+                class="absolute bottom-0 left-0 right-0 z-20 bg-sidebar border-t border-border shadow-lg transition-transform duration-300 ease-in-out translate-y-full hidden">
                 <!-- Toggle Handle Button -->
-                <button id="btnToggleBottomPanel" class="absolute -top-6 left-1/2 -translate-x-1/2 bg-sidebar border-t border-x border-border px-4 py-1 rounded-t-md text-content-muted hover:text-content text-xs flex items-center justify-center shadow-md focus:outline-none" onclick="toggleBottomPanel()" title="Toggle Action Panel">
+                <button id="btnToggleBottomPanel"
+                    class="absolute -top-6 left-1/2 -translate-x-1/2 bg-sidebar border-t border-x border-border px-4 py-1 rounded-t-md text-content-muted hover:text-content text-xs flex items-center justify-center shadow-md focus:outline-none"
+                    onclick="toggleBottomPanel()" title="Toggle Action Panel">
                     <i id="bottomPanelChevron" class="fa-solid fa-chevron-top"></i>
                 </button>
                 <!-- Panel Content -->
                 <div class="p-3 flex items-center justify-center gap-3">
                     <!-- Delete Box -->
-                    <button class="bg-red-900/50 hover:bg-red-900 text-red-200 text-xs px-4 py-2 rounded border border-red-700/30 flex items-center justify-center gap-1.5 transition-colors"
+                    <button
+                        class="bg-red-900/50 hover:bg-red-900 text-red-200 text-xs px-4 py-2 rounded border border-red-700/30 flex items-center justify-center gap-1.5 transition-colors"
                         id="btnDeleteBox" style="display: none;" onclick="editor.deleteSelected()">
                         <i class="fa-solid fa-trash"></i>
                         <span data-i18n="delete_box">Delete Box (Del/Q)</span>
                     </button>
                     <!-- Collect Crop -->
-                    <button class="bg-amber-700/50 hover:bg-amber-700 text-amber-200 text-xs px-4 py-2 rounded border border-amber-600/30 transition-colors flex items-center justify-center gap-1.5"
-                        id="btnCollectCrop" style="display: none;" onclick="currentWorkspace.collectCrop()" title="Collect this crop for classifier retraining">
+                    <button
+                        class="bg-amber-700/50 hover:bg-amber-700 text-amber-200 text-xs px-4 py-2 rounded border border-amber-600/30 transition-colors flex items-center justify-center gap-1.5"
+                        id="btnCollectCrop" style="display: none;" onclick="currentWorkspace.collectCrop()"
+                        title="Collect this crop for classifier retraining">
                         <i class="fa-solid fa-scissors"></i>
                         <span>Collect Crop</span>
                     </button>
                     <!-- Classify Selected -->
-                    <button class="bg-blue-700/50 hover:bg-blue-700 text-blue-200 text-xs px-4 py-2 rounded border border-blue-600/30 transition-colors flex items-center justify-center gap-1.5"
-                        id="btnClassifySelected" style="display: none;" onclick="currentWorkspace.classifySelectedBoxes()" title="Classify the selected box(es)">
+                    <button
+                        class="bg-blue-700/50 hover:bg-blue-700 text-blue-200 text-xs px-4 py-2 rounded border border-blue-600/30 transition-colors flex items-center justify-center gap-1.5"
+                        id="btnClassifySelected" style="display: none;"
+                        onclick="currentWorkspace.classifySelectedBoxes()" title="Classify the selected box(es)">
                         <i class="fa-solid fa-wand-magic-sparkles"></i>
                         <span>Classify Selected</span>
                     </button>
@@ -256,7 +309,8 @@
             class="p-4 border-b border-border bg-sidebar flex-shrink-0 flex flex-col max-h-[50%] overflow-y-auto sidebar-content">
             <div class="flex justify-between items-center mb-2">
                 <h3 class="font-semibold text-sm text-content-muted" data-i18n="inspection">Inspection</h3>
-                <button onclick="currentWorkspace.showClassExamplesModal()" class="text-content-muted hover:text-primary transition-colors" title="View Class Examples">
+                <button onclick="currentWorkspace.showClassExamplesModal()"
+                    class="text-content-muted hover:text-primary transition-colors" title="View Class Examples">
                     <i class="fa-solid fa-circle-question"></i>
                 </button>
             </div>
@@ -280,7 +334,8 @@
             <div class="flex justify-between items-center">
                 <h3 class="font-semibold text-content sidebar-content" data-i18n="classes">Classes</h3>
                 <div class="flex items-center gap-2 flex-1 justify-end">
-                    <input type="text" id="classSearch" placeholder="Search..." data-i18n-placeholder="search_placeholder"
+                    <input type="text" id="classSearch" placeholder="Search..."
+                        data-i18n-placeholder="search_placeholder"
                         class="bg-surface border border-border text-content text-xs rounded px-2 py-1 w-24 focus:w-full transition-all sidebar-content">
                     <button class="text-gray-400 hover:text-white" onclick="toggleSidebar('right')"
                         title="Toggle Class List">
@@ -291,11 +346,17 @@
             <!-- New Class Input -->
             <div class="flex gap-2 sidebar-content">
                 <div class="relative flex-1">
-                    <input type="text" id="newClassInput" autocomplete="off" class="w-full bg-surface border border-border text-xs rounded px-2 py-1 text-content outline-none focus:border-primary transition-colors" placeholder="New class name..." data-i18n-placeholder="new_class_placeholder">
+                    <input type="text" id="newClassInput" autocomplete="off"
+                        class="w-full bg-surface border border-border text-xs rounded px-2 py-1 text-content outline-none focus:border-primary transition-colors"
+                        placeholder="New class name..." data-i18n-placeholder="new_class_placeholder">
                     <!-- Autocomplete Dropdown -->
-                    <div id="newClassSuggestions" class="absolute top-full left-0 w-full mt-1 bg-panel border border-border rounded shadow-lg z-50 hidden max-h-40 overflow-y-auto text-xs text-content"></div>
+                    <div id="newClassSuggestions"
+                        class="absolute top-full left-0 w-full mt-1 bg-panel border border-border rounded shadow-lg z-50 hidden max-h-40 overflow-y-auto text-xs text-content">
+                    </div>
                 </div>
-                <button class="bg-primary hover:bg-blue-500 text-content-inv text-xs px-3 py-1 rounded transition-colors font-medium" onclick="currentWorkspace.addNewClassFromSelection()" data-i18n="btn_add">Add</button>
+                <button
+                    class="bg-primary hover:bg-blue-500 text-content-inv text-xs px-3 py-1 rounded transition-colors font-medium"
+                    onclick="currentWorkspace.addNewClassFromSelection()" data-i18n="btn_add">Add</button>
             </div>
         </div>
 
@@ -319,14 +380,17 @@
                     placeholder="e.g. Team Minh" required>
             </div>
             <div>
-                <label class="block text-xs font-medium text-content-muted mb-1" data-i18n="number_images">Number of Images</label>
+                <label class="block text-xs font-medium text-content-muted mb-1" data-i18n="number_images">Number of
+                    Images</label>
                 <input type="number" name="count"
                     class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary"
                     value="100" required>
             </div>
             <div>
-                <label class="block text-xs font-medium text-content-muted mb-1" data-i18n="assign_mode">Assign Mode</label>
-                <select name="assign_mode" class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary">
+                <label class="block text-xs font-medium text-content-muted mb-1" data-i18n="assign_mode">Assign
+                    Mode</label>
+                <select name="assign_mode"
+                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary">
                     <option value="both" data-i18n="filter_all_status">All Status</option>
                     <option value="labeled" data-i18n="filter_labeled">Labeled</option>
                     <option value="unlabeled" data-i18n="filter_unlabeled">Unlabeled</option>
@@ -336,8 +400,8 @@
                 <button type="button"
                     class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded"
                     onclick="closeModal('assignModal')" data-i18n="cancel">Cancel</button>
-                <button type="submit"
-                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded" data-i18n="btn_assign">Assign</button>
+                <button type="submit" class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded"
+                    data-i18n="btn_assign">Assign</button>
             </div>
         </form>
     </div>
@@ -375,14 +439,14 @@
         const panel = document.getElementById('bottomBoxPanel');
         const chevron = document.getElementById('bottomPanelChevron');
         if (!panel || !chevron) return;
-        
+
         let toOpen;
         if (typeof forceState !== 'undefined') {
             toOpen = forceState;
         } else {
             toOpen = panel.classList.contains('translate-y-full');
         }
-        
+
         if (toOpen) {
             panel.classList.remove('hidden');
             // Force reflow
@@ -396,7 +460,7 @@
             panel.classList.add('translate-y-full');
             chevron.classList.remove('fa-chevron-bottom');
             chevron.classList.add('fa-chevron-top');
-            
+
             // Hide after transition
             setTimeout(() => {
                 if (panel.classList.contains('translate-y-full')) {
@@ -582,41 +646,61 @@
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="exportExcludeFlagged"
                     class="rounded bg-surface border-border text-primary focus:ring-primary" checked>
-                <label for="exportExcludeFlagged" class="text-sm text-content-muted" data-i18n="exclude_flagged">Exclude Flagged Images</label>
+                <label for="exportExcludeFlagged" class="text-sm text-content-muted" data-i18n="exclude_flagged">Exclude
+                    Flagged Images</label>
             </div>
 
             <div class="flex flex-col gap-4">
                 <input type="hidden" id="exportTrainSplit" value="80">
                 <input type="hidden" id="exportValSplit" value="10">
                 <input type="hidden" id="exportTestSplit" value="10">
-                
+
                 <div class="flex justify-between items-center text-sm px-2">
                     <div class="flex flex-col items-center">
-                        <div class="border border-purple-400 text-purple-600 rounded px-2 py-0.5 text-xs font-medium bg-purple-50"><i class="fa-solid fa-person-running mr-1"></i> Train</div>
-                        <div class="text-content-muted mt-1 text-xs"><i class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblTrainCount">0</span> (<span id="lblTrainPct">80</span>%)</div>
+                        <div
+                            class="border border-purple-400 text-purple-600 rounded px-2 py-0.5 text-xs font-medium bg-purple-50">
+                            <i class="fa-solid fa-person-running mr-1"></i> Train</div>
+                        <div class="text-content-muted mt-1 text-xs"><i
+                                class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblTrainCount">0</span>
+                            (<span id="lblTrainPct">80</span>%)</div>
                     </div>
                     <div class="flex flex-col items-center">
-                        <div class="border border-blue-400 text-blue-600 rounded px-2 py-0.5 text-xs font-medium bg-blue-50"><i class="fa-solid fa-shield-halved mr-1"></i> Valid</div>
-                        <div class="text-content-muted mt-1 text-xs"><i class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblValCount">0</span> (<span id="lblValPct">10</span>%)</div>
+                        <div
+                            class="border border-blue-400 text-blue-600 rounded px-2 py-0.5 text-xs font-medium bg-blue-50">
+                            <i class="fa-solid fa-shield-halved mr-1"></i> Valid</div>
+                        <div class="text-content-muted mt-1 text-xs"><i
+                                class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblValCount">0</span> (<span
+                                id="lblValPct">10</span>%)</div>
                     </div>
                     <div class="flex flex-col items-center">
-                        <div class="border border-orange-400 text-orange-600 rounded px-2 py-0.5 text-xs font-medium bg-orange-50"><i class="fa-solid fa-pen mr-1"></i> Test</div>
-                        <div class="text-content-muted mt-1 text-xs"><i class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblTestCount">0</span> (<span id="lblTestPct">10</span>%)</div>
+                        <div
+                            class="border border-orange-400 text-orange-600 rounded px-2 py-0.5 text-xs font-medium bg-orange-50">
+                            <i class="fa-solid fa-pen mr-1"></i> Test</div>
+                        <div class="text-content-muted mt-1 text-xs"><i
+                                class="fa-solid fa-check text-green-500 mr-1"></i><span id="lblTestCount">0</span>
+                            (<span id="lblTestPct">10</span>%)</div>
                     </div>
                 </div>
 
-                <div class="relative w-full h-3 bg-surface rounded-full cursor-pointer select-none" id="splitSliderContainer" style="border: 1px solid var(--border-color);">
-                    <div class="absolute top-0 bottom-0 left-0 bg-purple-200 border-r border-purple-500 rounded-l-full" id="splitBarTrain" style="width: 80%;"></div>
-                    <div class="absolute top-0 bottom-0 bg-blue-200 border-r border-blue-500" id="splitBarVal" style="left: 80%; width: 10%;"></div>
-                    <div class="absolute top-0 bottom-0 right-0 bg-orange-200 rounded-r-full" id="splitBarTest" style="left: 90%; width: 10%;"></div>
-                    
-                    <div class="absolute top-1/2 -mt-2 w-4 h-4 bg-white border border-gray-400 rounded-full shadow hover:scale-110 z-10" style="left: 80%; transform: translateX(-50%); cursor: ew-resize;" id="splitHandle1"></div>
-                    <div class="absolute top-1/2 -mt-2 w-4 h-4 bg-white border border-gray-400 rounded-full shadow hover:scale-110 z-10" style="left: 90%; transform: translateX(-50%); cursor: ew-resize;" id="splitHandle2"></div>
+                <div class="relative w-full h-3 bg-surface rounded-full cursor-pointer select-none"
+                    id="splitSliderContainer" style="border: 1px solid var(--border-color);">
+                    <div class="absolute top-0 bottom-0 left-0 bg-purple-200 border-r border-purple-500 rounded-l-full"
+                        id="splitBarTrain" style="width: 80%;"></div>
+                    <div class="absolute top-0 bottom-0 bg-blue-200 border-r border-blue-500" id="splitBarVal"
+                        style="left: 80%; width: 10%;"></div>
+                    <div class="absolute top-0 bottom-0 right-0 bg-orange-200 rounded-r-full" id="splitBarTest"
+                        style="left: 90%; width: 10%;"></div>
+
+                    <div class="absolute top-1/2 -mt-2 w-4 h-4 bg-white border border-gray-400 rounded-full shadow hover:scale-110 z-10"
+                        style="left: 80%; transform: translateX(-50%); cursor: ew-resize;" id="splitHandle1"></div>
+                    <div class="absolute top-1/2 -mt-2 w-4 h-4 bg-white border border-gray-400 rounded-full shadow hover:scale-110 z-10"
+                        style="left: 90%; transform: translateX(-50%); cursor: ew-resize;" id="splitHandle2"></div>
                 </div>
             </div>
 
             <div>
-                <label class="block text-sm font-medium text-content-muted mb-2" data-i18n="yolo_version">YOLO Version</label>
+                <label class="block text-sm font-medium text-content-muted mb-2" data-i18n="yolo_version">YOLO
+                    Version</label>
                 <select id="exportFormat" class="w-full bg-surface border border-border rounded px-3 py-2 text-content">
                     <option value="yolov5nu.pt">YOLOv5 (yolov5nu.pt)</option>
                     <option value="yolov8n.pt" selected>YOLOv8 (yolov8n.pt - Recommended)</option>
@@ -627,7 +711,8 @@
                 </select>
                 <div class="mt-2 p-2 bg-sidebar rounded border border-border text-xs font-mono text-content-muted"
                     id="exportPreview">
-                    root/<br>&nbsp;&nbsp;├── images/train, val, test<br>&nbsp;&nbsp;├── labels/train, val, test<br>&nbsp;&nbsp;└── data.yaml
+                    root/<br>&nbsp;&nbsp;├── images/train, val, test<br>&nbsp;&nbsp;├── labels/train, val,
+                    test<br>&nbsp;&nbsp;└── data.yaml
                 </div>
             </div>
 
@@ -647,19 +732,25 @@
 <!-- Colab Code Modal -->
 <div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="colabCodeModal">
     <div class="bg-panel rounded-lg shadow-xl w-full max-w-4xl p-6 border border-border">
-        <h2 class="text-xl font-bold text-content mb-4"><i class="fa-brands fa-google text-yellow-500 mr-2"></i><span data-i18n="colab_title">Google Colab Training Code</span></h2>
-        <p class="text-sm text-content-muted mb-4" data-i18n="export_success">Export thành công! Hãy nén thư mục dataset, upload lên Colab và dùng đoạn code dưới đây để train YOLO.</p>
-        
+        <h2 class="text-xl font-bold text-content mb-4"><i class="fa-brands fa-google text-yellow-500 mr-2"></i><span
+                data-i18n="colab_title">Google Colab Training Code</span></h2>
+        <p class="text-sm text-content-muted mb-4" data-i18n="export_success">Export thành công! Hãy nén thư mục
+            dataset, upload lên Colab và dùng đoạn code dưới đây để train YOLO.</p>
+
         <div class="relative bg-sidebar rounded border border-border">
-            <pre class="p-4 text-sm font-mono text-content-muted overflow-x-auto overflow-y-auto max-h-[55vh] whitespace-pre-wrap"><code id="colabSnippetCode"></code></pre>
-            <button onclick="navigator.clipboard.writeText(document.getElementById('colabSnippetCode').textContent); const og = this.innerHTML; this.innerHTML='<i class=\'fa-solid fa-check\'></i> ' + (currentLang === 'vi' ? 'Đã sao chép!' : 'Copied!'); setTimeout(() => this.innerHTML=og, 2000);" 
-                    class="absolute top-2 right-2 px-2 py-1 bg-surface hover:bg-panel border border-border rounded text-xs text-content transition-colors">
+            <pre
+                class="p-4 text-sm font-mono text-content-muted overflow-x-auto overflow-y-auto max-h-[55vh] whitespace-pre-wrap"><code id="colabSnippetCode"></code></pre>
+            <button
+                onclick="navigator.clipboard.writeText(document.getElementById('colabSnippetCode').textContent); const og = this.innerHTML; this.innerHTML='<i class=\'fa-solid fa-check\'></i> ' + (currentLang === 'vi' ? 'Đã sao chép!' : 'Copied!'); setTimeout(() => this.innerHTML=og, 2000);"
+                class="absolute top-2 right-2 px-2 py-1 bg-surface hover:bg-panel border border-border rounded text-xs text-content transition-colors">
                 <i class="fa-solid fa-copy"></i> <span data-i18n="btn_copy">Copy</span>
             </button>
         </div>
-        
+
         <div class="flex justify-end mt-6">
-            <button type="button" class="px-4 py-2 text-sm bg-primary hover:opacity-90 text-content-inv rounded transition-opacity" onclick="closeModal('colabCodeModal')" data-i18n="btn_close">Đóng</button>
+            <button type="button"
+                class="px-4 py-2 text-sm bg-primary hover:opacity-90 text-content-inv rounded transition-opacity"
+                onclick="closeModal('colabCodeModal')" data-i18n="btn_close">Đóng</button>
         </div>
     </div>
 </div>
