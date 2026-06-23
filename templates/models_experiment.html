@@ -230,6 +230,16 @@
         <i class="fa-solid fa-xmark text-2xl font-bold"></i>
     </button>
     
+    <!-- Prev Button -->
+    <button id="fsPrevBtn" onclick="fsNavigate(-1); event.stopPropagation();" class="absolute left-6 top-1/2 -translate-y-1/2 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg" title="Ảnh trước (←)">
+        <i class="fa-solid fa-chevron-left text-xl"></i>
+    </button>
+    
+    <!-- Next Button -->
+    <button id="fsNextBtn" onclick="fsNavigate(1); event.stopPropagation();" class="absolute right-6 top-1/2 -translate-y-1/2 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg" title="Ảnh sau (→)">
+        <i class="fa-solid fa-chevron-right text-xl"></i>
+    </button>
+    
     <!-- Modal Body: Container for the full size canvas -->
     <div onclick="event.stopPropagation();" class="relative w-full h-full flex items-center justify-center overflow-auto max-w-[95vw] max-h-[85vh]">
         <canvas id="fullscreenCanvas" class="max-w-full max-h-full object-contain shadow-[0_0_30px_rgba(255,255,255,0.15)] rounded border border-white/10"></canvas>
@@ -530,6 +540,8 @@
         
         const resultsContainer = document.getElementById('experimentResults');
         resultsContainer.innerHTML = '';
+        let resultIndex = 0;
+        const resultFiles = [];
         
         const modelTimes = {};
         const modelScores = {};
@@ -597,7 +609,9 @@
                 }
                 
                 const paramsText = getParamsString(brightness, contrast, blur, noise);
-                renderTestResult(activeFile, data, resultsContainer, modelTimes, paramsText, roundScores, roundWinnerId);
+                resultFiles.push(activeFile);
+                renderTestResult(activeFile, data, resultsContainer, modelTimes, paramsText, roundScores, roundWinnerId, resultIndex);
+                resultIndex++;
             }
             
             // Calculate final averages and overall winner after all rounds
@@ -628,6 +642,11 @@
             if (summaryData.length > 0) {
                 renderExperimentSummary(summaryData, overallWinnerId, resultsContainer);
             }
+
+            // Build image navigator if multiple images
+            if (resultFiles.length > 1) {
+                buildImageNavigator(resultFiles, resultsContainer);
+            }
             
         } catch(e) {
             alert("Lỗi test: " + e.message);
@@ -637,11 +656,121 @@
         }
     }
     
-    function renderTestResult(file, results, container, modelTimes, paramsText, roundScores, roundWinnerId) {
+    // --- Image Navigator for quick switching ---
+    let currentNavIndex = 0;
+
+    function buildImageNavigator(files, container) {
+        // Hide all result blocks except first
+        const blocks = container.querySelectorAll('[data-result-index]');
+        blocks.forEach((b, i) => {
+            b.style.display = i === 0 ? '' : 'none';
+        });
+
+        const nav = document.createElement('div');
+        nav.id = 'imageNavigator';
+        nav.className = 'flex items-center gap-3 p-3 bg-panel border border-border rounded mb-4 sticky top-0 z-10';
+
+        // Prev button
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'px-2 py-1 bg-surface border border-border rounded text-content-muted hover:text-content hover:bg-panel transition-colors text-sm';
+        prevBtn.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+        prevBtn.onclick = () => navigateResult(-1, container);
+        nav.appendChild(prevBtn);
+
+        // Thumbnails
+        const strip = document.createElement('div');
+        strip.className = 'flex gap-2 overflow-x-auto flex-1 items-center';
+        strip.id = 'navThumbnails';
+
+        files.forEach((file, idx) => {
+            const thumb = document.createElement('div');
+            thumb.className = `cursor-pointer rounded border-2 overflow-hidden flex-shrink-0 transition-all duration-200 ${idx === 0 ? 'border-primary ring-2 ring-primary/30 scale-105' : 'border-border opacity-60 hover:opacity-100'}`;
+            thumb.dataset.navIndex = idx;
+            thumb.onclick = () => navigateToResult(idx, container);
+
+            const img = document.createElement('img');
+            img.src = URL.createObjectURL(file);
+            img.className = 'w-14 h-14 object-cover';
+            img.title = file.name;
+            thumb.appendChild(img);
+
+            // Counter label
+            const label = document.createElement('div');
+            label.className = 'text-[10px] text-center text-content-muted font-mono truncate px-0.5 bg-surface';
+            label.textContent = `${idx + 1}`;
+            thumb.appendChild(label);
+
+            strip.appendChild(thumb);
+        });
+        nav.appendChild(strip);
+
+        // Next button
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'px-2 py-1 bg-surface border border-border rounded text-content-muted hover:text-content hover:bg-panel transition-colors text-sm';
+        nextBtn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+        nextBtn.onclick = () => navigateResult(1, container);
+        nav.appendChild(nextBtn);
+
+        // Counter text
+        const counter = document.createElement('span');
+        counter.id = 'navCounter';
+        counter.className = 'text-xs text-content-muted font-mono whitespace-nowrap ml-1';
+        counter.textContent = `1 / ${files.length}`;
+        nav.appendChild(counter);
+
+        container.insertBefore(nav, container.firstChild);
+
+        // Keyboard navigation
+        document.addEventListener('keydown', handleNavKeydown);
+    }
+
+    function handleNavKeydown(e) {
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const container = document.getElementById('experimentResults');
+        if (!container) return;
+        if (e.key === 'ArrowLeft') { e.preventDefault(); navigateResult(-1, container); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); navigateResult(1, container); }
+    }
+
+    function navigateResult(direction, container) {
+        const blocks = container.querySelectorAll('[data-result-index]');
+        if (blocks.length === 0) return;
+        const newIndex = currentNavIndex + direction;
+        if (newIndex < 0 || newIndex >= blocks.length) return;
+        navigateToResult(newIndex, container);
+    }
+
+    function navigateToResult(index, container) {
+        const blocks = container.querySelectorAll('[data-result-index]');
+        if (index < 0 || index >= blocks.length) return;
+
+        blocks.forEach((b, i) => { b.style.display = i === index ? '' : 'none'; });
+        currentNavIndex = index;
+
+        // Update thumbnails
+        const thumbs = document.querySelectorAll('#navThumbnails [data-nav-index]');
+        thumbs.forEach((t, i) => {
+            if (i === index) {
+                t.className = 'cursor-pointer rounded border-2 overflow-hidden flex-shrink-0 transition-all duration-200 border-primary ring-2 ring-primary/30 scale-105';
+            } else {
+                t.className = 'cursor-pointer rounded border-2 overflow-hidden flex-shrink-0 transition-all duration-200 border-border opacity-60 hover:opacity-100';
+            }
+        });
+
+        // Update counter
+        const counter = document.getElementById('navCounter');
+        if (counter) counter.textContent = `${index + 1} / ${blocks.length}`;
+
+        // Scroll thumbnail into view
+        if (thumbs[index]) thumbs[index].scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    }
+
+    function renderTestResult(file, results, container, modelTimes, paramsText, roundScores, roundWinnerId, resultIdx) {
         const fileUrl = URL.createObjectURL(file);
         
         const block = document.createElement('div');
         block.className = 'border border-border rounded bg-surface overflow-hidden';
+        block.dataset.resultIndex = resultIdx !== undefined ? resultIdx : '';
         
         const header = document.createElement('div');
         header.className = 'bg-panel px-4 py-2 border-b border-border font-semibold text-content flex justify-between items-center';
@@ -716,16 +845,6 @@
                             ctx.strokeStyle = '#00ff00';
                             ctx.lineWidth = Math.max(2, img.width / 300);
                             ctx.strokeRect(p.bbox[0], p.bbox[1], p.bbox[2]-p.bbox[0], p.bbox[3]-p.bbox[1]);
-                            
-                            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                            const txt = `${p.class_name} ${(p.confidence*100).toFixed(0)}%`;
-                            const fontSize = Math.max(12, img.width / 40);
-                            ctx.font = `${fontSize}px sans-serif`;
-                            const tw = ctx.measureText(txt).width;
-                            ctx.fillRect(p.bbox[0], p.bbox[1] - fontSize - 4, tw + 8, fontSize + 4);
-                            
-                            ctx.fillStyle = '#00ff00';
-                            ctx.fillText(txt, p.bbox[0] + 4, p.bbox[1] - 4);
                         });
                     }
                 };
@@ -758,35 +877,78 @@
     }
 
     // Fullscreen Zoom Canvas Helpers
+    let fsCanvasList = [];  // [{canvas, name}]
+    let fsCurrentIndex = 0;
+
     function zoomCanvas(sourceCanvas, modelName) {
+        // Collect all sibling canvases from the same result block
+        const resultBlock = sourceCanvas.closest('[data-result-index]') || sourceCanvas.closest('.border');
+        fsCanvasList = [];
+        if (resultBlock) {
+            const allCols = resultBlock.querySelectorAll('canvas');
+            allCols.forEach(c => {
+                // Find the model name from the column title
+                const col = c.closest('.flex.flex-col');
+                const titleEl = col ? col.querySelector('.font-bold.text-sm') : null;
+                const name = titleEl ? titleEl.querySelector('span')?.textContent || modelName : modelName;
+                fsCanvasList.push({ canvas: c, name: name });
+            });
+        }
+        if (fsCanvasList.length === 0) {
+            fsCanvasList = [{ canvas: sourceCanvas, name: modelName }];
+        }
+
+        fsCurrentIndex = fsCanvasList.findIndex(item => item.canvas === sourceCanvas);
+        if (fsCurrentIndex === -1) fsCurrentIndex = 0;
+
+        fsShowCurrent();
+
         const fsModal = document.getElementById('fullscreenModal');
+        fsModal.classList.remove('hidden');
+        document.addEventListener('keydown', handleFullscreenKeys);
+    }
+
+    function fsShowCurrent() {
+        const item = fsCanvasList[fsCurrentIndex];
+        if (!item) return;
+
         const fsCanvas = document.getElementById('fullscreenCanvas');
         const fsTitle = document.getElementById('fullscreenTitle');
-        
         const fsCtx = fsCanvas.getContext('2d');
+
         fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
-        
-        fsCanvas.width = sourceCanvas.width;
-        fsCanvas.height = sourceCanvas.height;
-        
-        fsCtx.drawImage(sourceCanvas, 0, 0);
-        
-        fsTitle.innerHTML = `<i class="fa-solid fa-brain text-primary"></i> <span>${modelName}</span>`;
-        
-        fsModal.classList.remove('hidden');
-        document.addEventListener('keydown', handleFullscreenEsc);
+        fsCanvas.width = item.canvas.width;
+        fsCanvas.height = item.canvas.height;
+        fsCtx.drawImage(item.canvas, 0, 0);
+
+        const counter = fsCanvasList.length > 1 ? ` <span class="text-white/50 text-xs font-mono">(${fsCurrentIndex + 1}/${fsCanvasList.length})</span>` : '';
+        fsTitle.innerHTML = `<i class="fa-solid fa-brain text-primary"></i> <span>${item.name}</span>${counter}`;
+
+        // Show/hide nav buttons
+        const prevBtn = document.getElementById('fsPrevBtn');
+        const nextBtn = document.getElementById('fsNextBtn');
+        if (prevBtn) prevBtn.style.display = fsCanvasList.length > 1 ? '' : 'none';
+        if (nextBtn) nextBtn.style.display = fsCanvasList.length > 1 ? '' : 'none';
     }
-    
+
+    function fsNavigate(direction) {
+        const newIndex = fsCurrentIndex + direction;
+        if (newIndex < 0 || newIndex >= fsCanvasList.length) return;
+        fsCurrentIndex = newIndex;
+        fsShowCurrent();
+    }
+
     function closeFullscreen() {
         const fsModal = document.getElementById('fullscreenModal');
         fsModal.classList.add('hidden');
-        document.removeEventListener('keydown', handleFullscreenEsc);
+        document.removeEventListener('keydown', handleFullscreenKeys);
+        fsCanvasList = [];
     }
     
-    function handleFullscreenEsc(e) {
-        if (e.key === 'Escape') {
-            closeFullscreen();
-        }
+    function handleFullscreenKeys(e) {
+        if (e.key === 'Escape') { closeFullscreen(); }
+        if (e.key === 'ArrowLeft') { e.preventDefault(); fsNavigate(-1); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); fsNavigate(1); }
     }
 
     // Evaluation algorithms and summary rendering helpers
