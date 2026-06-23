@@ -56,17 +56,29 @@ class YOLOInference:
                 raise ValueError(f"Could not load image: {image_path}")
 
         h, w = img.shape[:2]
+        target_w, target_h = target_size
         
-        # "Force" resize (squeeze) as requested
-        img_resized = cv2.resize(img, target_size)
+        # Letterbox: resize maintaining aspect ratio, pad with gray
+        ratio = min(target_w / w, target_h / h)
+        new_w = int(w * ratio)
+        new_h = int(h * ratio)
         
-        # Preprocess: BGR -> RGB, float32, prompt -> 0-1
-        blob = cv2.cvtColor(img_resized, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img, (new_w, new_h))
+        
+        # Center the resized image on a padded canvas
+        pad_w = (target_w - new_w) // 2
+        pad_h = (target_h - new_h) // 2
+        
+        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = img_resized
+        
+        # Preprocess: BGR -> RGB, float32, 0-1
+        blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
         blob = blob.astype(np.float32) / 255.0
         blob = blob.transpose(2, 0, 1) # CHW
         blob = np.expand_dims(blob, axis=0) # Batch dimension
         
-        return blob, (w, h)
+        return blob, (w, h), ratio, (pad_w, pad_h)
 
     def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45, region=None):
         self.ensure_session()
@@ -109,9 +121,9 @@ class YOLOInference:
                 offset_x = rx
                 offset_y = ry
 
-        # 1. Preprocess
+        # 1. Preprocess (letterbox)
         try:
-            input_tensor, (orig_w, orig_h) = self.preprocess(img=img)
+            input_tensor, (orig_w, orig_h), ratio, (pad_w, pad_h) = self.preprocess(img=img)
         except Exception as e:
             return {'error': str(e)}
         
@@ -154,23 +166,15 @@ class YOLOInference:
         filtered_scores = class_scores[mask]
         filtered_classes = classes[mask]
         
-        # Convert to XYWH (center to top-left) and Rescale
-        # Model coords are in self.input_width x self.input_height
-        sx = orig_w / float(self.input_width)
-        sy = orig_h / float(self.input_height)
-        
+        # Convert to XYWH (center to top-left) and rescale from letterbox to original
         for i in range(len(filtered_boxes)):
-            cx, cy, w, h = filtered_boxes[i]
+            cx, cy, bw, bh = filtered_boxes[i]
             
-            # Convert center-wh to top-left-wh
-            x = (cx - w/2)
-            y = (cy - h/2)
-            
-            # Scale back to original
-            x *= sx
-            y *= sy
-            w *= sx
-            h *= sy
+            # Undo letterbox: remove padding, then divide by ratio
+            x = ((cx - bw / 2) - pad_w) / ratio
+            y = ((cy - bh / 2) - pad_h) / ratio
+            w = bw / ratio
+            h = bh / ratio
             
             boxes.append([x, y, w, h])
             confidences.append(float(filtered_scores[i]))
