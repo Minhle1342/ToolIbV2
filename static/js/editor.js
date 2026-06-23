@@ -961,11 +961,11 @@ class Editor {
             // getBoundingRect(true) returns WRONG coords when objects are inside
             // an activeSelection group (multi-select), causing bounding box drift on save.
             const matrix = obj.calcTransformMatrix();
-            const w = obj.width * obj.scaleX;
-            const h = obj.height * obj.scaleY;
+            const w = Math.abs(obj.width * obj.scaleX);
+            const h = Math.abs(obj.height * obj.scaleY);
 
-            // Transform center point (0,0 in object space) to absolute canvas coords
-            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+            // Transform true center point (width/2, height/2 in object space) to absolute canvas coords
+            const center = fabric.util.transformPoint({ x: obj.width / 2, y: obj.height / 2 }, matrix);
 
             const cx = center.x / this.imageWidth;
             const cy = center.y / this.imageHeight;
@@ -996,11 +996,11 @@ class Editor {
             // getBoundingRect() returns RELATIVE coords within the group.
             // We must use calcTransformMatrix() to get ABSOLUTE canvas coords.
             const matrix = obj.calcTransformMatrix();
-            const w = obj.width * obj.scaleX;
-            const h = obj.height * obj.scaleY;
+            const w = Math.abs(obj.width * obj.scaleX);
+            const h = Math.abs(obj.height * obj.scaleY);
 
-            // Transform the center point (0,0 in object space) to absolute coords
-            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+            // Transform the true center point (width/2, height/2 in object space) to absolute coords
+            const center = fabric.util.transformPoint({ x: obj.width / 2, y: obj.height / 2 }, matrix);
 
             const cx = center.x / this.imageWidth;
             const cy = center.y / this.imageHeight;
