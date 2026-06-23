@@ -255,11 +255,6 @@ def get_images():
         query = query.filter_by(view_id=view_id)
     if flag_status:
         query = query.filter_by(flag_status=flag_status)
-    if is_labeled is not None:
-        if is_labeled.lower() == 'true':
-            query = query.filter_by(is_labeled=True)
-        elif is_labeled.lower() == 'false':
-            query = query.filter_by(is_labeled=False)
     
     is_reviewed = request.args.get('is_reviewed')
     if is_reviewed is not None:
@@ -268,13 +263,54 @@ def get_images():
         elif is_reviewed.lower() == 'false':
             query = query.filter_by(is_reviewed=False)
     
-    # Pagination could be added here
     images = query.all()
     result = []
+    
+    projects_cache = {}
+    db_changed = False
+    
     for img in images:
+        if img.project_id not in projects_cache:
+            projects_cache[img.project_id] = Project.query.get(img.project_id)
+        project = projects_cache[img.project_id]
+        
+        has_coords = False
+        classes = []
+        if project:
+            label_file = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
+            if os.path.exists(label_file):
+                try:
+                    with open(label_file, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) >= 5:
+                                has_coords = True
+                                try:
+                                    classes.append(int(parts[0]))
+                                except ValueError:
+                                    pass
+                except Exception:
+                    pass
+                    
+        # Sync DB column
+        if img.is_labeled != has_coords:
+            img.is_labeled = has_coords
+            db_changed = True
+            
+        # Apply the is_labeled filter dynamically
+        if is_labeled is not None:
+            if is_labeled.lower() == 'true' and not has_coords:
+                continue
+            elif is_labeled.lower() == 'false' and has_coords:
+                continue
+                
         d = img.to_dict()
-        d['classes'] = utils.get_image_classes(img)
+        d['classes'] = sorted(list(set(classes)))
         result.append(d)
+        
+    if db_changed:
+        db.session.commit()
+        
     return jsonify(result)
 
 @api_bp.route('/labels/<int:image_id>', methods=['GET'])
@@ -307,7 +343,7 @@ def save_label():
     image = Image.query.get_or_404(data['image_id'])
     utils.save_yolo_label(image, data['labels'])
     
-    image.is_labeled = True
+    image.is_labeled = len(data.get('labels', [])) > 0
     if 'flag_status' in data:
         image.flag_status = data['flag_status']
     if 'split_type' in data:
@@ -413,9 +449,12 @@ def delete_project_class(project_id, class_idx):
             with open(label_file, 'w') as f:
                 if new_lines:
                     f.write('\n'.join(new_lines) + '\n')
+                    image.is_labeled = True
                 else:
                     f.write('') # Clear file if no boxes left
+                    image.is_labeled = False
 
+    db.session.commit()
     return jsonify({'message': 'Class deleted', 'classes': classes}), 200
 
 # --- Export ---

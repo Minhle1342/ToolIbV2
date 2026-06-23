@@ -597,14 +597,25 @@ class Workspace {
                 if (localImg) {
                     const uniqueClasses = Array.from(new Set(boxes.map(b => b.class_id))).sort((a, b) => a - b);
                     localImg.classes = uniqueClasses;
-                    localImg.is_labeled = true;
+                    localImg.is_labeled = boxes.length > 0;
 
                     // Update check icon in DOM without reloading the whole list
                     const el = document.getElementById(`img-${currentImage.id}`);
                     if (el) {
-                        const checkIcon = el.querySelector('.fa-regular.fa-circle');
-                        if (checkIcon) {
-                            checkIcon.className = 'fa-solid fa-check text-secondary';
+                        const iconContainer = el.querySelector('.flex.items-center.gap-2');
+                        if (iconContainer) {
+                            let checkIcon = iconContainer.querySelector('.fa-check') || iconContainer.querySelector('.fa-circle');
+                            if (!checkIcon) {
+                                iconContainer.insertAdjacentHTML('beforeend', '<i class="fa-regular fa-circle text-content-muted"></i>');
+                                checkIcon = iconContainer.querySelector('.fa-circle');
+                            }
+                            if (checkIcon) {
+                                if (boxes.length > 0) {
+                                    checkIcon.className = 'fa-solid fa-check text-secondary';
+                                } else {
+                                    checkIcon.className = 'fa-regular fa-circle text-content-muted';
+                                }
+                            }
                         }
                     }
                 }

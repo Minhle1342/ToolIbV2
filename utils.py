@@ -79,7 +79,8 @@ def scan_and_sync_images(project):
             except Exception as e:
                 print(f"Error parsing {yaml_name}: {e}")
 
-    existing_images = set(img.filename for img in project.images)
+    db_images_by_filename = {img.filename: img for img in project.images}
+    existing_images = set(db_images_by_filename.keys())
     new_images_count = 0
     
     # Scan folder
@@ -87,18 +88,32 @@ def scan_and_sync_images(project):
         for file in files:
             ext = os.path.splitext(file)[1].lower()
             if ext in ALLOWED_EXTENSIONS:
+                label_file = os.path.join(root, os.path.splitext(file)[0] + '.txt')
+                
+                # Check if file has coordinate data
+                has_coords = False
+                if os.path.exists(label_file):
+                    try:
+                        with open(label_file, 'r', encoding='utf-8') as lf:
+                            for line in lf:
+                                if len(line.strip().split()) >= 5:
+                                    has_coords = True
+                                    break
+                    except Exception:
+                        pass
+                
                 if file not in existing_images:
-                    # Check for labels (same directory)
-                    label_file = os.path.join(root, os.path.splitext(file)[0] + '.txt')
-                    is_labeled = os.path.exists(label_file) and os.path.getsize(label_file) > 0
-                    
                     new_image = Image(
                         filename=file,
                         project_id=project.id,
-                        is_labeled=is_labeled
+                        is_labeled=has_coords
                     )
                     db.session.add(new_image)
                     new_images_count += 1
+                else:
+                    img_obj = db_images_by_filename[file]
+                    if img_obj.is_labeled != has_coords:
+                        img_obj.is_labeled = has_coords
     
     db.session.commit()
     return new_images_count
