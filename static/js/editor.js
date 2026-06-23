@@ -43,6 +43,7 @@ class Editor {
         this.overlayCtx = this.overlayCanvas.getContext('2d');
         this.sequenceMode = 'none';
         this.showBoxes = true;
+        this.isDirty = false;
 
         this.initEvents();
         this.resizeCanvas();
@@ -129,6 +130,7 @@ class Editor {
         this.saveState();
         if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         this.focusClassId = null; // Reset focus on new image
+        this.isDirty = false; // Reset dirty flag after initial load
     }
 
     addBoxToCanvas(classId, cx, cy, w, h, isNew = true) {
@@ -467,7 +469,6 @@ class Editor {
             if (opt.target && opt.target.type === 'rect') {
                 const targetClassId = opt.target.classId;
                 if (typeof targetClassId !== 'undefined' && targetClassId !== null) {
-                    this.triggerGlowForClasses([targetClassId]);
                     if (typeof selectClass === 'function') {
                         selectClass(targetClassId);
                     }
@@ -803,6 +804,10 @@ class Editor {
 
         this.renderMagnifier(obj);
         this.updateSelectionInfo(obj);
+
+        if (this.isIsolationMode) {
+            this.updateIsolateView();
+        }
     }
 
     updateSelectionInfo(obj) {
@@ -889,7 +894,8 @@ class Editor {
      * @param {boolean} reverse - If true, select the previous box instead.
      */
     selectNextBox(reverse = false) {
-        const boxes = this.canvas.getObjects('rect').filter(o => o.visible !== false);
+        if (!this.showBoxes) return;
+        const boxes = this.canvas.getObjects('rect');
         if (boxes.length === 0) return;
 
         // Sort by top (Y) first, then by left (X) — reading order
@@ -1115,10 +1121,7 @@ class Editor {
         }
     }
 
-    toggleIsolateMode() {
-        // Toggle Isolation
-        this.isIsolationMode = !this.isIsolationMode;
-
+    updateIsolateView() {
         const activeObjects = this.canvas.getActiveObjects();
 
         this.canvas.getObjects().forEach(obj => {
@@ -1147,6 +1150,13 @@ class Editor {
         });
 
         this.canvas.requestRenderAll();
+    }
+
+    toggleIsolateMode() {
+        // Toggle Isolation
+        this.isIsolationMode = !this.isIsolationMode;
+
+        this.updateIsolateView();
 
         // Visual cue for button?
         const btn = document.getElementById('btnIsolate');
@@ -1330,6 +1340,8 @@ class Editor {
     // --- Undo/Redo ---
     saveState() {
         if (this.historyProcessing) return;
+
+        this.isDirty = true;
 
         // Save current state
         const state = JSON.stringify(this.canvas.toDatalessJSON([

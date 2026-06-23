@@ -195,6 +195,16 @@ class Workspace {
     }
 
     async selectImage(image) {
+        if (typeof editor !== 'undefined' && editor.isDirty) {
+            const msg = typeof window.t === 'function' ? window.t('unsaved_changes_warning') : 'Vui lòng lưu thay đổi trước khi chuyển sang ảnh khác!';
+            alert(msg);
+            return;
+        }
+
+        // Reset supervised mode when switching image
+        this.isSupervisedMode = false;
+        this.updateSupervisedUI();
+
         currentImage = image;
 
         // Update Split Type Select
@@ -584,6 +594,10 @@ class Workspace {
 
             await API.saveLabel(data);
 
+            if (typeof editor !== 'undefined') {
+                editor.isDirty = false;
+            }
+
             // Update local classes cache for filtering and checkmark status
             if (currentWorkspace.allImages) {
                 const localImg = currentWorkspace.allImages.find(i => i.id === currentImage.id);
@@ -843,6 +857,207 @@ class Workspace {
         } finally {
             btn.innerHTML = originalHtml;
             btn.disabled = false;
+        }
+    }
+
+    async startSupervisedLabeling() {
+        if (!currentImage) return;
+
+        const btn = document.getElementById('btnAutoLabelToggle');
+        if (!btn) return;
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+
+        try {
+            const data = await API.autoLabel(currentImage.id);
+            if (data.success) {
+                if (data.boxes.length > 0) {
+                    editor.loadBoxes(data.boxes);
+                    this.isSupervisedMode = true;
+                    this.updateSupervisedUI();
+                    
+                    setTimeout(() => {
+                        editor.canvas.discardActiveObject();
+                        editor.selectNextBox(false);
+                        this.zoomToActiveBox();
+                        if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
+                            editor.isIsolationMode = true;
+                            editor.updateIsolateView();
+                            
+                            const btnIsolate = document.getElementById('btnIsolate');
+                            if (btnIsolate) {
+                                btnIsolate.classList.add('text-yellow-500');
+                                btnIsolate.classList.remove('text-gray-400');
+                            }
+                        }
+                        this.updateSupervisedUI();
+                    }, 100);
+                } else {
+                    this.showToast('No objects detected.', 'info');
+                }
+            }
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+
+    startPreviewBoxes() {
+        if (!currentImage || typeof editor === 'undefined' || !editor.canvas) return;
+        
+        const boxes = editor.canvas.getObjects('rect');
+        if (boxes.length === 0) {
+            this.showToast(typeof window.t === 'function' ? window.t('no_boxes_preview') || 'No boxes to preview' : 'No boxes to preview', 'info');
+            return;
+        }
+
+        this.isSupervisedMode = true;
+        this.updateSupervisedUI();
+        
+        setTimeout(() => {
+            editor.canvas.discardActiveObject();
+            editor.selectNextBox(false);
+            this.zoomToActiveBox();
+            if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
+                editor.isIsolationMode = true;
+                editor.updateIsolateView();
+                
+                const btnIsolate = document.getElementById('btnIsolate');
+                if (btnIsolate) {
+                    btnIsolate.classList.add('text-yellow-500');
+                    btnIsolate.classList.remove('text-gray-400');
+                }
+            }
+            this.updateSupervisedUI();
+        }, 100);
+    }
+
+    zoomToActiveBox() {
+        if (!editor || !editor.canvas) return;
+        const target = editor.canvas.getActiveObject();
+        if (!target) return;
+        
+        const padding = 100;
+        const scaleX = editor.canvas.getWidth() / (target.width * target.scaleX + padding);
+        const scaleY = editor.canvas.getHeight() / (target.height * target.scaleY + padding);
+        let zoom = Math.min(scaleX, scaleY);
+        zoom = Math.min(zoom, 5); 
+        zoom = Math.max(zoom, 1);
+        
+        editor.canvas.setZoom(zoom);
+        
+        const boxCenterX = target.left + (target.width * target.scaleX) / 2;
+        const boxCenterY = target.top + (target.height * target.scaleY) / 2;
+        const vpw = editor.canvas.getWidth();
+        const vph = editor.canvas.getHeight();
+
+        const vpt = editor.canvas.viewportTransform.slice();
+        vpt[4] = vpw / 2 - boxCenterX * zoom;
+        vpt[5] = vph / 2 - boxCenterY * zoom;
+        editor.canvas.setViewportTransform(vpt);
+    }
+
+    finishSupervisedLabeling() {
+        this.isSupervisedMode = false;
+        this.updateSupervisedUI();
+        if (typeof editor !== 'undefined' && editor.canvas) {
+            if (editor.isIsolationMode) {
+                editor.isIsolationMode = false;
+                editor.updateIsolateView();
+                const btnIsolate = document.getElementById('btnIsolate');
+                if (btnIsolate) {
+                    btnIsolate.classList.remove('text-yellow-500');
+                    btnIsolate.classList.add('text-gray-400');
+                }
+            }
+            editor.resetView();
+            editor.canvas.discardActiveObject();
+            editor.canvas.renderAll();
+        }
+        this.showToast(typeof window.t === 'function' ? window.t('supervised_done') || 'Supervised labeling completed.' : 'Supervised labeling completed.', 'success');
+    }
+
+    nextSupervisedBox() {
+        if (!editor || !editor.canvas || !editor.showBoxes) return;
+        const boxes = editor.canvas.getObjects('rect');
+        const sorted = [...boxes].sort((a, b) => {
+            const dy = a.top - b.top;
+            if (Math.abs(dy) > 10) return dy;
+            return a.left - b.left;
+        });
+        
+        const current = editor.canvas.getActiveObject();
+        if (current && current.type === 'rect') {
+            const currentIdx = sorted.indexOf(current);
+            if (currentIdx === sorted.length - 1) {
+                this.finishSupervisedLabeling();
+                return;
+            }
+        }
+        
+        editor.selectNextBox(false);
+        this.zoomToActiveBox();
+        if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
+            editor.isIsolationMode = true;
+            editor.updateIsolateView();
+            
+            const btnIsolate = document.getElementById('btnIsolate');
+            if (btnIsolate) {
+                btnIsolate.classList.add('text-yellow-500');
+                btnIsolate.classList.remove('text-gray-400');
+            }
+        }
+        this.updateSupervisedUI();
+    }
+
+    prevSupervisedBox() {
+        if (!editor || !editor.canvas) return;
+        editor.selectNextBox(true);
+        this.zoomToActiveBox();
+        if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
+            editor.isIsolationMode = true;
+            editor.updateIsolateView();
+            
+            const btnIsolate = document.getElementById('btnIsolate');
+            if (btnIsolate) {
+                btnIsolate.classList.add('text-yellow-500');
+                btnIsolate.classList.remove('text-gray-400');
+            }
+        }
+        this.updateSupervisedUI();
+    }
+
+    updateSupervisedUI() {
+        const panel = document.getElementById('supervisedPanel');
+        if (panel) {
+            if (this.isSupervisedMode) {
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+                
+                const textEl = document.getElementById('supervisedModeText');
+                if (textEl && typeof editor !== 'undefined' && editor.canvas) {
+                    const boxes = editor.canvas.getObjects('rect');
+                    const sorted = [...boxes].sort((a, b) => {
+                        const dy = a.top - b.top;
+                        if (Math.abs(dy) > 10) return dy;
+                        return a.left - b.left;
+                    });
+                    const current = editor.canvas.getActiveObject();
+                    let currentIdx = 0;
+                    if (current && current.type === 'rect') {
+                        currentIdx = sorted.indexOf(current) + 1;
+                    } else if (sorted.length > 0) {
+                        currentIdx = 1;
+                    }
+                    textEl.innerText = `${currentIdx}/${sorted.length}`;
+                }
+            } else {
+                panel.classList.add('hidden');
+                panel.classList.remove('flex');
+            }
         }
     }
 

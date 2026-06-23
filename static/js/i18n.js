@@ -106,7 +106,8 @@ const translations = {
         "dashboard_totalFiles": "Total: {0} files",
         "dashboard_uploadError": "Upload error!",
         "dashboard_failed": "Failed",
-        "dashboard_errorMsg": "Error: {0}"
+        "dashboard_errorMsg": "Error: {0}",
+        "unsaved_changes_warning": "Please save your changes before switching to another image!"
     },
     vi: {
         // Base
@@ -215,7 +216,8 @@ const translations = {
         "dashboard_totalFiles": "Tổng: {0} tệp",
         "dashboard_uploadError": "Lỗi tải lên!",
         "dashboard_failed": "Thất bại",
-        "dashboard_errorMsg": "Lỗi: {0}"
+        "dashboard_errorMsg": "Lỗi: {0}",
+        "unsaved_changes_warning": "Vui lòng lưu thay đổi trước khi chuyển sang ảnh khác!"
     }
 };
 

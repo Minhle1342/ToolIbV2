@@ -167,6 +167,11 @@
                         <i class="fa-solid fa-images w-4 text-center"></i> <span data-i18n="auto_all">All Unlabeled
                             Images</span>
                     </button>
+                    <button
+                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.startSupervisedLabeling()">
+                        <i class="fa-solid fa-user-check w-4 text-center"></i> <span data-i18n="supervised_labeling">Supervised Labeling</span>
+                    </button>
                 </div>
             </div>
 
@@ -204,6 +209,12 @@
                     </button>
                 </div>
             </div>
+            <button id="btnPreviewBoxes"
+                class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel transition-colors"
+                title="Preview Boxes" data-i18n-title="tool_preview_boxes"
+                onclick="currentWorkspace.startPreviewBoxes()">
+                <i class="fa-solid fa-play text-lg"></i>
+            </button>
             <button id="btnHideBoxes"
                 class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel transition-colors"
                 title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes"
@@ -232,7 +243,7 @@
                 <i class="fa-solid fa-compress"></i>
             </button>
 
-            <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel"
+            <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel ml-auto"
                 onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)" data-i18n-title="tool_flag">
                 <i class="fa-regular fa-flag text-lg"></i>
             </button>
@@ -285,6 +296,25 @@
                 <option value="test" class="bg-surface text-content">TEST</option>
             </select>
             <canvas id="c"></canvas>
+
+            <!-- Supervised Labeling Floating Panel -->
+            <div id="supervisedPanel" class="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 bg-panel border border-border rounded-full shadow-2xl px-6 py-3 hidden items-center gap-4">
+                <span class="text-xs font-bold text-purple-400 uppercase tracking-widest flex items-center gap-2">
+                    <i class="fa-solid fa-user-check"></i> <span id="supervisedModeText" data-i18n="supervised_mode">Supervised Mode</span>
+                </span>
+                <div class="w-px h-5 bg-border"></div>
+                <button class="bg-gray-700/50 hover:bg-gray-700 text-gray-200 text-xs px-4 py-1.5 rounded-full border border-gray-600/30 transition-colors flex items-center gap-1.5"
+                    onclick="currentWorkspace.prevSupervisedBox()" title="Previous Box">
+                    <i class="fa-solid fa-chevron-left"></i> <span data-i18n="btn_prev">Previous</span>
+                </button>
+                <button class="bg-green-700/50 hover:bg-green-700 text-green-200 text-xs px-4 py-1.5 rounded-full border border-green-600/30 transition-colors flex items-center gap-1.5 font-medium shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                    onclick="currentWorkspace.nextSupervisedBox()" title="Accept & Next Box">
+                    <span data-i18n="btn_accept_next">Accept & Next</span> <i class="fa-solid fa-chevron-right"></i>
+                </button>
+                <button class="text-content-muted hover:text-red-500 transition-colors ml-2" onclick="currentWorkspace.finishSupervisedLabeling()" title="Exit Supervised Mode">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
 
             <!-- Collapsible Action Bottom Panel for Selected Bounding Boxes -->
             <div id="bottomBoxPanel"
