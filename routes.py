@@ -283,6 +283,23 @@ def get_label(image_id):
     labels = utils.read_yolo_label(image)
     return jsonify(labels)
 
+@api_bp.route('/images/batch-review', methods=['POST'])
+def batch_review():
+    data = request.json
+    image_ids = data.get('image_ids', [])
+    is_reviewed = data.get('is_reviewed', True)
+    
+    if not image_ids:
+        return jsonify({'message': 'No images to update'}), 200
+        
+    db.session.query(Image).filter(Image.id.in_(image_ids)).update(
+        {Image.is_reviewed: is_reviewed},
+        synchronize_session=False
+    )
+    db.session.commit()
+    
+    return jsonify({'message': f'Successfully updated {len(image_ids)} images'})
+
 @api_bp.route('/save', methods=['POST'])
 def save_label():
     data = request.json

@@ -149,6 +149,15 @@ class startAPI {
         });
         return await res.json();
     }
+
+    async batchReview(data) {
+        const res = await fetch('/api/images/batch-review', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

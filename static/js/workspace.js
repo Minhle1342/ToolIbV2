@@ -6,6 +6,7 @@ let projectClasses = [];
 
 class Workspace {
     constructor() {
+        this.keysPressed = {};
         this.init();
         this.imageList = [];
     }
@@ -18,34 +19,62 @@ class Workspace {
         await loadImages();
 
         // Hotkeys
+        document.addEventListener('keyup', (e) => {
+            this.keysPressed[e.key.toLowerCase()] = false;
+        });
+        window.addEventListener('blur', () => {
+            this.keysPressed = {};
+        });
+
         document.addEventListener('keydown', (e) => {
             // Ignore hotkeys if typing in an input text field
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
                 return;
             }
 
-            if (e.key === 'Delete' || e.key === 'Backspace' || e.key.toLowerCase() === 'q') {
+            const key = e.key.toLowerCase();
+            this.keysPressed[key] = true;
+
+            if (this.keysPressed['g'] && this.keysPressed['a']) {
+                e.preventDefault();
+                if (this.gTimeout) {
+                    clearTimeout(this.gTimeout);
+                    this.gTimeout = null;
+                }
+                this.toggleReviewAll();
+                return;
+            }
+
+            if (e.key === 'Delete' || e.key === 'Backspace' || key === 'q') {
                 editor.deleteSelected();
             }
-            if (e.key.toLowerCase() === 's' && (e.ctrlKey || e.metaKey)) {
+            if (key === 's' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 this.save();
             }
-            if (e.key.toLowerCase() === 'd' && (e.ctrlKey || e.metaKey)) {
+            if (key === 'd' && (e.ctrlKey || e.metaKey)) {
                 e.preventDefault();
                 editor.duplicateSelected();
-            } else if (e.key.toLowerCase() === 'd') {
+            } else if (key === 'd') {
                 // Single D for Draw Mode
                 editor.setMode('draw');
             }
-            if (e.key.toLowerCase() === 'v') editor.setMode('select');
-            if (e.key.toLowerCase() === 'r') editor.setMode('auto_label_region');
-            if (e.key.toLowerCase() === 'f') this.toggleFlag();
-            if (e.key.toLowerCase() === 'g') this.toggleReview();
-            if (e.key.toLowerCase() === 'l') this.toggleLockBox();
-            if (e.key.toLowerCase() === 'h') this.toggleImageVisibility();
-            if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
-            if (e.key.toLowerCase() === 'a') editor.toggleStickyMove();
+            if (key === 'v') editor.setMode('select');
+            if (key === 'r') editor.setMode('auto_label_region');
+            if (key === 'f') this.toggleFlag();
+            if (key === 'g') {
+                this.gTimeout = setTimeout(() => {
+                    this.toggleReview();
+                }, 150);
+            }
+            if (key === 'l') this.toggleLockBox();
+            if (key === 'h') this.toggleImageVisibility();
+            if (key === 'i') this.toggleIsolateMode();
+            if (key === 'a') {
+                if (!this.keysPressed['g']) {
+                    editor.toggleStickyMove();
+                }
+            }
 
             // Class Hotkeys (0-9)
             if (e.key >= '0' && e.key <= '9') {
@@ -397,6 +426,68 @@ class Workspace {
         if (this.allImages) {
             const localImg = this.allImages.find(i => i.id === currentImage.id);
             if (localImg) localImg.is_reviewed = currentImage.is_reviewed;
+        }
+    }
+
+    async toggleReviewAll() {
+        if (!this.imageList || this.imageList.length === 0) return;
+
+        // Check if there is at least one unreviewed image in the list
+        const hasUnreviewed = this.imageList.some(img => !img.is_reviewed);
+        const targetReviewed = hasUnreviewed; // if has unreviewed, mark all as reviewed; else mark all as unreviewed
+
+        const imageIds = this.imageList.map(img => img.id);
+
+        try {
+            const res = await API.batchReview({
+                image_ids: imageIds,
+                is_reviewed: targetReviewed
+            });
+
+            if (res.message) {
+                // Update local states
+                this.imageList.forEach(img => {
+                    img.is_reviewed = targetReviewed;
+                });
+                if (this.allImages) {
+                    this.allImages.forEach(img => {
+                        if (imageIds.includes(img.id)) {
+                            img.is_reviewed = targetReviewed;
+                        }
+                    });
+                }
+
+                // If currentImage is in the updated list, update its state and the UI button
+                if (currentImage && imageIds.includes(currentImage.id)) {
+                    currentImage.is_reviewed = targetReviewed;
+                    this.updateReviewButton();
+                }
+
+                // Update the sidebar icons in the DOM
+                imageIds.forEach(id => {
+                    const el = document.getElementById(`img-${id}`);
+                    if (el) {
+                        const iconContainer = el.querySelector('.flex.items-center.gap-2');
+                        if (iconContainer) {
+                            const icon = iconContainer.querySelector('.fa-circle-check');
+                            if (targetReviewed) {
+                                if (!icon) {
+                                    iconContainer.insertAdjacentHTML('afterbegin', '<i class="fa-solid fa-circle-check text-green-500"></i>');
+                                }
+                            } else {
+                                if (icon) icon.remove();
+                            }
+                        }
+                    }
+                });
+
+                this.showToast(targetReviewed ? 'Marked all as reviewed' : 'Unmarked all reviews', 'success');
+            } else {
+                alert(res.error || 'Failed to update review status');
+            }
+        } catch (e) {
+            console.error('Batch review error:', e);
+            alert('Failed to update review status: ' + e.message);
         }
     }
 
