@@ -882,6 +882,63 @@ class Editor {
         }
     }
 
+    /**
+     * Select the next (or previous) bounding box in reading order:
+     * top-to-bottom, left-to-right.
+     * Pans the viewport to center the selected box on screen.
+     * @param {boolean} reverse - If true, select the previous box instead.
+     */
+    selectNextBox(reverse = false) {
+        const boxes = this.canvas.getObjects('rect').filter(o => o.visible !== false);
+        if (boxes.length === 0) return;
+
+        // Sort by top (Y) first, then by left (X) — reading order
+        const sorted = [...boxes].sort((a, b) => {
+            const dy = a.top - b.top;
+            // Consider boxes within 10px of vertical distance as "same row"
+            if (Math.abs(dy) > 10) return dy;
+            return a.left - b.left;
+        });
+
+        // Ensure we are in select mode
+        if (this.currentMode !== 'select') {
+            this.setMode('select');
+        }
+
+        const current = this.canvas.getActiveObject();
+        let nextIndex = 0;
+
+        if (current && current.type === 'rect') {
+            const currentIdx = sorted.indexOf(current);
+            if (currentIdx !== -1) {
+                if (reverse) {
+                    nextIndex = (currentIdx - 1 + sorted.length) % sorted.length;
+                } else {
+                    nextIndex = (currentIdx + 1) % sorted.length;
+                }
+            }
+        } else {
+            // Nothing selected: pick first (Tab) or last (Shift+Tab)
+            nextIndex = reverse ? sorted.length - 1 : 0;
+        }
+
+        const target = sorted[nextIndex];
+        this.canvas.setActiveObject(target);
+        this.onSelect({ selected: [target] });
+
+        // Pan viewport to center the selected box on screen
+        const zoom = this.canvas.getZoom();
+        const boxCenterX = target.left + (target.width * target.scaleX) / 2;
+        const boxCenterY = target.top + (target.height * target.scaleY) / 2;
+        const vpw = this.canvas.getWidth();
+        const vph = this.canvas.getHeight();
+
+        const vpt = this.canvas.viewportTransform.slice(); // copy current transform
+        vpt[4] = vpw / 2 - boxCenterX * zoom;
+        vpt[5] = vph / 2 - boxCenterY * zoom;
+        this.canvas.setViewportTransform(vpt);
+    }
+
     deleteSelected() {
         const active = this.canvas.getActiveObjects();
         if (active.length) {

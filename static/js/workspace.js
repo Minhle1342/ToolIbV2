@@ -46,6 +46,13 @@ class Workspace {
                 return;
             }
 
+            // Tab / Shift+Tab: Cycle through bounding boxes
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                editor.selectNextBox(e.shiftKey);
+                return;
+            }
+
             if (e.key === 'Delete' || e.key === 'Backspace' || key === 'q') {
                 editor.deleteSelected();
             }
@@ -115,22 +122,7 @@ class Workspace {
             }
         });
 
-        // Setup Auto Save
-        this.isAutoSave = localStorage.getItem('autoSaveEnabled') === 'true';
-        this.autoSaveTimeout = null;
 
-        // Initialize Auto Save Checkbox
-        const autoSaveToggle = document.getElementById('autoSaveToggle');
-        if (autoSaveToggle) {
-            autoSaveToggle.checked = this.isAutoSave;
-        }
-
-        // Set callback on editor state change
-        editor.onStateChange = () => {
-            if (this.isAutoSave) {
-                this.triggerAutoSaveDebounced();
-            }
-        };
     }
 
     async loadProjectInfo() {
@@ -654,19 +646,7 @@ class Workspace {
         }
     }
 
-    toggleAutoSave(checked) {
-        this.isAutoSave = checked;
-        localStorage.setItem('autoSaveEnabled', checked ? 'true' : 'false');
-    }
 
-    triggerAutoSaveDebounced() {
-        if (this.autoSaveTimeout) {
-            clearTimeout(this.autoSaveTimeout);
-        }
-        this.autoSaveTimeout = setTimeout(() => {
-            this.save(true);
-        }, 1200); // 1.2s debounce
-    }
 
     async collectCrop() {
         if (!currentImage) return;
@@ -755,7 +735,7 @@ class Workspace {
             if (result.success) {
                 editor.updateActiveBoxesClasses(result.results);
                 this.showToast(`Classified ${selectedBoxes.length} box(es)`, 'success');
-                this.triggerAutoSaveDebounced();
+                this.save(true);
 
                 if (btn) {
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> Classified!';
