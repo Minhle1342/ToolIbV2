@@ -873,7 +873,18 @@ class Workspace {
             const data = await API.autoLabel(currentImage.id, normRegion);
             if (data.success) {
                 if (data.boxes.length > 0) {
-                    // Add the new boxes to the existing boxes
+                    // Remove existing boxes whose center falls inside the drawn region
+                    // to prevent duplicate bounding boxes
+                    const existingBoxes = editor.canvas.getObjects('rect');
+                    const toRemove = existingBoxes.filter(box => {
+                        const boxCenterX = box.left + (box.width * box.scaleX) / 2;
+                        const boxCenterY = box.top + (box.height * box.scaleY) / 2;
+                        return boxCenterX >= region.x && boxCenterX <= region.x + region.w &&
+                               boxCenterY >= region.y && boxCenterY <= region.y + region.h;
+                    });
+                    toRemove.forEach(box => editor.canvas.remove(box));
+
+                    // Add the new boxes from AI
                     data.boxes.forEach(box => {
                         editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, true);
                     });
