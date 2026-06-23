@@ -918,8 +918,11 @@ class Workspace {
         this.updateSupervisedUI();
         
         setTimeout(() => {
-            editor.canvas.discardActiveObject();
-            editor.selectNextBox(false);
+            const activeObj = editor.canvas.getActiveObject();
+            if (!activeObj || activeObj.type !== 'rect') {
+                editor.canvas.discardActiveObject();
+                editor.selectNextBox(false);
+            }
             this.zoomToActiveBox();
             if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
                 editor.isIsolationMode = true;
