@@ -147,7 +147,7 @@ class Editor {
             height: height,
             fill: 'rgba(0,0,0,0)',
             stroke: cls.color,
-            strokeWidth: 2 / this.getZoom(), // Dynamic stroke?
+            strokeWidth: 1 / this.getZoom(), // Dynamic stroke?
             transparentCorners: false,
             cornerColor: 'white',
             cornerSize: 8,
@@ -329,7 +329,7 @@ class Editor {
                     fill: this.currentMode === 'auto_label_region' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(0,0,0,0)',
                     stroke: strokeColor,
                     strokeDashArray: strokeDashArray,
-                    strokeWidth: 2 / this.getZoom(),
+                    strokeWidth: 1 / this.getZoom(),
                     selectable: false, // temporarily false
                     classId: this.currentMode === 'auto_label_region' ? null : this.currentClassId
                 });
@@ -1387,7 +1387,7 @@ class Editor {
                 const baseColor = r.stroke || '#ffffff';
 
                 r.set({
-                    strokeWidth: 2 / this.getZoom() + extraStroke,
+                    strokeWidth: 1 / this.getZoom() + extraStroke,
                     shadow: new fabric.Shadow({
                         color: baseColor,
                         blur: blurValue,
