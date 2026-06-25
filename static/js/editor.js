@@ -705,12 +705,29 @@ class Editor {
                 if (ctx) {
                     ctx.save();
                     const rects = this.canvas.getObjects('rect');
+                    const time = performance.now();
+                    const pulse = (Math.sin(time / 200) + 1) / 2; // oscillates between 0 and 1
+                    const pulseRadius = 4.5 + pulse * 6; // oscillates between 4.5 and 10.5
+                    const pulseAlpha = (1 - pulse) * 0.8; // fades out as it expands
+                    
                     rects.forEach(rect => {
                         const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
                         const bound = rect.getBoundingRect();
                         const cx = bound.left + bound.width / 2;
                         const cy = bound.top + bound.height / 2;
                         
+                        // Draw glowing outer ring
+                        ctx.save();
+                        ctx.globalAlpha = pulseAlpha;
+                        ctx.fillStyle = cls.color;
+                        ctx.shadowColor = cls.color;
+                        ctx.shadowBlur = 10;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
+
+                        // Draw solid center dot
                         ctx.fillStyle = cls.color;
                         ctx.beginPath();
                         ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
@@ -1435,6 +1452,22 @@ class Editor {
         });
         if (!this.showBoxes) {
             this.canvas.discardActiveObject();
+            if (!this._dotAnimFrame) {
+                const animateDots = () => {
+                    if (this.showBoxes) {
+                        this._dotAnimFrame = null;
+                        return;
+                    }
+                    this.canvas.requestRenderAll();
+                    this._dotAnimFrame = requestAnimationFrame(animateDots);
+                };
+                this._dotAnimFrame = requestAnimationFrame(animateDots);
+            }
+        } else {
+            if (this._dotAnimFrame) {
+                cancelAnimationFrame(this._dotAnimFrame);
+                this._dotAnimFrame = null;
+            }
         }
         this.canvas.requestRenderAll();
         return this.showBoxes;
