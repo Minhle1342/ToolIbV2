@@ -276,6 +276,7 @@ def get_images():
         
         has_coords = False
         classes = []
+        boxes = []
         if project:
             label_file = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
             if os.path.exists(label_file):
@@ -287,6 +288,13 @@ def get_images():
                                 has_coords = True
                                 try:
                                     classes.append(int(parts[0]))
+                                    boxes.append({
+                                        'class_id': int(parts[0]),
+                                        'x_center': float(parts[1]),
+                                        'y_center': float(parts[2]),
+                                        'width': float(parts[3]),
+                                        'height': float(parts[4])
+                                    })
                                 except ValueError:
                                     pass
                 except Exception:
@@ -306,6 +314,7 @@ def get_images():
                 
         d = img.to_dict()
         d['classes'] = sorted(list(set(classes)))
+        d['boxes'] = boxes
         result.append(d)
         
     if db_changed:

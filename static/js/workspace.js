@@ -46,6 +46,17 @@ class Workspace {
                 return;
             }
 
+            // Supervised/Preview mode navigation with arrow keys
+            if (this.isSupervisedMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+                e.preventDefault();
+                if (e.key === 'ArrowLeft') {
+                    this.prevSupervisedBox();
+                } else {
+                    this.nextSupervisedBox();
+                }
+                return;
+            }
+
             // Tab / Shift+Tab: Cycle through bounding boxes
             if (e.key === 'Tab') {
                 e.preventDefault();
@@ -281,6 +292,22 @@ class Workspace {
                 alert('Failed to load image'); 
                 return; 
             }
+            
+            if (image.overlapThreshold !== undefined && image.overlapThreshold !== null) {
+                for (let i = 0; i < labels.length; i++) {
+                    labels[i].isOverlapping = false;
+                }
+                for (let i = 0; i < labels.length; i++) {
+                    for (let j = i + 1; j < labels.length; j++) {
+                        const iou = calculateIoU(labels[i], labels[j]);
+                        if (iou >= image.overlapThreshold) {
+                            labels[i].isOverlapping = true;
+                            labels[j].isOverlapping = true;
+                        }
+                    }
+                }
+            }
+            
             editor.loadImage(img);
             editor.loadBoxes(labels);
 
@@ -2001,6 +2028,80 @@ files.download(onnx_path)
     }
 }
 
+function calculateIoU(box1, box2) {
+    const b1_x = box1.x_center !== undefined ? box1.x_center : box1.x;
+    const b1_y = box1.y_center !== undefined ? box1.y_center : box1.y;
+    const b1_w = box1.width !== undefined ? box1.width : box1.w;
+    const b1_h = box1.height !== undefined ? box1.height : box1.h;
+
+    const b2_x = box2.x_center !== undefined ? box2.x_center : box2.x;
+    const b2_y = box2.y_center !== undefined ? box2.y_center : box2.y;
+    const b2_w = box2.width !== undefined ? box2.width : box2.w;
+    const b2_h = box2.height !== undefined ? box2.height : box2.h;
+
+    const x1_min = b1_x - b1_w / 2;
+    const y1_min = b1_y - b1_h / 2;
+    const x1_max = b1_x + b1_w / 2;
+    const y1_max = b1_y + b1_h / 2;
+
+    const x2_min = b2_x - b2_w / 2;
+    const y2_min = b2_y - b2_h / 2;
+    const x2_max = b2_x + b2_w / 2;
+    const y2_max = b2_y + b2_h / 2;
+
+    const inter_x_min = Math.max(x1_min, x2_min);
+    const inter_y_min = Math.max(y1_min, y2_min);
+    const inter_x_max = Math.min(x1_max, x2_max);
+    const inter_y_max = Math.min(y1_max, y2_max);
+
+    if (inter_x_min < inter_x_max && inter_y_min < inter_y_max) {
+        const inter_area = (inter_x_max - inter_x_min) * (inter_y_max - inter_y_min);
+        const area1 = b1_w * b1_h;
+        const area2 = b2_w * b2_h;
+        const union_area = area1 + area2 - inter_area;
+        return inter_area / union_area;
+    }
+    return 0;
+}
+
+function applyOverlapFilter() {
+    loadImages(false);
+}
+
+function toggleSidebarFilters() {
+    const content = document.getElementById('sidebarFiltersContent');
+    const icon = document.getElementById('toggleFiltersIcon');
+    if (content && icon) {
+        if (content.classList.contains('hidden')) {
+            content.classList.remove('hidden');
+            icon.classList.remove('fa-chevron-down');
+            icon.classList.add('fa-chevron-up');
+        } else {
+            content.classList.add('hidden');
+            icon.classList.remove('fa-chevron-up');
+            icon.classList.add('fa-chevron-down');
+        }
+    }
+}
+
+function copyImageName(event, filename) {
+    event.preventDefault();
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+    navigator.clipboard.writeText(nameWithoutExt).then(() => {
+        const el = event.currentTarget;
+        const originalBg = el.style.backgroundColor;
+        const originalColor = el.style.color;
+        el.style.backgroundColor = '#10b981';
+        el.style.color = '#fff';
+        setTimeout(() => {
+            el.style.backgroundColor = originalBg;
+            el.style.color = originalColor;
+        }, 300);
+    }).catch(err => {
+        console.error('Failed to copy', err);
+    });
+}
+
 const currentWorkspace = new Workspace();
 
 async function loadImages(fetchFromServer = true) {
@@ -2059,25 +2160,59 @@ async function loadImages(fetchFromServer = true) {
     // Filter images
     let filteredImages = currentWorkspace.allImages;
     if (selectedClasses.length > 0) {
-        filteredImages = currentWorkspace.allImages.filter(img => {
+        filteredImages = filteredImages.filter(img => {
             const imgClasses = img.classes || [];
             return selectedClasses.every(c => imgClasses.includes(c));
         });
     }
 
+    // Overlap filter
+    const overlapInput = document.getElementById('overlapThresholdInput');
+    const overlapThreshold = overlapInput ? parseFloat(overlapInput.value) : NaN;
+    
+    // Add overlap info to images if threshold is set
+    filteredImages.forEach(img => {
+        img.overlapCount = 0;
+        img.overlappingBoxes = new Set();
+        if (!isNaN(overlapThreshold) && img.boxes && img.boxes.length > 1) {
+            for (let i = 0; i < img.boxes.length; i++) {
+                for (let j = i + 1; j < img.boxes.length; j++) {
+                    const iou = calculateIoU(img.boxes[i], img.boxes[j]);
+                    if (iou >= overlapThreshold) {
+                        img.overlappingBoxes.add(i);
+                        img.overlappingBoxes.add(j);
+                    }
+                }
+            }
+            img.overlapCount = img.overlappingBoxes.size;
+        }
+    });
+
+    if (!isNaN(overlapThreshold)) {
+        filteredImages = filteredImages.filter(img => img.overlapCount > 0);
+    }
+
     const container = document.getElementById('imageList');
     if (filteredImages.length === 0) {
-        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc nhãn</div>';
+        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc</div>';
     } else {
         container.innerHTML = filteredImages.map(img => {
             const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
             const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
+            
+            // Overlap UI classes
+            const overlapClasses = (!isNaN(overlapThreshold) && img.overlapCount > 0) 
+                ? 'border-l-[3px] border-b-[3px] border-l-red-500 border-b-red-500' 
+                : '';
+
             return `
-            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses}" 
+            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses} ${overlapClasses}" 
                  id="img-${img.id}" 
-                 onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}', is_reviewed: ${img.is_reviewed || false}})">
+                 onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}', is_reviewed: ${img.is_reviewed || false}, overlapThreshold: ${isNaN(overlapThreshold) ? 'null' : overlapThreshold}})"
+                 oncontextmenu="copyImageName(event, '${img.filename}')">
                 <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
                 <div class="flex items-center gap-2">
+                    ${img.overlapCount > 0 ? `<span class="text-xs font-bold text-red-500 bg-red-500/20 px-1.5 py-0.5 rounded" title="${img.overlapCount} overlapping boxes">${img.overlapCount}</span>` : ''}
                     ${img.is_reviewed ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : ''}
                     ${img.flag_status === 'Flagged' ? '<i class="fa-solid fa-flag text-red-500"></i>' : ''}
                     ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}

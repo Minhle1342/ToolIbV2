@@ -123,7 +123,7 @@ class Editor {
         });
 
         boxes.forEach(box => {
-            this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false);
+            this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, box.isOverlapping);
         });
 
         // Save initial state for Undo
@@ -133,7 +133,7 @@ class Editor {
         this.isDirty = false; // Reset dirty flag after initial load
     }
 
-    addBoxToCanvas(classId, cx, cy, w, h, isNew = true) {
+    addBoxToCanvas(classId, cx, cy, w, h, isNew = true, isOverlapping = false) {
         // Convert YOLO (normalized center xywh) to Canvas (top-left xywh)
         const left = (cx - w / 2) * this.imageWidth;
         const top = (cy - h / 2) * this.imageHeight;
@@ -142,14 +142,18 @@ class Editor {
 
         const cls = this.classes.find(c => c.id === classId) || { color: 'white' };
 
+        const strokeColor = isOverlapping ? 'red' : cls.color;
+        const fillColor = isOverlapping ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0,0,0,0)';
+        const strokeWidth = isOverlapping ? 3 / this.getZoom() : 1 / this.getZoom();
+
         const rect = new fabric.Rect({
             left: left,
             top: top,
             width: width,
             height: height,
-            fill: 'rgba(0,0,0,0)',
-            stroke: cls.color,
-            strokeWidth: 1 / this.getZoom(), // Dynamic stroke?
+            fill: fillColor,
+            stroke: strokeColor,
+            strokeWidth: strokeWidth,
             transparentCorners: false,
             cornerColor: 'white',
             cornerSize: 8,
@@ -553,29 +557,48 @@ class Editor {
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
 
-        // Focus Mode Dimming Overlay
+        // Focus Mode Dimming Overlay & Center Dots
         this.canvas.on('after:render', (opt) => {
+            if (!this.showBoxes) {
+                const ctx = opt.ctx || this.canvas.contextContainer;
+                if (ctx) {
+                    ctx.save();
+                    const rects = this.canvas.getObjects('rect');
+                    rects.forEach(rect => {
+                        const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
+                        const bound = rect.getBoundingRect();
+                        const cx = bound.left + bound.width / 2;
+                        const cy = bound.top + bound.height / 2;
+                        
+                        ctx.fillStyle = cls.color;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                    ctx.restore();
+                }
+            }
             if (this.focusClassId !== null) {
                 const ctx = opt.ctx || this.canvas.contextContainer;
                 if (!ctx) return;
-                
+
                 const offCanvas = this.overlayCanvas;
                 const offCtx = this.overlayCtx;
-                
+
                 // Match sizes if they got out of sync
                 if (offCanvas.width !== this.canvas.width || offCanvas.height !== this.canvas.height) {
                     offCanvas.width = this.canvas.width;
                     offCanvas.height = this.canvas.height;
                 }
-                
+
                 // Clear offscreen canvas
                 offCtx.globalCompositeOperation = 'source-over';
                 offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
-                
+
                 // Fill with dimming color
                 offCtx.fillStyle = 'rgba(0, 0, 0, 0.65)';
                 offCtx.fillRect(0, 0, offCanvas.width, offCanvas.height);
-                
+
                 // Cut out the boxes
                 offCtx.globalCompositeOperation = 'destination-out';
                 offCtx.fillStyle = '#fff';
@@ -584,7 +607,7 @@ class Editor {
                     const bound = box.getBoundingRect();
                     offCtx.fillRect(bound.left, bound.top, bound.width, bound.height);
                 });
-                
+
                 // Draw off-screen canvas to main canvas
                 ctx.save();
                 ctx.globalCompositeOperation = 'source-over';
@@ -597,9 +620,9 @@ class Editor {
                 if (!ctx) return;
 
                 ctx.save();
-                const rects = this.canvas.getObjects('rect').filter(r => 
-                    r.classId !== undefined && 
-                    r.classId !== null && 
+                const rects = this.canvas.getObjects('rect').filter(r =>
+                    r.classId !== undefined &&
+                    r.classId !== null &&
                     (this.focusClassId === null || r.classId === this.focusClassId)
                 );
 
@@ -645,7 +668,7 @@ class Editor {
                         const titlePad = 6;
                         const titleHeight = 18;
                         const titleY = y - titleHeight - 4; // Margin bottom 4px
-                        
+
                         // Shadow for a premium look
                         ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
                         ctx.shadowBlur = 4;
@@ -664,7 +687,7 @@ class Editor {
                         // Reset shadow for text
                         ctx.shadowColor = 'transparent';
                         ctx.shadowBlur = 0;
-                        
+
                         ctx.fillStyle = '#ffffff';
                         ctx.fillText(badgeTitle, x + titleWidth / 2 + titlePad, titleY + titleHeight / 2);
                         ctx.restore();
@@ -684,7 +707,7 @@ class Editor {
                         const list = rectsByClass[cid];
                         list.sort((a, b) => a.top - b.top || a.left - b.left);
                         const cls = this.classes.find(c => c.id === classId) || { color: '#00C2FF' };
-                        
+
                         list.forEach((rect, index) => {
                             const bound = rect.getBoundingRect();
                             drawBadge((index + 1).toString(), cls.color, bound.left, bound.top);
@@ -694,12 +717,12 @@ class Editor {
                     // Thuật toán Graph-based Connected Components (Thành phần liên thông)
                     const n = rects.length;
                     const adj = Array.from({ length: n }, () => []);
-                    
+
                     for (let i = 0; i < n; i++) {
                         for (let j = i + 1; j < n; j++) {
                             const r1 = rects[i];
                             const r2 = rects[j];
-                            
+
                             // Giao thoa trục X
                             const minX1 = r1.left;
                             const maxX1 = r1.left + r1.width;
@@ -708,7 +731,7 @@ class Editor {
                             const overlapX = Math.max(0, Math.min(maxX1, maxX2) - Math.max(minX1, minX2));
                             const overlapRatioX1 = overlapX / r1.width;
                             const overlapRatioX2 = overlapX / r2.width;
-                            
+
                             // Giao thoa trục Y
                             const minY1 = r1.top;
                             const maxY1 = r1.top + r1.height;
@@ -717,7 +740,7 @@ class Editor {
                             const overlapY = Math.max(0, Math.min(maxY1, maxY2) - Math.max(minY1, minY2));
                             const overlapRatioY1 = overlapY / r1.height;
                             const overlapRatioY2 = overlapY / r2.height;
-                            
+
                             // Điều kiện nối cạnh (chung cột):
                             // 1. Giao thoa X > 30%
                             // 2. KHÔNG giao thoa Y quá lớn (<= 50%) để tránh gộp các box nằm ngang hàng (cùng 1 row)
@@ -729,21 +752,21 @@ class Editor {
                             }
                         }
                     }
-                    
+
                     // Duyệt đồ thị tìm các Connected Components
                     const visited = new Array(n).fill(false);
                     const columns = [];
-                    
+
                     for (let i = 0; i < n; i++) {
                         if (!visited[i]) {
                             const compRects = [];
                             const queue = [i];
                             visited[i] = true;
-                            
+
                             while (queue.length > 0) {
                                 const curr = queue.shift();
                                 compRects.push(rects[curr]);
-                                
+
                                 for (const neighbor of adj[curr]) {
                                     if (!visited[neighbor]) {
                                         visited[neighbor] = true;
@@ -751,19 +774,19 @@ class Editor {
                                     }
                                 }
                             }
-                            
+
                             const minX = Math.min(...compRects.map(r => r.left));
                             const maxX = Math.max(...compRects.map(r => r.left + r.width));
                             columns.push({ rects: compRects, minX, maxX });
                         }
                     }
-                    
+
                     columns.sort((a, b) => a.minX - b.minX);
                     let globalIndex = 1;
-                    
+
                     columns.forEach((col, colIndex) => {
                         col.rects.sort((a, b) => a.top - b.top);
-                        
+
                         // Optionally draw a column bounding box (like the image shows a big orange/green box)
                         if (col.rects.length > 0) {
                             const minY = Math.min(...col.rects.map(r => r.getBoundingRect().top));
@@ -774,7 +797,7 @@ class Editor {
                             // Subtle background fill
                             ctx.fillStyle = 'rgba(255, 140, 0, 0.05)';
                             ctx.fillRect(col.minX, minY, col.maxX - col.minX, maxY - minY);
-                            
+
                             // Dashed vivid border
                             ctx.strokeStyle = '#FF8C00'; // Dark Orange
                             ctx.lineWidth = 2;
@@ -1039,7 +1062,7 @@ class Editor {
             const pred = predictions[idx];
             if (pred && pred.class_id !== undefined && !pred.error) {
                 obj.classId = pred.class_id;
-                
+
                 // Update color
                 const cls = this.classes.find(c => c.id === pred.class_id);
                 if (cls) {
@@ -1048,7 +1071,7 @@ class Editor {
                         cornerColor: cls.color,
                         borderColor: cls.color
                     });
-                    
+
                     // Add confidence tooltip/label if needed
                     obj.label = `${cls.name} (${(pred.confidence * 100).toFixed(1)}%)`;
                 }
@@ -1414,8 +1437,8 @@ class Editor {
         if (rects.length === 0) return;
 
         // If classIds is empty or null, default to all rects
-        const targets = (!classIds || classIds.length === 0) 
-            ? rects 
+        const targets = (!classIds || classIds.length === 0)
+            ? rects
             : rects.filter(r => classIds.includes(r.classId));
 
         if (targets.length === 0) return;
