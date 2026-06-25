@@ -311,11 +311,6 @@ class Editor {
             
             // Allow selecting hidden boxes by clicking anywhere inside their bounding box or sweeping
             if (!this.showBoxes) {
-                // If user clicked on an already visible/active object, let Fabric handle it natively
-                if (opt.target && (opt.target.type === 'rect' || opt.target.type === 'activeSelection')) {
-                    return;
-                }
-
                 const pointer = this.canvas.getPointer(opt.e);
                 
                 // Store drag start coordinates for sweep selection
@@ -324,33 +319,29 @@ class Editor {
 
                 const rects = this.canvas.getObjects('rect');
                 let clickedRect = null;
-                let minArea = Infinity;
+                let minDistance = Infinity;
+                const zoom = this.canvas.getZoom();
+                const hitRadiusLogical = 10 / zoom; // 10 screen pixels tolerance
                 
                 rects.forEach(rect => {
-                    const left = rect.left;
-                    const top = rect.top;
-                    const width = rect.width * rect.scaleX;
-                    const height = rect.height * rect.scaleY;
+                    const center = rect.getCenterPoint();
                     
-                    if (pointer.x >= left && pointer.x <= left + width &&
-                        pointer.y >= top && pointer.y <= top + height) {
-                        
-                        const area = width * height;
-                        if (area < minArea) {
-                            minArea = area;
+                    const dx = pointer.x - center.x;
+                    const dy = pointer.y - center.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    
+                    if (distance <= hitRadiusLogical) {
+                        if (distance < minDistance) {
+                            minDistance = distance;
                             clickedRect = rect;
                         }
                     }
                 });
                 
                 if (clickedRect) {
-                    clickedRect.set({
-                        visible: true,
-                        evented: true,
-                        selectable: true
-                    });
-                    
                     this.setMode('select');
+                    const activeObjects = this.canvas.getActiveObjects();
+                    const isSelected = activeObjects.includes(clickedRect);
                     
                     if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
                         const activeObj = this.canvas.getActiveObject();
@@ -367,6 +358,7 @@ class Editor {
                                 currentObjects.splice(index, 1);
                             } else {
                                 currentObjects.push(clickedRect);
+                                clickedRect.set({ visible: true, evented: true, selectable: true });
                             }
                             
                             this.canvas.discardActiveObject();
@@ -378,13 +370,26 @@ class Editor {
                                 this.canvas.setActiveObject(sel);
                             }
                         } else {
+                            clickedRect.set({ visible: true, evented: true, selectable: true });
                             this.canvas.setActiveObject(clickedRect);
                         }
                     } else {
-                        this.canvas.discardActiveObject();
-                        this.canvas.setActiveObject(clickedRect);
+                        if (isSelected) {
+                            // Clicked center dot of an already selected box -> turn off focus
+                            this.canvas.discardActiveObject();
+                        } else {
+                            // Not selected -> Select it
+                            clickedRect.set({ visible: true, evented: true, selectable: true });
+                            this.canvas.discardActiveObject();
+                            this.canvas.setActiveObject(clickedRect);
+                        }
                     }
                     
+                    return;
+                }
+
+                // If user clicked on an already visible/active object (but not its center dot), let Fabric handle it natively (e.g. dragging)
+                if (opt.target && (opt.target.type === 'rect' || opt.target.type === 'activeSelection')) {
                     return;
                 }
             }
@@ -708,7 +713,7 @@ class Editor {
                         
                         ctx.fillStyle = cls.color;
                         ctx.beginPath();
-                        ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+                        ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
                         ctx.fill();
                     });
                     ctx.restore();
