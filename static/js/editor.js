@@ -306,7 +306,90 @@ class Editor {
                 this.canvas.selection = false;
                 this.lastPosX = evt.clientX;
                 this.lastPosY = evt.clientY;
-            } else if (this.currentMode === 'draw' || this.currentMode === 'auto_label_region') {
+                return;
+            }
+            
+            // Allow selecting hidden boxes by clicking anywhere inside their bounding box or sweeping
+            if (!this.showBoxes) {
+                // If user clicked on an already visible/active object, let Fabric handle it natively
+                if (opt.target && (opt.target.type === 'rect' || opt.target.type === 'activeSelection')) {
+                    return;
+                }
+
+                const pointer = this.canvas.getPointer(opt.e);
+                
+                // Store drag start coordinates for sweep selection
+                this.sweepStartX = pointer.x;
+                this.sweepStartY = pointer.y;
+
+                const rects = this.canvas.getObjects('rect');
+                let clickedRect = null;
+                let minArea = Infinity;
+                
+                rects.forEach(rect => {
+                    const left = rect.left;
+                    const top = rect.top;
+                    const width = rect.width * rect.scaleX;
+                    const height = rect.height * rect.scaleY;
+                    
+                    if (pointer.x >= left && pointer.x <= left + width &&
+                        pointer.y >= top && pointer.y <= top + height) {
+                        
+                        const area = width * height;
+                        if (area < minArea) {
+                            minArea = area;
+                            clickedRect = rect;
+                        }
+                    }
+                });
+                
+                if (clickedRect) {
+                    clickedRect.set({
+                        visible: true,
+                        evented: true,
+                        selectable: true
+                    });
+                    
+                    this.setMode('select');
+                    
+                    if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
+                        const activeObj = this.canvas.getActiveObject();
+                        if (activeObj) {
+                            let currentObjects = [];
+                            if (activeObj.type === 'activeSelection') {
+                                currentObjects = activeObj.getObjects();
+                            } else {
+                                currentObjects = [activeObj];
+                            }
+                            
+                            const index = currentObjects.indexOf(clickedRect);
+                            if (index > -1) {
+                                currentObjects.splice(index, 1);
+                            } else {
+                                currentObjects.push(clickedRect);
+                            }
+                            
+                            this.canvas.discardActiveObject();
+                            
+                            if (currentObjects.length === 1) {
+                                this.canvas.setActiveObject(currentObjects[0]);
+                            } else if (currentObjects.length > 1) {
+                                const sel = new fabric.ActiveSelection(currentObjects, { canvas: this.canvas });
+                                this.canvas.setActiveObject(sel);
+                            }
+                        } else {
+                            this.canvas.setActiveObject(clickedRect);
+                        }
+                    } else {
+                        this.canvas.discardActiveObject();
+                        this.canvas.setActiveObject(clickedRect);
+                    }
+                    
+                    return;
+                }
+            }
+
+            if (this.currentMode === 'draw' || this.currentMode === 'auto_label_region') {
                 // If user clicks on an existing box, switch to select mode
                 if (this.currentMode === 'draw' && opt.target && opt.target.type === 'rect') {
                     this.setMode('select');
@@ -402,6 +485,59 @@ class Editor {
                 this.isPanning = false;
                 // Restore selection if in select mode
                 this.canvas.selection = (this.currentMode === 'select');
+            } else if (!this.showBoxes && this.sweepStartX !== undefined && this.sweepStartY !== undefined) {
+                const pointer = this.canvas.getPointer(opt.e);
+                const dx = Math.abs(pointer.x - this.sweepStartX);
+                const dy = Math.abs(pointer.y - this.sweepStartY);
+                
+                if (dx > 5 || dy > 5) {
+                    const minX = Math.min(this.sweepStartX, pointer.x);
+                    const maxX = Math.max(this.sweepStartX, pointer.x);
+                    const minY = Math.min(this.sweepStartY, pointer.y);
+                    const maxY = Math.max(this.sweepStartY, pointer.y);
+                    
+                    const rects = this.canvas.getObjects('rect');
+                    const selectedRects = [];
+                    
+                    rects.forEach(rect => {
+                        const center = rect.getCenterPoint();
+                        if (center.x >= minX && center.x <= maxX && center.y >= minY && center.y <= maxY) {
+                            rect.set({ visible: true, evented: true, selectable: true });
+                            selectedRects.push(rect);
+                        }
+                    });
+                    
+                    if (selectedRects.length > 0) {
+                        this.setMode('select');
+                        const evt = opt.e;
+                        
+                        let currentSelection = [];
+                        if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
+                            const activeObj = this.canvas.getActiveObject();
+                            if (activeObj) {
+                                if (activeObj.type === 'activeSelection') {
+                                    currentSelection = activeObj.getObjects();
+                                } else {
+                                    currentSelection = [activeObj];
+                                }
+                            }
+                        }
+                        
+                        // Combine and remove duplicates
+                        const finalSelection = Array.from(new Set([...currentSelection, ...selectedRects]));
+                        
+                        this.canvas.discardActiveObject();
+                        if (finalSelection.length === 1) {
+                            this.canvas.setActiveObject(finalSelection[0]);
+                        } else if (finalSelection.length > 1) {
+                            const sel = new fabric.ActiveSelection(finalSelection, { canvas: this.canvas });
+                            this.canvas.setActiveObject(sel);
+                        }
+                    }
+                }
+                
+                this.sweepStartX = undefined;
+                this.sweepStartY = undefined;
             } else if (this.isDrawing) {
                 this.isDrawing = false;
                 this.rect.setCoords();
@@ -822,11 +958,37 @@ class Editor {
     }
 
     onSelect(e) {
-        const obj = e.selected[0];
-        if (!obj || obj.type !== 'rect') return;
+        if (!this.showBoxes) {
+            if (e && e.deselected) {
+                e.deselected.forEach(obj => {
+                    if (obj.type === 'rect') {
+                        obj.set({ visible: false, evented: false, selectable: false });
+                    }
+                });
+            }
+            if (e && e.selected) {
+                e.selected.forEach(obj => {
+                    if (obj.type === 'rect') {
+                        obj.set({ visible: true, evented: true, selectable: true });
+                    }
+                });
+            }
+            this.canvas.requestRenderAll();
+        }
 
-        this.renderMagnifier(obj);
-        this.updateSelectionInfo(obj);
+        const activeObj = this.canvas.getActiveObject();
+        if (!activeObj) return;
+
+        // Verify it contains rects
+        let hasRect = activeObj.type === 'rect';
+        if (activeObj.type === 'activeSelection') {
+            const objs = activeObj.getObjects();
+            hasRect = objs.some(o => o.type === 'rect');
+        }
+        if (!hasRect) return;
+
+        this.renderMagnifier(activeObj);
+        this.updateSelectionInfo(activeObj);
 
         if (this.isIsolationMode) {
             this.updateIsolateView();
@@ -888,7 +1050,7 @@ class Editor {
         }
     }
 
-    onDeselect() {
+    onDeselect(e) {
         document.getElementById('selectionInfo').innerHTML = 'Nothing selected';
         document.getElementById('btnDeleteBox').style.display = 'none';
         const btnCollect = document.getElementById('btnCollectCrop');
@@ -907,6 +1069,25 @@ class Editor {
         // Also ensure rects are unselectable if in draw mode
         if (this.currentMode === 'draw') {
             this.canvas.forEachObject(o => o.selectable = false);
+        }
+
+        // Re-hide boxes if we are in hidden boxes mode
+        if (!this.showBoxes) {
+            if (e && e.deselected) {
+                e.deselected.forEach(obj => {
+                    if (obj.type === 'rect') {
+                        obj.set({ visible: false, evented: false, selectable: false });
+                    }
+                });
+            } else {
+                const activeObjects = this.canvas.getActiveObjects();
+                this.canvas.getObjects('rect').forEach(rect => {
+                    if (!activeObjects.includes(rect)) {
+                        rect.set({ visible: false, evented: false, selectable: false });
+                    }
+                });
+            }
+            this.canvas.requestRenderAll();
         }
     }
 
