@@ -261,6 +261,25 @@ class Editor {
         // Draw the full original image (browser handles clipping to magnifier canvas area automatically)
         ctx.drawImage(imgElement, 0, 0);
         ctx.restore();
+
+        // Draw a center dot for the currently selected bounding box
+        const cls = this.classes.find(c => c.id === obj.classId) || { color: '#00C2FF' };
+        ctx.save();
+        ctx.fillStyle = cls.color;
+        
+        // Add a soft shadow so the dot stands out on both light and dark backgrounds
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+        ctx.shadowBlur = 4;
+        
+        ctx.beginPath();
+        ctx.arc(tW / 2, tH / 2, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Optional: A subtle white outline for better contrast
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+        ctx.restore();
     }
 
     sortBoxesByArea() {
@@ -977,6 +996,161 @@ class Editor {
                 ctx.restore();
             }
         });
+
+        // Setup Magnifier Interactions
+        const magCanvas = document.getElementById('magnifierCanvas');
+        if (magCanvas) {
+            let isMagDragging = false;
+            let magStartX = 0;
+            let magStartY = 0;
+            let startBoxTop = 0;
+            let startBoxLeft = 0;
+            let startBoxWidth = 0;
+            let startBoxHeight = 0;
+            let dragEdgeX = 0;
+            let dragEdgeY = 0;
+            let startMagScale = 1;
+
+            magCanvas.addEventListener('mousedown', (e) => {
+                const activeObj = this.canvas.getActiveObject();
+                if (!activeObj || activeObj.type !== 'rect') return;
+                
+                isMagDragging = true;
+                magStartX = e.clientX;
+                magStartY = e.clientY;
+                
+                startBoxTop = activeObj.top;
+                startBoxLeft = activeObj.left;
+                startBoxWidth = activeObj.width * activeObj.scaleX;
+                startBoxHeight = activeObj.height * activeObj.scaleY;
+
+                const rect = magCanvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+
+                // Determine which half was clicked (left or right, top or bottom)
+                dragEdgeX = (clickX > rect.width / 2) ? 1 : -1;
+                dragEdgeY = (clickY > rect.height / 2) ? 1 : -1;
+
+                // Calculate magScale (from renderMagnifier logic)
+                const sW = startBoxWidth;
+                const sH = startBoxHeight;
+                if (sW > 0 && sH > 0) {
+                    const maxDim = 300;
+                    if (sW > sH) {
+                        startMagScale = maxDim / sW;
+                    } else {
+                        startMagScale = maxDim / sH;
+                    }
+                } else {
+                    startMagScale = 1;
+                }
+            });
+
+            magCanvas.addEventListener('mousemove', (e) => {
+                if (isMagDragging) return;
+                const rect = magCanvas.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const clickY = e.clientY - rect.top;
+                const isRight = clickX > rect.width / 2;
+                const isBottom = clickY > rect.height / 2;
+                
+                if ((isRight && isBottom) || (!isRight && !isBottom)) {
+                    magCanvas.style.cursor = 'nwse-resize';
+                } else {
+                    magCanvas.style.cursor = 'nesw-resize';
+                }
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isMagDragging) return;
+                
+                const activeObj = this.canvas.getActiveObject();
+                if (!activeObj || activeObj.type !== 'rect') {
+                    isMagDragging = false;
+                    return;
+                }
+
+                const dx = e.clientX - magStartX;
+                const dy = e.clientY - magStartY;
+
+                const imgDx = dx / startMagScale;
+                const imgDy = dy / startMagScale;
+
+                let newWidth = startBoxWidth;
+                let newHeight = startBoxHeight;
+                let newLeft = startBoxLeft;
+                let newTop = startBoxTop;
+
+                if (dragEdgeX === 1) { // Right edge
+                    newWidth = startBoxWidth + imgDx;
+                } else { // Left edge
+                    newWidth = startBoxWidth - imgDx;
+                    newLeft = startBoxLeft + imgDx;
+                }
+
+                if (dragEdgeY === 1) { // Bottom edge
+                    newHeight = startBoxHeight + imgDy;
+                } else { // Top edge
+                    newHeight = startBoxHeight - imgDy;
+                    newTop = startBoxTop + imgDy;
+                }
+
+                // Prevent negative dimensions
+                if (newWidth < 5) {
+                    if (dragEdgeX === -1) {
+                        newLeft -= (5 - newWidth);
+                    }
+                    newWidth = 5;
+                }
+                if (newHeight < 5) {
+                    if (dragEdgeY === -1) {
+                        newTop -= (5 - newHeight);
+                    }
+                    newHeight = 5;
+                }
+                
+                // Enforce boundaries
+                if (newLeft < 0) {
+                    newWidth += newLeft;
+                    newLeft = 0;
+                }
+                if (newTop < 0) {
+                    newHeight += newTop;
+                    newTop = 0;
+                }
+                if (newLeft + newWidth > this.imageWidth) {
+                    newWidth = this.imageWidth - newLeft;
+                }
+                if (newTop + newHeight > this.imageHeight) {
+                    newHeight = this.imageHeight - newTop;
+                }
+
+                activeObj.set({
+                    left: newLeft,
+                    top: newTop,
+                    width: newWidth,
+                    height: newHeight,
+                    scaleX: 1,
+                    scaleY: 1
+                });
+                
+                activeObj.setCoords();
+                this.canvas.requestRenderAll();
+                this.renderMagnifier(activeObj);
+                this.isDirty = true;
+                
+                // Keep the selection info panel updated
+                this.updateSelectionInfo(activeObj);
+            });
+
+            window.addEventListener('mouseup', () => {
+                if (isMagDragging) {
+                    isMagDragging = false;
+                    this.saveState();
+                }
+            });
+        }
     }
 
     onSelect(e) {
