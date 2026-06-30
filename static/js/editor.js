@@ -42,7 +42,18 @@ class Editor {
         this.overlayCanvas = document.createElement('canvas');
         this.overlayCtx = this.overlayCanvas.getContext('2d');
         this.sequenceMode = 'none';
-        this.showBoxes = true;
+        this.showBoxes = false;
+        
+        // Start dot animation loop since boxes are hidden by default
+        const animateDots = () => {
+            if (this.showBoxes) {
+                this._dotAnimFrame = null;
+                return;
+            }
+            this.canvas.requestRenderAll();
+            this._dotAnimFrame = requestAnimationFrame(animateDots);
+        };
+        this._dotAnimFrame = requestAnimationFrame(animateDots);
         this.isDirty = false;
 
         this.initEvents();
@@ -117,13 +128,18 @@ class Editor {
         });
     }
 
-    loadBoxes(boxes) {
+    clearAllBoxes() {
         this.canvas.getObjects().forEach(o => {
             if (o.type === 'rect' || o.type === 'text' || o.type === 'group') this.canvas.remove(o);
         });
+        this.canvas.requestRenderAll();
+    }
 
-        boxes.forEach(box => {
-            this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, box.isOverlapping);
+    loadBoxes(boxes) {
+        this.clearAllBoxes();
+
+        boxes.forEach((box, i) => {
+            this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, box.isOverlapping, 'box_' + i);
         });
 
         // Save initial state for Undo
@@ -133,7 +149,7 @@ class Editor {
         this.isDirty = false; // Reset dirty flag after initial load
     }
 
-    addBoxToCanvas(classId, cx, cy, w, h, isNew = true, isOverlapping = false) {
+    addBoxToCanvas(classId, cx, cy, w, h, isNew = true, isOverlapping = false, collabId = null) {
         // Convert YOLO (normalized center xywh) to Canvas (top-left xywh)
         const left = (cx - w / 2) * this.imageWidth;
         const top = (cy - h / 2) * this.imageHeight;
@@ -158,6 +174,7 @@ class Editor {
             cornerColor: 'white',
             cornerSize: 8,
             classId: classId,
+            collabId: collabId || (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random()*10000))),
             lockRotation: true,
             hasRotatingPoint: false,
             visible: this.showBoxes,
@@ -171,6 +188,7 @@ class Editor {
 
         if (isNew) this.canvas.setActiveObject(rect);
         this.canvas.requestRenderAll();
+        return rect;
     }
 
 
@@ -444,7 +462,8 @@ class Editor {
                     strokeDashArray: strokeDashArray,
                     strokeWidth: 1 / this.getZoom(),
                     selectable: false, // temporarily false
-                    classId: this.currentMode === 'auto_label_region' ? null : this.currentClassId
+                    classId: this.currentMode === 'auto_label_region' ? null : this.currentClassId,
+                    collabId: (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random()*10000)))
                 });
                 this.canvas.add(this.rect);
             }
@@ -589,17 +608,132 @@ class Editor {
                         // Auto-select the new box
                         this.canvas.setActiveObject(this.rect);
                         this.onSelect({ selected: [this.rect] });
+                        
+                        // Send real-time box creation
+                        if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                            const scaleX = this.rect.scaleX || 1;
+                            const scaleY = this.rect.scaleY || 1;
+                            const w = (this.rect.width * scaleX) / this.imageWidth;
+                            const h = (this.rect.height * scaleY) / this.imageHeight;
+                            const x = (this.rect.left + (this.rect.width * scaleX) / 2) / this.imageWidth;
+                            const y = (this.rect.top + (this.rect.height * scaleY) / 2) / this.imageHeight;
+
+                            window.collabSocket.emit('box_created', {
+                                image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                                box: {
+                                    collabId: this.rect.collabId,
+                                    class_id: this.rect.classId,
+                                    x: x,
+                                    y: y,
+                                    w: w,
+                                    h: h
+                                }
+                            });
+                        }
                     }
                 }
                 this.rect = null;
             }
         });
 
-        // Key listeners for Panning
+        // Key listeners for Panning and Navigation
         document.addEventListener('keydown', (e) => {
             if (e.code === 'Space') {
                 this.isSpacePressed = true;
                 if (this.currentMode === 'draw') this.canvas.defaultCursor = 'grab';
+                return;
+            }
+
+            // Arrow key navigation between bounding boxes
+            if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+                // Ignore if typing in input/textarea
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    return;
+                }
+
+                // If workspace is in supervised mode, let it handle the arrow keys
+                if (typeof currentWorkspace !== 'undefined' && currentWorkspace.isSupervisedMode) {
+                    return;
+                }
+
+                if (this.currentMode === 'select') {
+                    const rects = this.canvas.getObjects('rect');
+                    if (rects.length === 0) return;
+
+                    e.preventDefault(); // Prevent default browser scrolling
+
+                    const activeObj = this.canvas.getActiveObject();
+
+                    // If no active rect is selected, start with the first one
+                    if (!activeObj || activeObj.type !== 'rect') {
+                        const firstRect = rects[0];
+                        if (firstRect) {
+                            if (!this.showBoxes) {
+                                // Hide all boxes first
+                                rects.forEach(r => r.set({ visible: false, evented: false, selectable: false }));
+                                firstRect.set({ visible: true, evented: true, selectable: true });
+                                this.centerBoxIfObscured(firstRect);
+                            }
+                            this.canvas.setActiveObject(firstRect);
+                            this.canvas.requestRenderAll();
+                            this.onSelect({ selected: [firstRect] });
+                        }
+                        return;
+                    }
+
+                    if (rects.length <= 1) return;
+
+                    const currentCenter = activeObj.getCenterPoint();
+                    let bestMatch = null;
+                    let minDistance = Infinity;
+
+                    rects.forEach(rect => {
+                        if (rect === activeObj) return;
+
+                        const center = rect.getCenterPoint();
+                        const dx = center.x - currentCenter.x;
+                        const dy = center.y - currentCenter.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        let isDirectionMatch = false;
+
+                        // Check direction match
+                        if (e.code === 'ArrowUp' && dy < 0 && Math.abs(dy) >= Math.abs(dx)) isDirectionMatch = true;
+                        if (e.code === 'ArrowDown' && dy > 0 && Math.abs(dy) >= Math.abs(dx)) isDirectionMatch = true;
+                        if (e.code === 'ArrowLeft' && dx < 0 && Math.abs(dx) >= Math.abs(dy)) isDirectionMatch = true;
+                        if (e.code === 'ArrowRight' && dx > 0 && Math.abs(dx) >= Math.abs(dy)) isDirectionMatch = true;
+
+                        if (isDirectionMatch && distance < minDistance) {
+                            minDistance = distance;
+                            bestMatch = rect;
+                        }
+                    });
+
+                    // Fallback to cycling order if no match in that specific direction
+                    if (!bestMatch) {
+                        const currentIndex = rects.indexOf(activeObj);
+                        let nextIndex = currentIndex;
+                        if (e.code === 'ArrowRight' || e.code === 'ArrowDown') {
+                            nextIndex = (currentIndex + 1) % rects.length;
+                        } else if (e.code === 'ArrowLeft' || e.code === 'ArrowUp') {
+                            nextIndex = (currentIndex - 1 + rects.length) % rects.length;
+                        }
+                        bestMatch = rects[nextIndex];
+                    }
+
+                    if (bestMatch && bestMatch !== activeObj) {
+                        if (!this.showBoxes) {
+                            activeObj.set({ visible: false, evented: false, selectable: false });
+                            bestMatch.set({ visible: true, evented: true, selectable: true });
+                            this.centerBoxIfObscured(bestMatch);
+                        }
+
+                        this.canvas.discardActiveObject();
+                        this.canvas.setActiveObject(bestMatch);
+                        this.canvas.requestRenderAll();
+                        this.onSelect({ selected: [bestMatch] });
+                    }
+                }
             }
         });
         document.addEventListener('keyup', (e) => {
@@ -660,6 +794,19 @@ class Editor {
 
                 this.renderMagnifier(obj);
                 this.updateSelectionInfo(obj);
+
+                if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_updated', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId,
+                        left: obj.left,
+                        top: obj.top,
+                        scaleX: obj.scaleX,
+                        scaleY: obj.scaleY,
+                        width: obj.width,
+                        height: obj.height
+                    });
+                }
             }
         });
         this.canvas.on('object:scaling', (e) => {
@@ -692,6 +839,19 @@ class Editor {
                 this.renderMagnifier(obj);
                 this.sortBoxesByArea();
                 this.updateSelectionInfo(obj);
+
+                if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_updated', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId,
+                        left: obj.left,
+                        top: obj.top,
+                        scaleX: obj.scaleX,
+                        scaleY: obj.scaleY,
+                        width: obj.width,
+                        height: obj.height
+                    });
+                }
             }
         });
 
@@ -1147,6 +1307,7 @@ class Editor {
             window.addEventListener('mouseup', () => {
                 if (isMagDragging) {
                     isMagDragging = false;
+                    if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
                     this.saveState();
                 }
             });
@@ -1154,6 +1315,27 @@ class Editor {
     }
 
     onSelect(e) {
+        if (e && e.deselected) {
+            e.deselected.forEach(obj => {
+                if (obj.type === 'rect' && typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_unlock', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId
+                    });
+                }
+            });
+        }
+        if (e && e.selected) {
+            e.selected.forEach(obj => {
+                if (obj.type === 'rect' && typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_lock', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId
+                    });
+                }
+            });
+        }
+
         if (!this.showBoxes) {
             if (e && e.deselected) {
                 e.deselected.forEach(obj => {
@@ -1173,7 +1355,12 @@ class Editor {
         }
 
         const activeObj = this.canvas.getActiveObject();
-        if (!activeObj) return;
+        if (!activeObj) {
+            if (typeof window.updateMyActiveBox === 'function') {
+                window.updateMyActiveBox(null);
+            }
+            return;
+        }
 
         // Verify it contains rects
         let hasRect = activeObj.type === 'rect';
@@ -1181,7 +1368,16 @@ class Editor {
             const objs = activeObj.getObjects();
             hasRect = objs.some(o => o.type === 'rect');
         }
-        if (!hasRect) return;
+        if (!hasRect) {
+            if (typeof window.updateMyActiveBox === 'function') {
+                window.updateMyActiveBox(null);
+            }
+            return;
+        }
+
+        if (typeof window.updateMyActiveBox === 'function' && activeObj.type === 'rect') {
+            window.updateMyActiveBox(activeObj.collabId);
+        }
 
         this.renderMagnifier(activeObj);
         this.updateSelectionInfo(activeObj);
@@ -1207,7 +1403,12 @@ class Editor {
         const clsName = this.classes.find(c => c.id === displayObj.classId)?.name || 'Unknown';
         document.getElementById('selectionInfo').innerHTML = `
             <div class="mb-2">
-                <label class="block text-xs text-gray-500 mb-0.5">Class</label>
+                <label class="flex items-center gap-2 text-xs text-gray-500 mb-0.5">
+                    Class
+                    <span class="${obj.lockMovementX ? 'text-yellow-500' : 'text-gray-600'}">
+                        <i class="fa-solid fa-${obj.lockMovementX ? 'lock' : 'lock-open'}"></i> ${obj.lockMovementX ? 'Locked' : 'Unlocked'}
+                    </span>
+                </label>
                 <span class="text-sm font-semibold text-gray-300">${clsName}</span>
             </div>
             <div class="grid grid-cols-2 gap-2 text-xs">
@@ -1215,11 +1416,6 @@ class Editor {
                  <div><span class="text-gray-500">Y:</span> <span class="font-mono text-gray-300">${Math.round(obj.top)}</span></div>
                  <div><span class="text-gray-500">W:</span> <span class="font-mono text-gray-300">${Math.round(obj.width * obj.scaleX)}</span></div>
                  <div><span class="text-gray-500">H:</span> <span class="font-mono text-gray-300">${Math.round(obj.height * obj.scaleY)}</span></div>
-            </div>
-            <div class="mt-2 text-xs">
-                <span class="${obj.lockMovementX ? 'text-yellow-500' : 'text-gray-600'}">
-                    <i class="fa-solid fa-${obj.lockMovementX ? 'lock' : 'lock-open'}"></i> ${obj.lockMovementX ? 'Locked' : 'Unlocked'}
-                </span>
             </div>
         `;
         document.getElementById('btnDeleteBox').style.display = 'block';
@@ -1247,6 +1443,21 @@ class Editor {
     }
 
     onDeselect(e) {
+        if (e && e.deselected) {
+            e.deselected.forEach(obj => {
+                if (obj.type === 'rect' && typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_unlock', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId
+                    });
+                }
+            });
+        }
+
+        if (typeof window.updateMyActiveBox === 'function') {
+            window.updateMyActiveBox(null);
+        }
+
         document.getElementById('selectionInfo').innerHTML = 'Nothing selected';
         document.getElementById('btnDeleteBox').style.display = 'none';
         const btnCollect = document.getElementById('btnCollectCrop');
@@ -1345,11 +1556,70 @@ class Editor {
         this.canvas.setViewportTransform(vpt);
     }
 
+    centerBoxIfObscured(rect) {
+        if (!rect) return;
+        const zoom = this.canvas.getZoom();
+        const vpt = this.canvas.viewportTransform;
+        if (!vpt) return;
+
+        const left = rect.left * zoom + vpt[4];
+        const top = rect.top * zoom + vpt[5];
+        const right = (rect.left + rect.width * rect.scaleX) * zoom + vpt[4];
+        const bottom = (rect.top + rect.height * rect.scaleY) * zoom + vpt[5];
+
+        const canvasWidth = this.canvas.getWidth();
+        const canvasHeight = this.canvas.getHeight();
+        const pad = 10; // buffer in screen pixels
+
+        if (left < pad || top < pad || right > canvasWidth - pad || bottom > canvasHeight - pad) {
+            const boxCenterX = rect.left + (rect.width * rect.scaleX) / 2;
+            const boxCenterY = rect.top + (rect.height * rect.scaleY) / 2;
+            const newVpt = vpt.slice();
+            newVpt[4] = canvasWidth / 2 - boxCenterX * zoom;
+            newVpt[5] = canvasHeight / 2 - boxCenterY * zoom;
+            this.canvas.setViewportTransform(newVpt);
+        }
+    }
+
+    selectAllBoxes() {
+        if (!this.showBoxes) return;
+        const rects = this.canvas.getObjects().filter(obj => obj.type === 'rect');
+        if (rects.length === 0) return;
+
+        // Ensure we are in select mode
+        if (this.currentMode !== 'select') {
+            this.setMode('select');
+        }
+
+        if (rects.length === 1) {
+            this.canvas.setActiveObject(rects[0]);
+            this.onSelect({ selected: [rects[0]] });
+        } else {
+            const activeSelection = new fabric.ActiveSelection(rects, {
+                canvas: this.canvas
+            });
+            this.canvas.setActiveObject(activeSelection);
+            this.onSelect({ selected: rects });
+        }
+        this.canvas.requestRenderAll();
+    }
+
+
     deleteSelected() {
         const active = this.canvas.getActiveObjects();
         if (active.length) {
             this.canvas.discardActiveObject();
-            active.forEach(obj => this.canvas.remove(obj));
+            active.forEach(obj => {
+                this.canvas.remove(obj);
+                
+                // Emit event for real-time collaboration
+                if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                    window.collabSocket.emit('box_deleted', {
+                        image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                        collabId: obj.collabId
+                    });
+                }
+            });
         }
     }
 
@@ -1429,13 +1699,11 @@ class Editor {
 
     updateActiveBoxesClasses(predictions) {
         // predictions is an array of { class_id, class_name, confidence } matching the active objects order
-        const activeObjects = this.canvas.getActiveObjects();
-        if (!activeObjects || activeObjects.length !== predictions.length) return;
+        const activeObjects = this.canvas.getActiveObjects().filter(obj => obj.type === 'rect');
+        if (activeObjects.length !== predictions.length) return;
 
         let changedCount = 0;
         activeObjects.forEach((obj, idx) => {
-            if (obj.type !== 'rect') return;
-
             const pred = predictions[idx];
             if (pred && pred.class_id !== undefined && !pred.error) {
                 obj.classId = pred.class_id;
@@ -1459,6 +1727,8 @@ class Editor {
         if (changedCount > 0) {
             this.canvas.requestRenderAll();
             this.updateSelectionInfo(this.canvas.getActiveObject());
+            if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
+            this.saveState();
         }
     }
 
@@ -1821,6 +2091,10 @@ class Editor {
 
             if (!this.loading && typeof this.onStateChange === 'function') {
                 this.onStateChange();
+            }
+
+            if (typeof updateClassListVisibility === 'function') {
+                updateClassListVisibility();
             }
         });
     }

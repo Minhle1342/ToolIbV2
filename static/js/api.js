@@ -158,6 +158,15 @@ class startAPI {
         });
         return await res.json();
     }
+
+    async batchDeleteImages(data) {
+        const res = await fetch('/api/images/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% set hide_global_sidebar = True %}
 
 {% block content %}
 <style>
@@ -8,6 +9,41 @@
 
     .fa-chevron-bottom::before {
         content: "\f078" !important;
+    }
+
+    .image-checkbox {
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease-in-out;
+    }
+
+    .image-item:hover .image-checkbox,
+    .image-item.bg-blue-600\/30 .image-checkbox,
+    .image-checkbox:checked {
+        opacity: 1;
+        pointer-events: auto;
+    }
+
+    /* Active toolbar buttons styling */
+    #btnDraw.active,
+    #btnSelect.active,
+    #btnAutoLabelRegion.active {
+        color: var(--primary, #3b82f6) !important;
+        background-color: color-mix(in srgb, var(--primary, #3b82f6) 15%, transparent) !important;
+    }
+
+    /* Hide toolbar scrollbar for clean look but allow scroll */
+    .toolbar-scroll::-webkit-scrollbar {
+        height: 4px;
+    }
+
+    .toolbar-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .toolbar-scroll::-webkit-scrollbar-thumb {
+        background: var(--border, #333333);
+        border-radius: 2px;
     }
 </style>
 <div class="flex h-full overflow-hidden">
@@ -42,8 +78,8 @@
                             </button>
                         </div>
                     </div>
-                    <input type="file" id="imageUploadInput" class="hidden" multiple accept="image/*,.txt,.yaml,.yml"
-                        onchange="currentWorkspace.uploadImages(event)">
+                    <input type="file" id="imageUploadInput" class="hidden" multiple
+                        accept="image/*,.txt,.yaml,.yml,.json" onchange="currentWorkspace.uploadImages(event)">
                     <input type="file" id="folderUploadInput" class="hidden" webkitdirectory directory multiple
                         onchange="currentWorkspace.uploadImages(event)">
                 </div>
@@ -83,8 +119,14 @@
                     </select>
                 </div>
                 <div class="space-y-1">
-                    <label class="text-[10px] font-semibold text-content-muted uppercase tracking-wider block"
-                        data-i18n="filter_by_classes">Filter by Classes</label>
+                    <div class="flex items-center justify-between">
+                        <label class="text-[10px] font-semibold text-content-muted uppercase tracking-wider block"
+                            data-i18n="filter_by_classes">Filter by Classes</label>
+                        <button onclick="openAdvancedClassFilterModal()"
+                            class="text-primary hover:text-blue-500 text-[10px]" title="Advanced Filter">
+                            <i class="fa-solid fa-filter"></i>
+                        </button>
+                    </div>
                     <div id="classFilterContainer"
                         class="bg-surface border border-border rounded p-2 max-h-36 overflow-y-auto space-y-1 text-xs text-content-muted">
                         <span class="italic text-content-muted" data-i18n="loading_classes">Loading classes...</span>
@@ -127,14 +169,41 @@
         </div>
 
         <!-- Scrollable List Wrapper -->
-        <div class="flex-1 min-h-0 relative bg-surface">
+        <div class="flex-1 min-h-0 relative bg-surface flex flex-col">
+            <!-- Action Panel -->
+            <div id="batchActionPanel" class="bg-panel border-b border-border p-3 space-y-2 text-xs flex-none hidden">
+                <div class="flex items-center justify-between">
+                    <span class="font-semibold text-content-muted" id="batchActionTitle">Hành động ảnh</span>
+                    <button onclick="currentWorkspace.clearImageSelection()"
+                        class="text-xs text-primary hover:underline hidden" id="btnClearSelection">Bỏ chọn</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-1">
+                    <button onclick="currentWorkspace.deleteSelectedImages()" id="btnDeleteSelected"
+                        class="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1 opacity-50 cursor-not-allowed"
+                        disabled>
+                        <i class="fa-solid fa-trash-can"></i> <span>Xóa đã chọn (<span
+                                id="selectedCount">0</span>)</span>
+                    </button>
+                    <button onclick="currentWorkspace.deleteListedImages()"
+                        class="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-dumpster"></i> <span>Xóa tất cả ds (<span
+                                id="listedCount">0</span>)</span>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 gap-2 mt-1">
+                    <button onclick="currentWorkspace.deleteCurrentImage()"
+                        class="bg-panel hover:bg-border text-content text-xs py-1.5 rounded flex items-center justify-center gap-1.5 border border-border">
+                        <i class="fa-solid fa-trash"></i> <span>Xóa ảnh hiện tại</span>
+                    </button>
+                </div>
+            </div>
             <!-- Scrollable List -->
-            <div class="h-full overflow-y-auto" id="imageList">
+            <div class="flex-1 overflow-y-auto" id="imageList">
                 <!-- Items injected by JS -->
             </div>
             <!-- Scroll to active button -->
             <button id="btnScrollToActive"
-                class="absolute top-2 right-4 bg-primary text-white p-2 w-8 h-8 flex items-center justify-center rounded-full shadow-md opacity-50 hover:opacity-100 transition-all z-10 hidden"
+                class="absolute bottom-4 right-4 bg-primary text-white p-2 w-8 h-8 flex items-center justify-center rounded-full shadow-md opacity-50 hover:opacity-100 transition-all z-10 hidden"
                 onclick="currentWorkspace.scrollToActiveImage()" title="Cuộn đến ảnh đang chọn">
                 <i class="fa-solid fa-location-crosshairs"></i>
             </button>
@@ -144,137 +213,187 @@
     <!-- Main: Canvas -->
     <div class="flex-1 flex flex-col min-w-0 bg-app-bg relative">
         <!-- Toolbar -->
-        <div class="h-14 bg-sidebar border-b border-border flex items-center px-4 gap-2 shadow-sm z-30">
-            <button class="p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
-                onclick="editor.setMode('draw')" title="Draw (D)" data-i18n-title="tool_draw" id="btnDraw">
-                <i class="fa-solid fa-pen text-lg"></i>
-            </button>
-            <button class="p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
-                onclick="editor.setMode('select')" title="Select/Edit (V)" data-i18n-title="tool_select" id="btnSelect">
-                <i class="fa-solid fa-mouse-pointer text-lg"></i>
-            </button>
+        <div
+            class="min-h-[3.5rem] h-auto bg-sidebar border-b border-border flex flex-nowrap items-center justify-between px-4 py-2 gap-2 shadow-sm z-30 overflow-x-auto toolbar-scroll select-none">
+            <!-- Left Group -->
+            <div class="flex flex-nowrap items-center gap-x-3 flex-1 flex-shrink-0">
+                <!-- Group 1: Navigation -->
+                <div class="flex items-center pr-2 border-r border-border flex-shrink-0">
+                    <a href="/"
+                        class="p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
+                        title="Back to Dashboard" data-i18n-title="back_to_dashboard">
+                        <i class="fa-solid fa-arrow-left text-lg"></i>
+                    </a>
+                </div>
 
-            <div class="w-px h-6 bg-border mx-2"></div>
-
-            <button class="p-2 text-content-muted hover:text-accent rounded hover:bg-panel transition-colors"
-                onclick="currentWorkspace.toggleLockBox()" title="Lock/Unlock Box (L)" data-i18n-title="tool_lock"
-                id="btnLock">
-                <i class="fa-solid fa-lock-open text-lg"></i>
-            </button>
-            <button class="p-2 text-content-muted hover:text-secondary rounded hover:bg-panel transition-colors"
-                onclick="currentWorkspace.toggleImageVisibility()" title="Hide/Show Image (H)"
-                data-i18n-title="tool_hide" id="btnHideImage">
-                <i class="fa-regular fa-image text-lg"></i>
-            </button>
-
-            <div class="relative" id="autoLabelDropdownWrapper">
-                <button id="btnAutoLabelToggle"
-                    class="p-2 text-content-muted hover:text-purple-500 rounded hover:bg-panel transition-colors"
-                    title="Auto Label (Magic Wand)" data-i18n-title="tool_auto"
-                    onclick="document.getElementById('autoLabelDropdown').classList.toggle('hidden'); event.stopPropagation();">
-                    <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
-                </button>
-                <div id="autoLabelDropdown"
-                    class="absolute left-0 mt-8 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                <!-- Group 2: Mode Selection -->
+                <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
                     <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabel()">
-                        <i class="fa-solid fa-image w-4 text-center"></i> <span data-i18n="auto_current">Current
-                            Canvas</span>
+                        class="btn-tool p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
+                        onclick="editor.setMode('draw')" title="Draw (D)" data-i18n-title="tool_draw" id="btnDraw">
+                        <i class="fa-solid fa-pen text-lg"></i>
                     </button>
                     <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabelAll()">
-                        <i class="fa-solid fa-images w-4 text-center"></i> <span data-i18n="auto_all">All Unlabeled
-                            Images</span>
+                        class="btn-tool p-2 text-content-muted hover:text-primary rounded hover:bg-panel transition-colors"
+                        onclick="editor.setMode('select')" title="Select/Edit (V)" data-i18n-title="tool_select"
+                        id="btnSelect">
+                        <i class="fa-solid fa-mouse-pointer text-lg"></i>
                     </button>
-                    <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.startSupervisedLabeling()">
-                        <i class="fa-solid fa-user-check w-4 text-center"></i> <span
-                            data-i18n="supervised_labeling">Supervised Labeling</span>
+                </div>
+
+                <!-- Group 3: Box Actions & Visibility -->
+                <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
+                    <button class="p-2 text-content-muted hover:text-accent rounded hover:bg-panel transition-colors"
+                        onclick="currentWorkspace.toggleLockBox()" title="Lock/Unlock Box (L)"
+                        data-i18n-title="tool_lock" id="btnLock">
+                        <i class="fa-solid fa-lock-open text-lg"></i>
                     </button>
+                    <button class="p-2 text-content-muted hover:text-secondary rounded hover:bg-panel transition-colors"
+                        onclick="currentWorkspace.toggleImageVisibility()" title="Hide/Show Image (H)"
+                        data-i18n-title="tool_hide" id="btnHideImage">
+                        <i class="fa-regular fa-image text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Group 4: Automated Labeling -->
+                <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
+                    <div class="relative" id="autoLabelDropdownWrapper">
+                        <button id="btnAutoLabelToggle"
+                            class="p-2 text-content-muted hover:text-purple-500 rounded hover:bg-panel transition-colors"
+                            title="Auto Label (Magic Wand)" data-i18n-title="tool_auto"
+                            onclick="toggleDropdown(event, 'btnAutoLabelToggle', 'autoLabelDropdown', 192)">
+                            <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
+                        </button>
+                        <div id="autoLabelDropdown"
+                            class="fixed hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabel()">
+                                <i class="fa-solid fa-image w-4 text-center"></i> <span data-i18n="auto_current">Current
+                                    Canvas</span>
+                            </button>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.autoLabelAll()">
+                                <i class="fa-solid fa-images w-4 text-center"></i> <span data-i18n="auto_all">All
+                                    Unlabeled
+                                    Images</span>
+                            </button>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-purple-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('autoLabelDropdown').classList.add('hidden'); currentWorkspace.startSupervisedLabeling()">
+                                <i class="fa-solid fa-user-check w-4 text-center"></i> <span
+                                    data-i18n="supervised_labeling">Supervised Labeling</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button id="btnAutoLabelRegion"
+                        class="btn-tool p-2 text-content-muted hover:text-purple-400 rounded hover:bg-panel transition-colors"
+                        title="Auto Label Region (R)" data-i18n-title="tool_auto_region"
+                        onclick="editor.setMode('auto_label_region')">
+                        <i class="fa-solid fa-crop-simple text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Group 5: Sequence & Bounding Box View Options -->
+                <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
+                    <div class="relative">
+                        <button id="btnShowSequenceNumbers"
+                            class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
+                            title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers"
+                            onclick="toggleDropdown(event, 'btnShowSequenceNumbers', 'sequenceDropdown', 192)">
+                            <i class="fa-solid fa-list-ol text-lg"></i>
+                        </button>
+                        <div id="sequenceDropdown"
+                            class="fixed hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('class')">
+                                <i class="fa-solid fa-layer-group w-4 text-center"></i> <span data-i18n="seq_class">By
+                                    Class</span>
+                            </button>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('column')">
+                                <i class="fa-solid fa-columns w-4 text-center"></i> <span data-i18n="seq_column">By
+                                    Column</span>
+                            </button>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-red-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('none')">
+                                <i class="fa-solid fa-eye-slash w-4 text-center"></i> <span data-i18n="seq_off">Turn
+                                    Off</span>
+                            </button>
+                        </div>
+                    </div>
+                    <button id="btnPreviewBoxes"
+                        class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel transition-colors"
+                        title="Preview Boxes" data-i18n-title="tool_preview_boxes"
+                        onclick="currentWorkspace.startPreviewBoxes()">
+                        <i class="fa-solid fa-play text-lg"></i>
+                    </button>
+                    <button id="btnHideBoxes" class="p-2 text-red-500 rounded hover:bg-panel transition-colors"
+                        title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes"
+                        onclick="currentWorkspace.toggleBoxesVisibility()">
+                        <i class="fa-solid fa-eye-slash text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Group 6: Zoom & Extra Classifier Utilities -->
+                <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
+                    <button id="btnCollectAll"
+                        class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
+                        title="Collect all box crops for classifier retraining"
+                        onclick="currentWorkspace.collectAllBoxes()">
+                        <i class="fa-solid fa-scissors text-lg"></i>
+                    </button>
+
+                    <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
+                        onclick="editor.zoomIn()">
+                        <i class="fa-solid fa-magnifying-glass-plus"></i>
+                    </button>
+                    <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
+                        onclick="editor.zoomOut()">
+                        <i class="fa-solid fa-magnifying-glass-minus"></i>
+                    </button>
+                    <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
+                        onclick="editor.resetView()">
+                        <i class="fa-solid fa-compress"></i>
+                    </button>
+                </div>
+
+                <!-- Group 7: Collaboration Status Widget -->
+                <div class="px-1 flex items-center gap-2 flex-shrink-0">
+                    <div id="collabUserNameBadge"
+                        class="flex items-center gap-1.5 px-2.5 py-1 bg-surface hover:bg-border border border-border rounded text-xs text-content cursor-pointer transition-all duration-200 px-1"
+                        title="Thay đổi tên hiển thị">
+                        <span id="collabUserIndicator"
+                            class="w-2.5 h-2.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]"></span>
+                        <span id="collabUserName" class="font-semibold text-content">User</span>
+                    </div>
+                    <div id="collabUsersList" class="flex items-center -space-x-1.5 overflow-hidden">
+                        <!-- Dynamic online users list -->
+                    </div>
                 </div>
             </div>
 
-            <button id="btnAutoLabelRegion"
-                class="p-2 text-content-muted hover:text-purple-400 rounded hover:bg-panel transition-colors"
-                title="Auto Label Region (R)" data-i18n-title="tool_auto_region"
-                onclick="editor.setMode('auto_label_region')">
-                <i class="fa-solid fa-crop-simple text-lg"></i>
-            </button>
-            <div class="relative">
-                <button id="btnShowSequenceNumbers"
-                    class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel transition-colors"
-                    title="Show Bounding Box Sequence Numbers" data-i18n-title="tool_sequence_numbers"
-                    onclick="document.getElementById('sequenceDropdown').classList.toggle('hidden')">
-                    <i class="fa-solid fa-list-ol text-lg"></i>
+            <!-- Right Group -->
+            <div class="flex flex-nowrap items-center gap-2 justify-end ml-auto flex-shrink-0">
+                <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel"
+                    onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)"
+                    data-i18n-title="tool_flag">
+                    <i class="fa-regular fa-flag text-lg"></i>
                 </button>
-                <div id="sequenceDropdown"
-                    class="absolute left-0 mt-2 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
-                    <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('class')">
-                        <i class="fa-solid fa-layer-group w-4 text-center"></i> <span data-i18n="seq_class">By
-                            Class</span>
-                    </button>
-                    <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-blue-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('column')">
-                        <i class="fa-solid fa-columns w-4 text-center"></i> <span data-i18n="seq_column">By
-                            Column</span>
-                    </button>
-                    <button
-                        class="text-left px-3 py-2 hover:bg-surface text-content hover:text-red-500 transition-colors flex items-center gap-2"
-                        onclick="document.getElementById('sequenceDropdown').classList.add('hidden'); currentWorkspace.setSequenceMode('none')">
-                        <i class="fa-solid fa-eye-slash w-4 text-center"></i> <span data-i18n="seq_off">Turn Off</span>
-                    </button>
-                </div>
+                <button class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel"
+                    onclick="currentWorkspace.toggleReview()" id="btnReview" title="Mark as Reviewed (G)">
+                    <i class="fa-regular fa-circle-check text-lg"></i>
+                </button>
+                <button
+                    class="bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2"
+                    onclick="currentWorkspace.save()"><span data-i18n="btn_saved"
+                        id="btnSavedText">Saved</span></button>
             </div>
-            <button id="btnPreviewBoxes"
-                class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel transition-colors"
-                title="Preview Boxes" data-i18n-title="tool_preview_boxes"
-                onclick="currentWorkspace.startPreviewBoxes()">
-                <i class="fa-solid fa-play text-lg"></i>
-            </button>
-            <button id="btnHideBoxes"
-                class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel transition-colors"
-                title="Hide/Show Bounding Boxes" data-i18n-title="tool_hide_boxes"
-                onclick="currentWorkspace.toggleBoxesVisibility()">
-                <i class="fa-solid fa-eye text-lg"></i>
-            </button>
-
-            <div class="w-px h-6 bg-border mx-2"></div>
-
-            <button id="btnCollectAll"
-                class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
-                title="Collect all box crops for classifier retraining" onclick="currentWorkspace.collectAllBoxes()">
-                <i class="fa-solid fa-scissors text-lg"></i>
-            </button>
-
-            <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
-                onclick="editor.zoomIn()">
-                <i class="fa-solid fa-magnifying-glass-plus"></i>
-            </button>
-            <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
-                onclick="editor.zoomOut()">
-                <i class="fa-solid fa-magnifying-glass-minus"></i>
-            </button>
-            <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
-                onclick="editor.resetView()">
-                <i class="fa-solid fa-compress"></i>
-            </button>
-
-            <button class="p-2 text-content-muted hover:text-red-500 rounded hover:bg-panel ml-auto"
-                onclick="currentWorkspace.toggleFlag()" id="btnFlag" title="Flag Image (F)" data-i18n-title="tool_flag">
-                <i class="fa-regular fa-flag text-lg"></i>
-            </button>
-            <button class="p-2 text-content-muted hover:text-green-500 rounded hover:bg-panel"
-                onclick="currentWorkspace.toggleReview()" id="btnReview" title="Mark as Reviewed (G)">
-                <i class="fa-regular fa-circle-check text-lg"></i>
-            </button>
-            <button class="bg-primary hover:bg-blue-500 text-content-inv text-sm font-medium px-4 py-1.5 rounded ml-2"
-                onclick="currentWorkspace.save()"><span data-i18n="btn_saved" id="btnSavedText">Saved</span></button>
         </div>
 
         <!-- Collapsible Search Header -->
@@ -355,8 +474,14 @@
                     onclick="toggleBottomPanel()" title="Toggle Action Panel">
                     <i id="bottomPanelChevron" class="fa-solid fa-chevron-top"></i>
                 </button>
+
+                <!-- Toggle Permanent Bottom Panel Button -->
+                <button id="btnTogglePermanentBottomPanel"
+                    class="absolute -top-6 right-4 bg-sidebar border-t border-x border-border px-4 py-1 rounded-t-md text-content-muted hover:text-content text-xs focus:outline-none shadow-md"
+                    onclick="togglePermanentBottomPanel()" data-i18n="hide">Ẩn</button>
+
                 <!-- Panel Content -->
-                <div class="p-3 flex items-center justify-center gap-3">
+                <div id="bottomPanelContentWrapper" class="p-3 flex items-center justify-center gap-3">
                     <!-- Delete Box -->
                     <button
                         class="bg-red-900/50 hover:bg-red-900 text-red-200 text-xs px-4 py-2 rounded border border-red-700/30 flex items-center justify-center gap-1.5 transition-colors"
@@ -386,30 +511,68 @@
     </div>
 
     <!-- Right Sidebar: Inspection & Classes -->
-    <div class="flex-none bg-sidebar border-l border-border flex flex-col transition-all duration-300 w-72"
+    <div class="flex-none bg-sidebar border-l border-border flex flex-col transition-all duration-300 w-72 relative"
         id="rightSidebar">
+        <!-- Resizer Handle -->
+        <div id="rightSidebarResizer"
+            class="absolute top-0 bottom-0 -left-1 w-2 cursor-col-resize hover:bg-primary/50 z-50 transition-colors">
+        </div>
+
         <!-- Inspection Panel (Fixed Top) -->
-        <div
-            class="p-4 border-b border-border bg-sidebar flex-shrink-0 flex flex-col max-h-[50%] overflow-y-auto sidebar-content">
-            <div class="flex justify-between items-center mb-2">
-                <h3 class="font-semibold text-sm text-content-muted" data-i18n="inspection">Inspection</h3>
-                <button onclick="currentWorkspace.showClassExamplesModal()"
+        <div class="border-b border-border bg-sidebar flex-shrink-0 flex flex-col sidebar-content">
+            <div class="flex justify-between items-center p-4 cursor-pointer hover:bg-panel transition-colors group"
+                onclick="toggleInspectionDropdown()">
+                <div class="flex items-center gap-2">
+                    <h3 class="font-semibold text-sm text-content-muted transition-colors group-hover:text-content"
+                        data-i18n="inspection">Inspection</h3>
+                    <i id="inspectionDropdownIcon"
+                        class="fa-solid fa-chevron-down text-xs text-content-muted transition-transform duration-200"></i>
+                </div>
+                <button onclick="event.stopPropagation(); currentWorkspace.showClassExamplesModal()"
                     class="text-content-muted hover:text-primary transition-colors" title="View Class Examples">
                     <i class="fa-solid fa-circle-question"></i>
                 </button>
             </div>
 
-            <div
-                class="w-full aspect-square bg-surface border border-border rounded overflow-hidden flex justify-center items-center relative mb-3 max-h-48">
-                <canvas id="magnifierCanvas" class="w-full h-full object-contain hidden"></canvas>
-                <div class="flex flex-col items-center gap-2 text-content-muted text-xs" id="magPlaceholder">
-                    <i class="fa-solid fa-magnifying-glass text-2xl"></i>
-                    <span data-i18n="select_zoom">Select a box to zoom</span>
+            <div id="inspectionDropdownContent" class="hidden flex-col px-4 pb-4 max-h-[50vh] overflow-y-auto">
+                <div
+                    class="w-full aspect-square bg-surface border border-border rounded overflow-hidden flex justify-center items-center relative mb-3 max-h-48">
+                    <canvas id="magnifierCanvas" class="w-full h-full object-contain hidden"></canvas>
+                    <div class="flex flex-col items-center gap-2 text-content-muted text-xs" id="magPlaceholder">
+                        <i class="fa-solid fa-magnifying-glass text-2xl"></i>
+                        <span data-i18n="select_zoom">Select a box to zoom</span>
+                    </div>
+                </div>
+
+                <div id="selectionInfo" class="space-y-2 text-sm text-content-muted" data-i18n="nothing_selected">
+                    Nothing selected
                 </div>
             </div>
+        </div>
 
-            <div id="selectionInfo" class="space-y-2 text-sm text-content-muted" data-i18n="nothing_selected">
-                Nothing selected
+        <!-- Tags Panel (Image Level) -->
+        <div class="border-b border-border bg-sidebar flex-shrink-0 flex flex-col sidebar-content">
+            <div class="flex justify-between items-center p-4 cursor-pointer hover:bg-panel transition-colors group"
+                onclick="toggleTagsDropdown()">
+                <div class="flex items-center gap-2">
+                    <h3 class="font-semibold text-sm text-content-muted transition-colors group-hover:text-content"
+                        data-i18n="tags">Tags</h3>
+                    <i id="tagsDropdownIcon"
+                        class="fa-solid fa-chevron-down text-xs text-content-muted transition-transform duration-200"></i>
+                </div>
+                <button onclick="event.stopPropagation(); currentWorkspace.openTagManager()"
+                    class="text-content-muted hover:text-primary transition-colors" title="Manage Tags">
+                    <i class="fa-solid fa-cog"></i>
+                </button>
+            </div>
+            <div id="tagsDropdownContent" class="hidden flex-col px-4 pb-4 max-h-[30vh] overflow-y-auto">
+                <div class="flex flex-wrap gap-1.5 mb-2" id="currentImageTags">
+                    <!-- Current image tags injected by JS -->
+                </div>
+                <button onclick="currentWorkspace.openTagSelector()"
+                    class="w-full py-1.5 text-xs bg-surface hover:bg-panel border border-border rounded text-content transition-colors flex justify-center items-center gap-1.5">
+                    <i class="fa-solid fa-plus"></i> <span data-i18n="assign_tags">Assign Tags</span>
+                </button>
             </div>
         </div>
 
@@ -509,14 +672,69 @@
         </div>
     </div>
 </div>
+</div>
+
+<!-- Tag Manager Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="tagManagerModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-md p-6 border border-border flex flex-col max-h-[80vh]">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold text-content" data-i18n="manage_tags">Manage Tags</h2>
+            <button onclick="closeModal('tagManagerModal')" class="text-content-muted hover:text-content">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <form id="addTagForm" class="flex gap-2 mb-4" onsubmit="event.preventDefault(); currentWorkspace.addTag();">
+            <input type="text" id="newTagName" placeholder="New tag name..."
+                class="flex-1 bg-surface border border-border text-sm rounded px-3 py-2 text-content outline-none focus:border-primary"
+                required>
+            <input type="color" id="newTagColor" value="#3b82f6"
+                class="w-10 h-10 rounded cursor-pointer bg-surface border border-border p-1">
+            <button type="submit"
+                class="bg-primary hover:bg-blue-600 text-white px-4 py-2 rounded text-sm transition-colors">Add</button>
+        </form>
+
+        <div class="flex-1 overflow-y-auto space-y-2 pr-2" id="tagManagerList">
+            <!-- Tag list injected by JS -->
+        </div>
+    </div>
+</div>
+
+<!-- Tag Selector Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="tagSelectorModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-sm p-6 border border-border flex flex-col max-h-[80vh]">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-bold text-content" data-i18n="select_tags">Select Tags</h2>
+            <button onclick="closeModal('tagSelectorModal')" class="text-content-muted hover:text-content">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-2 mb-4 pr-2" id="tagSelectorList">
+            <!-- Tag selector checkboxes injected by JS -->
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="closeModal('tagSelectorModal')">Cancel</button>
+            <button type="button"
+                class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-white rounded transition-colors"
+                onclick="currentWorkspace.saveImageTags()">Save</button>
+        </div>
+    </div>
+</div>
 
 <!-- Send project_id to JS -->
 <script>
     const PROJECT_ID = "{{ project_id }}";
+    const ACTIVE_FILENAME = "{{ active_filename if active_filename else '' }}";
 </script>
 <script src="{{ url_for('static', filename='js/fabric.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/collaboration.js') }}"></script>
 
 <script>
     function toggleBottomPanel(forceState) {
@@ -554,6 +772,141 @@
         }
     }
 
+    function togglePermanentBottomPanel() {
+        const content = document.getElementById('bottomPanelContentWrapper');
+        const btn = document.getElementById('btnTogglePermanentBottomPanel');
+        if (!content || !btn) return;
+
+        const isHidden = content.classList.contains('hidden');
+        if (isHidden) {
+            content.classList.remove('hidden');
+            btn.innerText = typeof window.t === 'function' ? window.t('hide') || 'Ẩn' : 'Ẩn';
+            localStorage.setItem('bottomPanelContentHidden', 'false');
+        } else {
+            content.classList.add('hidden');
+            btn.innerText = typeof window.t === 'function' ? window.t('show') || 'Hiển thị' : 'Hiển thị';
+            localStorage.setItem('bottomPanelContentHidden', 'true');
+        }
+    }
+
+    function toggleInspectionDropdown() {
+        const content = document.getElementById('inspectionDropdownContent');
+        const icon = document.getElementById('inspectionDropdownIcon');
+        if (content.classList.contains('hidden')) {
+            content.classList.remove('hidden');
+            content.classList.add('flex');
+            icon.classList.add('rotate-180');
+        } else {
+            content.classList.add('hidden');
+            content.classList.remove('flex');
+            icon.classList.remove('rotate-180');
+        }
+    }
+
+    function toggleTagsDropdown() {
+        const content = document.getElementById('tagsDropdownContent');
+        const icon = document.getElementById('tagsDropdownIcon');
+        if (content.classList.contains('hidden')) {
+            content.classList.remove('hidden');
+            content.classList.add('flex');
+            icon.classList.add('rotate-180');
+        } else {
+            content.classList.add('hidden');
+            content.classList.remove('flex');
+            icon.classList.remove('rotate-180');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const isHidden = localStorage.getItem('bottomPanelContentHidden') === 'true';
+        if (isHidden) {
+            const content = document.getElementById('bottomPanelContentWrapper');
+            const btn = document.getElementById('btnTogglePermanentBottomPanel');
+            if (content && btn) {
+                content.classList.add('hidden');
+                btn.innerText = typeof window.t === 'function' ? window.t('show') || 'Hiển thị' : 'Hiển thị';
+            }
+        }
+
+        // Initialize right sidebar width
+        const savedWidth = localStorage.getItem('rightSidebarWidth');
+        const rightSidebar = document.getElementById('rightSidebar');
+        if (savedWidth && rightSidebar && !rightSidebar.classList.contains('w-12')) {
+            let widthVal = parseInt(savedWidth);
+            const maxAllowedWidth = Math.min(800, window.innerWidth / 2);
+            if (widthVal > maxAllowedWidth) widthVal = maxAllowedWidth;
+            if (widthVal < 200) widthVal = 200;
+            rightSidebar.style.width = widthVal + 'px';
+            rightSidebar.classList.remove('w-72');
+        }
+    });
+
+    // Right Sidebar Resizing Logic
+    const rightSidebar = document.getElementById('rightSidebar');
+    const rightResizer = document.getElementById('rightSidebarResizer');
+
+    let isResizingRight = false;
+    let initialX = 0;
+    let initialWidth = 0;
+
+    if (rightResizer) {
+        rightResizer.addEventListener('mousedown', function (e) {
+            isResizingRight = true;
+            initialX = e.clientX;
+            initialWidth = rightSidebar.getBoundingClientRect().width;
+
+            // Disable transition during resize for smooth dragging
+            rightSidebar.classList.remove('transition-all', 'duration-300');
+
+            // Prevent text selection while dragging
+            document.body.style.userSelect = 'none';
+            document.body.style.cursor = 'col-resize';
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isResizingRight) return;
+
+            // Calculate new width (moving left increases width for right sidebar)
+            const deltaX = initialX - e.clientX;
+            let newWidth = initialWidth + deltaX;
+
+            // Set min and max width constraints
+            const maxAllowedWidth = Math.min(800, window.innerWidth / 2);
+            if (newWidth < 200) newWidth = 200;
+            if (newWidth > maxAllowedWidth) newWidth = maxAllowedWidth;
+
+            rightSidebar.style.width = newWidth + 'px';
+
+            // Dynamically resize canvas
+            if (typeof editor !== 'undefined' && editor.resizeCanvas) {
+                editor.resizeCanvas();
+            }
+        });
+
+        document.addEventListener('mouseup', function (e) {
+            if (isResizingRight) {
+                isResizingRight = false;
+
+                // Re-enable transitions
+                rightSidebar.classList.add('transition-all', 'duration-300');
+
+                // Reset body styles
+                document.body.style.userSelect = '';
+                document.body.style.cursor = '';
+
+                // Save custom width to localStorage
+                localStorage.setItem('rightSidebarWidth', rightSidebar.style.width);
+
+                // Final resize for canvas
+                setTimeout(() => {
+                    if (typeof editor !== 'undefined' && editor.resizeCanvas) {
+                        editor.resizeCanvas();
+                    }
+                }, 50);
+            }
+        });
+    }
+
     // Update JS injection logic for Tailwind Styles
     // Since workspace.js injects HTML strings, we need to update workspace.js too!
     // But first let's handle the sidebar toggle logic here which uses classes.
@@ -566,7 +919,20 @@
         if (isCollapsed) {
             // Expand
             sidebar.classList.remove('w-12');
-            sidebar.classList.add(fullWidth);
+            if (side === 'right') {
+                const savedWidth = localStorage.getItem('rightSidebarWidth');
+                if (savedWidth) {
+                    let widthVal = parseInt(savedWidth);
+                    const maxAllowedWidth = Math.min(800, window.innerWidth / 2);
+                    if (widthVal > maxAllowedWidth) widthVal = maxAllowedWidth;
+                    if (widthVal < 200) widthVal = 200;
+                    sidebar.style.width = widthVal + 'px';
+                } else {
+                    sidebar.classList.add('w-72');
+                }
+            } else {
+                sidebar.classList.add(fullWidth);
+            }
 
             // Show content
             const contents = sidebar.querySelectorAll('.sidebar-content');
@@ -578,6 +944,9 @@
 
         } else {
             // Collapse
+            if (side === 'right') {
+                sidebar.style.width = ''; // Clear inline width so w-12 can apply
+            }
             sidebar.classList.remove(fullWidth);
             sidebar.classList.add('w-12');
 
@@ -726,16 +1095,26 @@
         <div class="space-y-4">
             <div>
                 <label class="block text-sm font-medium text-content-muted mb-2" data-i18n="scope">Scope</label>
-                <select id="exportScope" class="w-full bg-surface border border-border rounded px-3 py-2 text-content">
+                <select id="exportScope" class="w-full bg-surface border border-border rounded px-3 py-2 text-content"
+                    onchange="currentWorkspace.onExportScopeChange()">
                     <option value="project" data-i18n="scope_project">Entire Project</option>
-                    <option value="view" data-i18n="scope_view">Current View (Assigned)</option>
+                    <option value="tags" data-i18n="scope_tags">Đã gán tag</option>
                     <option value="current" data-i18n="scope_current">Current Image Only</option>
                 </select>
             </div>
 
+            <div id="exportTagsSelection" class="hidden">
+                <label class="block text-sm font-medium text-content-muted mb-2">Select Tags to Export</label>
+                <div class="max-h-32 overflow-y-auto border border-border rounded p-2 bg-surface space-y-1"
+                    id="exportTagsList">
+                    <!-- Checkboxes injected by JS -->
+                </div>
+            </div>
+
             <div class="flex items-center gap-2">
                 <input type="checkbox" id="exportExcludeFlagged"
-                    class="rounded bg-surface border-border text-primary focus:ring-primary" checked>
+                    class="rounded bg-surface border-border text-primary focus:ring-primary" checked
+                    onchange="if(typeof window.updateSplitCounts === 'function') window.updateSplitCounts()">
                 <label for="exportExcludeFlagged" class="text-sm text-content-muted" data-i18n="exclude_flagged">Exclude
                     Flagged Images</label>
             </div>
@@ -844,6 +1223,52 @@
             <button type="button"
                 class="px-4 py-2 text-sm bg-primary hover:opacity-90 text-content-inv rounded transition-opacity"
                 onclick="closeModal('colabCodeModal')" data-i18n="btn_close">Đóng</button>
+        </div>
+    </div>
+</div>
+
+<!-- Advanced Class Filter Modal -->
+<div id="advancedClassFilterModal"
+    class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-6xl flex flex-col max-h-[90vh] border border-border">
+        <!-- Header -->
+        <div class="flex items-center justify-between p-4 border-b border-border">
+            <h3 class="text-lg font-semibold text-content flex items-center gap-2">
+                <i class="fa-solid fa-filter text-primary"></i>
+                <span data-i18n="advanced_class_filter">Advanced Filter (Exact Match)</span>
+            </h3>
+            <button onclick="closeAdvancedClassFilterModal()"
+                class="text-content-muted hover:text-content transition-colors">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <!-- Body -->
+        <div class="p-4 flex-1 overflow-y-auto space-y-4">
+            <p class="text-sm text-content-muted" data-i18n="advanced_class_filter_desc">
+                Select a class to filter images that contain <b>only</b> this specific class and no others.
+            </p>
+            <div id="advancedClassFilterList"
+                class="max-h-60 overflow-y-auto border border-border p-2 rounded bg-surface text-sm text-content"
+                style="display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 0.5rem;">
+                <!-- Radio buttons injected by JS -->
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="p-4 border-t border-border flex justify-end gap-2 bg-sidebar rounded-b-lg">
+            <button onclick="clearAdvancedClassFilter()"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content transition-colors">
+                Clear Filter
+            </button>
+            <button onclick="closeAdvancedClassFilterModal()"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content transition-colors">
+                Cancel
+            </button>
+            <button onclick="applyAdvancedClassFilter()"
+                class="px-4 py-2 text-sm bg-primary text-white rounded hover:bg-blue-600 transition-colors">
+                Apply Filter
+            </button>
         </div>
     </div>
 </div>

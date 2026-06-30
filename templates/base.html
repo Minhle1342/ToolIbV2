@@ -8,65 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        // Semantic Colors
-                        surface: 'var(--color-surface)',     // Main BG
-                        sidebar: 'var(--color-sidebar)',     // Sidebar BG
-                        panel: 'var(--color-panel)',         // Panels/Cards
-                        border: 'var(--color-border)',       // Borders
-
-                        primary: 'var(--color-primary)',     // Main Brand Color
-                        secondary: 'var(--color-secondary)', // Secondary Brand Color
-                        accent: 'var(--color-accent)',       // Accents
-
-                        content: {
-                            DEFAULT: 'var(--color-text)',    // Main Text
-                            muted: 'var(--color-text-muted)',// Secondary Text
-                            inv: 'var(--color-text-inv)',    // Inverted Text
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-    <style type="text/tailwindcss">
-        :root {
-            /* Dark Theme (Default) */
-            --color-surface: #0d1117;       /* gray-950 */
-            --color-sidebar: #1f2937;       /* gray-800 */
-            --color-panel: #111827;         /* gray-900 */
-            --color-border: #374151;        /* gray-700 */
-            
-            --color-primary: #3b82f6;       /* blue-500 */
-            --color-secondary: #22c55e;     /* green-500 */
-            --color-accent: #eab308;        /* yellow-500 */
-            
-            --color-text: #e5e7eb;          /* gray-200 */
-            --color-text-muted: #9ca3af;    /* gray-400 */
-            --color-text-inv: #ffffff;
-        }
-
-        .pink-mode {
-            /* Pastel Pink Theme */
-            --color-surface: #fff0f5;       /* LavenderBlush */
-            --color-sidebar: #ffe4e1;       /* MistyRose */
-            --color-panel: #ffffff;         /* White */
-            --color-border: #ffb6c1;        /* LightPink */
-            
-            --color-primary: #ff69b4;       /* HotPink */
-            --color-secondary: #ff1493;     /* DeepPink */
-            --color-accent: #ff6347;        /* Tomato */
-            
-            --color-text: #4a4a4a;          /* Dark Gray */
-            --color-text-muted: #8b8b8b;    /* Gray */
-            --color-text-inv: #ffffff;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/output.css') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="{{ url_for('static', filename='js/i18n.js') }}"></script>
     <script src="{{ url_for('static', filename='js/api.js') }}"></script>
@@ -75,6 +17,7 @@
 <body class="bg-surface text-content h-screen overflow-hidden font-sans transition-colors duration-300">
     <div class="flex h-full">
         <!-- Global Sidebar -->
+        {% if not hide_global_sidebar %}
         <nav class="w-64 bg-sidebar border-r border-border flex flex-col transition-all duration-300"
             id="globalSidebar">
             <div class="h-16 flex items-center justify-between px-4 border-b border-border">
@@ -133,6 +76,7 @@
                 </button>
             </div>
         </nav>
+        {% endif %}
 
         <main class="flex-1 flex flex-col min-w-0 bg-surface text-content">
             {% block content %}{% endblock %}
@@ -170,17 +114,42 @@
         // Sidebar
         if (localStorage.getItem('sidebar-collapsed') === 'true') {
             const sidebar = document.getElementById('globalSidebar');
-            sidebar.classList.remove('w-64');
-            sidebar.classList.add('w-16');
-            document.querySelectorAll('.nav-text').forEach(el => el.style.display = 'none');
-            let brandSpan = document.getElementById('brandText')?.querySelector('span');
-            if (brandSpan) brandSpan.style.display = 'none';
+            if (sidebar) {
+                sidebar.classList.remove('w-64');
+                sidebar.classList.add('w-16');
+                document.querySelectorAll('.nav-text').forEach(el => el.style.display = 'none');
+                let brandSpan = document.getElementById('brandText')?.querySelector('span');
+                if (brandSpan) brandSpan.style.display = 'none';
+            }
         }
 
         // Theme
         if (localStorage.getItem('theme') === 'pink') {
             document.body.classList.add('pink-mode');
         }
+
+        // Global Toast
+        window.showToast = function(message, type = 'info') {
+            const toast = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+            toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${bgColor} text-white px-5 py-2.5 rounded-lg shadow-2xl text-sm font-medium z-[9999] transition-all duration-300 flex items-center gap-2`;
+            const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info';
+            toast.innerHTML = `<i class="fa-solid ${icon}"></i> ${message}`;
+            document.body.appendChild(toast);
+            
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(-50%) translateY(20px)';
+            requestAnimationFrame(() => {
+                toast.style.opacity = '1';
+                toast.style.transform = 'translateX(-50%) translateY(0)';
+            });
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(-50%) translateY(20px)';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        };
     </script>
     {% block scripts %}{% endblock %}
 </body>

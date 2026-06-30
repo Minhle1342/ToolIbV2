@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface: var(--color-surface-val);
+  --color-sidebar: var(--color-sidebar-val);
+  --color-panel: var(--color-panel-val);
+  --color-border: var(--color-border-val);
+  
+  --color-primary: var(--color-primary-val);
+  --color-secondary: var(--color-secondary-val);
+  --color-accent: var(--color-accent-val);
+  
+  --color-content: var(--color-text-val);
+  --color-content-muted: var(--color-text-muted-val);
+  --color-content-inv: var(--color-text-inv-val);
+}
+
+@layer base {
+  :root {
+    /* Dark Theme (Default) */
+    --color-surface-val: #0d1117;       /* gray-950 */
+    --color-sidebar-val: #1f2937;       /* gray-800 */
+    --color-panel-val: #111827;         /* gray-900 */
+    --color-border-val: #374151;        /* gray-700 */
+    
+    --color-primary-val: #3b82f6;       /* blue-500 */
+    --color-secondary-val: #22c55e;     /* green-500 */
+    --color-accent-val: #eab308;        /* yellow-500 */
+    
+    --color-text-val: #e5e7eb;          /* gray-200 */
+    --color-text-muted-val: #9ca3af;    /* gray-400 */
+    --color-text-inv-val: #ffffff;
+  }
+
+  .pink-mode {
+    /* Pastel Pink Theme */
+    --color-surface-val: #fff0f5;       /* LavenderBlush */
+    --color-sidebar-val: #ffe4e1;       /* MistyRose */
+    --color-panel-val: #ffffff;         /* White */
+    --color-border-val: #ffb6c1;        /* LightPink */
+    
+    --color-primary-val: #ff69b4;       /* HotPink */
+    --color-secondary-val: #ff1493;     /* DeepPink */
+    --color-accent-val: #ff6347;        /* Tomato */
+    
+    --color-text-val: #4a4a4a;          /* Dark Gray */
+    --color-text-muted-val: #8b8b8b;    /* Gray */
+    --color-text-inv-val: #ffffff;
+  }
+}

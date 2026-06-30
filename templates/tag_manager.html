@@ -1,0 +1,539 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="p-6 h-full flex flex-col bg-panel">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+        <div>
+            <h1 class="text-2xl font-bold text-content">Tag Manager</h1>
+            <p class="text-sm text-content-muted mt-1">Manage tags and assign them to images for project #{{ project_id }}</p>
+        </div>
+        <a href="/project/{{ project_id }}" class="btn btn-secondary px-4 py-2 bg-surface hover:bg-surface-alt rounded border border-border">
+            <i class="fa-solid fa-arrow-left mr-2"></i> Back to Workspace
+        </a>
+    </div>
+
+    <div class="flex flex-1 gap-6 min-h-0">
+        <!-- Left: Tag Management -->
+        <div class="w-80 flex flex-col bg-surface border border-border rounded-lg shadow-sm">
+            <div class="p-4 border-b border-border">
+                <h2 class="font-semibold text-content mb-4">Project Tags</h2>
+                <div class="flex gap-2">
+                    <input type="text" id="newTagName" placeholder="New tag name" class="flex-1 bg-panel border border-border rounded px-3 py-1.5 text-sm text-content">
+                    <input type="color" id="newTagColor" value="#3b82f6" class="w-8 h-8 rounded cursor-pointer border-none p-0 bg-transparent">
+                    <button onclick="tagManager.addTag()" class="btn btn-primary px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm">
+                        <i class="fa-solid fa-plus"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-2" id="tagsList">
+                <div class="text-center text-sm text-content-muted mt-4">Loading tags...</div>
+            </div>
+        </div>
+
+        <!-- Right: Image List & Bulk Actions -->
+        <div class="flex-1 flex flex-col bg-surface border border-border rounded-lg shadow-sm overflow-hidden">
+            <!-- Toolbar -->
+            <div class="p-4 border-b border-border flex flex-wrap gap-4 items-center justify-between bg-panel">
+                <div class="flex items-center gap-4">
+                    <label class="flex items-center gap-2 text-sm text-content cursor-pointer">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="tagManager.toggleSelectAll()" class="rounded border-border bg-surface text-primary">
+                        Select All on Page
+                    </label>
+                    <span class="text-sm text-content-muted" id="selectedCountText">0 selected</span>
+                </div>
+                
+                <div class="flex items-center gap-3">
+                    <select id="bulkTagSelect" class="bg-surface border border-border rounded px-3 py-1.5 text-sm text-content max-w-[200px]">
+                        <option value="">Select a tag...</option>
+                    </select>
+                    <button onclick="tagManager.bulkAssign('assign')" class="btn px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm" title="Assign tag to selected">
+                        <i class="fa-solid fa-tag mr-1"></i> Assign
+                    </button>
+                    <button onclick="tagManager.bulkAssign('unassign')" class="btn px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded text-sm" title="Remove tag from selected">
+                        <i class="fa-solid fa-tag-slash mr-1"></i> Remove
+                    </button>
+                    <div class="h-6 w-px bg-border mx-1"></div>
+                    <button onclick="tagManager.bulkAssignAll('assign')" class="btn px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded text-sm" title="Assign tag to ALL images in project">
+                        Assign to ALL
+                    </button>
+                    <div class="h-6 w-px bg-border mx-1"></div>
+                    <button id="btnExportTags" onclick="tagManager.exportDataset()" class="btn px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded text-sm" title="Export dataset with tags">
+                        <i class="fa-solid fa-file-export mr-1"></i> Export Dataset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Image Grid -->
+            <div class="flex-1 overflow-y-auto p-4 bg-panel" id="imagesGrid">
+                <div class="text-center text-sm text-content-muted mt-8">Loading images...</div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="p-4 border-t border-border flex items-center justify-between bg-surface">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-content-muted">Items per page:</span>
+                    <select id="limitSelect" onchange="tagManager.changeLimit()" class="bg-panel border border-border rounded px-2 py-1 text-sm text-content">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-4">
+                    <span class="text-sm text-content-muted" id="paginationInfo">Showing 0 of 0</span>
+                    <div class="flex gap-1">
+                        <button onclick="tagManager.prevPage()" id="prevBtn" class="btn px-3 py-1 bg-panel hover:bg-surface-alt rounded border border-border text-content disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-chevron-left"></i>
+                        </button>
+                        <button onclick="tagManager.nextPage()" id="nextBtn" class="btn px-3 py-1 bg-panel hover:bg-surface-alt rounded border border-border text-content disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa-solid fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Export Dataset Modal -->
+<div id="exportModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div class="bg-surface rounded-lg shadow-lg w-[400px] border border-border">
+        <div class="p-4 border-b border-border flex justify-between items-center">
+            <h3 class="font-bold text-lg text-content">Export Dataset Settings</h3>
+            <button onclick="tagManager.closeExportModal()" class="text-content-muted hover:text-red-500">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="p-4 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-content-muted mb-2">Chế độ xuất (Export Mode)</label>
+                <div class="flex flex-col gap-2">
+                    <label class="flex items-center gap-2 text-sm text-content cursor-pointer">
+                        <input type="radio" name="exportMode" value="all" checked class="text-primary bg-panel border-border focus:ring-primary">
+                        Xuất tất cả (Export All)
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-content cursor-pointer">
+                        <input type="radio" name="exportMode" value="tagged_only" class="text-primary bg-panel border-border focus:ring-primary">
+                        Chỉ xuất dataset có tag (Tagged only)
+                    </label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm text-content-muted mb-1">Train Split (%)</label>
+                <input type="number" id="exportTrainSplit" value="80" min="0" max="100" class="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-content" onchange="tagManager.updateSplits('train')">
+            </div>
+            <div>
+                <label class="block text-sm text-content-muted mb-1">Val Split (%)</label>
+                <input type="number" id="exportValSplit" value="20" min="0" max="100" class="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-content" onchange="tagManager.updateSplits('val')">
+            </div>
+            <div>
+                <label class="block text-sm text-content-muted mb-1">Test Split (%)</label>
+                <input type="number" id="exportTestSplit" value="0" min="0" max="100" class="w-full bg-panel border border-border rounded px-3 py-2 text-sm text-content" onchange="tagManager.updateSplits('test')">
+            </div>
+            <div id="splitError" class="text-red-500 text-xs hidden">Total must be exactly 100%</div>
+        </div>
+        <div class="p-4 border-t border-border flex justify-end gap-3">
+            <button onclick="tagManager.closeExportModal()" class="btn px-4 py-2 bg-panel hover:bg-surface-alt rounded border border-border text-sm text-content">Cancel</button>
+            <button id="btnConfirmExport" onclick="tagManager.confirmExport()" class="btn px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm">Export</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const PROJECT_ID = "{{ project_id }}";
+
+const tagManager = {
+    tags: [],
+    images: [],
+    selectedImageIds: new Set(),
+    currentPage: 1,
+    limit: 50,
+    totalImages: 0,
+    
+    showToast(message, type = 'info') {
+        const toast = document.createElement('div');
+        const bgColor = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+        toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${bgColor} text-white px-5 py-2.5 rounded-lg shadow-2xl text-sm font-medium z-[9999] transition-all duration-300 flex items-center gap-2`;
+        
+        const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info';
+        toast.innerHTML = `<i class="fa-solid ${icon}"></i> ${message}`;
+        
+        document.body.appendChild(toast);
+        
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(20px)';
+        requestAnimationFrame(() => {
+            toast.style.opacity = '1';
+            toast.style.transform = 'translateX(-50%) translateY(0)';
+        });
+        
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(-50%) translateY(20px)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    },
+
+    async init() {
+        await this.loadTags();
+        await this.loadImages();
+    },
+
+    async loadTags() {
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/tags`);
+            this.tags = await res.json();
+            this.renderTags();
+            this.updateBulkTagSelect();
+        } catch (e) {
+            console.error('Error loading tags:', e);
+        }
+    },
+
+    async loadImages() {
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/images_paginated?page=${this.currentPage}&limit=${this.limit}`);
+            const data = await res.json();
+            this.images = data.images;
+            this.totalImages = data.total;
+            
+            // Retain selection if they are still on this page, otherwise we could clear it.
+            // Let's clear selection on page change to avoid confusion.
+            this.selectedImageIds.clear();
+            document.getElementById('selectAllCheckbox').checked = false;
+            
+            this.renderImages();
+            this.updatePagination();
+            this.updateSelectionState();
+        } catch (e) {
+            console.error('Error loading images:', e);
+            document.getElementById('imagesGrid').innerHTML = '<div class="text-red-500 p-4">Error loading images.</div>';
+        }
+    },
+
+    renderTags() {
+        const container = document.getElementById('tagsList');
+        if (this.tags.length === 0) {
+            container.innerHTML = '<div class="text-sm text-content-muted p-2 text-center">No tags found.</div>';
+            return;
+        }
+        
+        container.innerHTML = this.tags.map(tag => `
+            <div class="flex items-center justify-between p-2 hover:bg-panel rounded border border-transparent hover:border-border transition-colors group mb-1">
+                <div class="flex items-center gap-3 flex-1 overflow-hidden">
+                    <span class="w-4 h-4 rounded-full flex-shrink-0" style="background-color: ${tag.color}"></span>
+                    <span class="text-sm text-content truncate" title="${tag.name}">${tag.name}</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs bg-surface text-content-muted px-2 py-0.5 rounded-full border border-border">${tag.image_count || 0}</span>
+                    <button onclick="tagManager.deleteTag(${tag.id})" class="text-content-muted hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete tag">
+                        <i class="fa-solid fa-trash text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    updateBulkTagSelect() {
+        const select = document.getElementById('bulkTagSelect');
+        const currentVal = select.value;
+        
+        let html = '<option value="">Select a tag...</option>';
+        html += this.tags.map(tag => `<option value="${tag.id}">${tag.name}</option>`).join('');
+        select.innerHTML = html;
+        
+        if (currentVal && this.tags.find(t => t.id == currentVal)) {
+            select.value = currentVal;
+        }
+    },
+
+    renderImages() {
+        const container = document.getElementById('imagesGrid');
+        if (this.images.length === 0) {
+            container.innerHTML = '<div class="text-sm text-content-muted p-2 text-center mt-8">No images found in this project.</div>';
+            return;
+        }
+
+        container.innerHTML = `<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+            ${this.images.map(img => {
+                const isSelected = this.selectedImageIds.has(img.id);
+                return `
+                <div class="relative bg-surface border ${isSelected ? 'border-primary ring-1 ring-primary' : 'border-border'} rounded overflow-hidden cursor-pointer group" onclick="tagManager.toggleImage(${img.id})">
+                    <div class="aspect-square bg-panel relative">
+                        <img src="/api/image_data/${img.id}" class="w-full h-full object-cover" loading="lazy">
+                        <div class="absolute top-2 left-2 z-10">
+                            <input type="checkbox" ${isSelected ? 'checked' : ''} onclick="event.stopPropagation(); tagManager.toggleImage(${img.id})" class="w-5 h-5 rounded border-border bg-surface text-primary cursor-pointer shadow-sm">
+                        </div>
+                    </div>
+                    <div class="p-2 text-xs truncate text-content bg-surface" title="${img.filename}">
+                        ${img.filename}
+                    </div>
+                    ${img.tags && img.tags.length > 0 ? `
+                        <div class="px-2 pb-2 flex flex-wrap gap-1 bg-surface">
+                            ${img.tags.map(t => `
+                                <span class="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] border border-border bg-panel group/tag" title="${t.name}">
+                                    <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${t.color}"></span>
+                                    <span class="max-w-[60px] truncate text-content">${t.name}</span>
+                                    <button onclick="event.stopPropagation(); tagManager.doBulkAssign([${img.id}], [${t.id}], 'unassign')" class="opacity-0 group-hover/tag:opacity-100 hover:text-red-500 focus:outline-none transition-opacity text-content-muted" title="Remove tag">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
+                                </span>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+                `;
+            }).join('')}
+        </div>`;
+    },
+
+    updatePagination() {
+        const totalPages = Math.ceil(this.totalImages / this.limit) || 1;
+        document.getElementById('prevBtn').disabled = this.currentPage <= 1;
+        document.getElementById('nextBtn').disabled = this.currentPage >= totalPages;
+        
+        const start = this.totalImages === 0 ? 0 : ((this.currentPage - 1) * this.limit) + 1;
+        const end = Math.min(this.currentPage * this.limit, this.totalImages);
+        document.getElementById('paginationInfo').textContent = `Showing ${start}-${end} of ${this.totalImages}`;
+    },
+
+    changeLimit() {
+        this.limit = parseInt(document.getElementById('limitSelect').value);
+        this.currentPage = 1;
+        this.loadImages();
+    },
+
+    prevPage() {
+        if (this.currentPage > 1) {
+            this.currentPage--;
+            this.loadImages();
+        }
+    },
+
+    nextPage() {
+        const totalPages = Math.ceil(this.totalImages / this.limit);
+        if (this.currentPage < totalPages) {
+            this.currentPage++;
+            this.loadImages();
+        }
+    },
+
+    toggleImage(imgId) {
+        if (this.selectedImageIds.has(imgId)) {
+            this.selectedImageIds.delete(imgId);
+        } else {
+            this.selectedImageIds.add(imgId);
+        }
+        
+        // Quick DOM update for checkbox and border instead of full re-render
+        this.renderImages();
+        this.updateSelectionState();
+    },
+
+    toggleSelectAll() {
+        const checked = document.getElementById('selectAllCheckbox').checked;
+        if (checked) {
+            this.images.forEach(img => this.selectedImageIds.add(img.id));
+        } else {
+            this.selectedImageIds.clear();
+        }
+        this.renderImages();
+        this.updateSelectionState();
+    },
+
+    updateSelectionState() {
+        const count = this.selectedImageIds.size;
+        document.getElementById('selectedCountText').textContent = `${count} selected`;
+        
+        // Sync select all checkbox
+        const selectAllCb = document.getElementById('selectAllCheckbox');
+        if (count === 0) {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = false;
+        } else if (count === this.images.length && this.images.length > 0) {
+            selectAllCb.checked = true;
+            selectAllCb.indeterminate = false;
+        } else {
+            selectAllCb.checked = false;
+            selectAllCb.indeterminate = true;
+        }
+    },
+
+    async addTag() {
+        const nameInput = document.getElementById('newTagName');
+        const colorInput = document.getElementById('newTagColor');
+        const name = nameInput.value.trim();
+        const color = colorInput.value;
+        
+        if (!name) return;
+
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/tags`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, color })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                nameInput.value = '';
+                await this.loadTags();
+                this.showToast('Tag added successfully', 'success');
+            } else {
+                this.showToast(data.error || 'Failed to add tag', 'error');
+            }
+        } catch (e) {
+            console.error('Add tag error:', e);
+            this.showToast('Failed to add tag', 'error');
+        }
+    },
+
+    async deleteTag(tagId) {
+        if (!confirm('Are you sure you want to delete this tag? It will be removed from all images.')) return;
+        try {
+            const res = await fetch(`/api/tags/${tagId}`, { method: 'DELETE' });
+            if (res.ok) {
+                await this.loadTags();
+                // Reload images to reflect removed tags
+                await this.loadImages();
+                this.showToast('Tag deleted successfully', 'success');
+            } else {
+                const data = await res.json();
+                this.showToast(data.error || 'Failed to delete tag', 'error');
+            }
+        } catch (e) {
+            console.error('Delete tag error:', e);
+            this.showToast('Failed to delete tag', 'error');
+        }
+    },
+
+    async bulkAssign(action) {
+        if (this.selectedImageIds.size === 0) {
+            this.showToast('Please select at least one image.', 'error');
+            return;
+        }
+        
+        const tagId = document.getElementById('bulkTagSelect').value;
+        if (!tagId) {
+            this.showToast('Please select a tag first.', 'error');
+            return;
+        }
+
+        await this.doBulkAssign(Array.from(this.selectedImageIds), [parseInt(tagId)], action);
+    },
+    
+    async bulkAssignAll(action) {
+        const tagId = document.getElementById('bulkTagSelect').value;
+        if (!tagId) {
+            this.showToast('Please select a tag first.', 'error');
+            return;
+        }
+        
+        if (!confirm(`Are you sure you want to assign this tag to ALL ${this.totalImages} images in the project?`)) {
+            return;
+        }
+
+        await this.doBulkAssign('all', [parseInt(tagId)], action);
+    },
+
+    async doBulkAssign(imageIds, tagIds, action) {
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/bulk_assign_tags`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_ids: imageIds, tag_ids: tagIds, action })
+            });
+            
+            if (res.ok) {
+                // Reload both to update counts and image tags
+                await this.loadTags();
+                await this.loadImages();
+                this.showToast('Tags updated successfully', 'success');
+            } else {
+                const data = await res.json();
+                this.showToast(data.error || 'Failed to update tags', 'error');
+            }
+        } catch (e) {
+            console.error('Bulk assign error:', e);
+            this.showToast('Failed to update tags', 'error');
+        }
+    },
+
+    exportDataset() {
+        document.getElementById('exportModal').classList.remove('hidden');
+    },
+
+    closeExportModal() {
+        document.getElementById('exportModal').classList.add('hidden');
+    },
+    
+    updateSplits(changed) {
+        const train = parseInt(document.getElementById('exportTrainSplit').value) || 0;
+        const val = parseInt(document.getElementById('exportValSplit').value) || 0;
+        const test = parseInt(document.getElementById('exportTestSplit').value) || 0;
+        const total = train + val + test;
+        const errorEl = document.getElementById('splitError');
+        
+        if (total !== 100) {
+            errorEl.classList.remove('hidden');
+        } else {
+            errorEl.classList.add('hidden');
+        }
+    },
+
+    async confirmExport() {
+        const train = parseInt(document.getElementById('exportTrainSplit').value) || 0;
+        const val = parseInt(document.getElementById('exportValSplit').value) || 0;
+        const test = parseInt(document.getElementById('exportTestSplit').value) || 0;
+        
+        if (train + val + test !== 100) {
+            this.showToast('Train, Val, and Test splits must sum exactly to 100%.', 'error');
+            return;
+        }
+        
+        const exportModeEl = document.querySelector('input[name="exportMode"]:checked');
+        const exportMode = exportModeEl ? exportModeEl.value : 'all';
+
+        const payload = {
+            project_ids: [parseInt(PROJECT_ID)],
+            splits: { train, val, test }
+        };
+
+        if (exportMode === 'tagged_only') {
+            payload.has_any_tag = true;
+        }
+
+        const btn = document.getElementById('btnConfirmExport');
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Exporting...';
+        btn.disabled = true;
+
+        try {
+            const res = await fetch('/api/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            
+            if (res.ok) {
+                this.showToast(`Export successful! Path: ${data.export_path}`, 'success');
+                this.closeExportModal();
+            } else {
+                this.showToast(data.error || 'Failed to export dataset', 'error');
+            }
+        } catch (e) {
+            console.error('Export error:', e);
+            this.showToast('Failed to export dataset', 'error');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    }
+};
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    tagManager.init();
+});
+</script>
+{% endblock %}

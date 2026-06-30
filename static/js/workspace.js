@@ -7,6 +7,8 @@ let projectClasses = [];
 class Workspace {
     constructor() {
         this.keysPressed = {};
+        this.selectedImageIds = new Set();
+        this.lastCheckedId = null;
         this.init();
         this.imageList = [];
     }
@@ -18,6 +20,15 @@ class Workspace {
         this.setupAutocomplete();
         this.setupImageSearchAutocomplete();
         await loadImages();
+        this.updateSelectionUI();
+
+        // Auto-select ACTIVE_FILENAME if set
+        if (typeof ACTIVE_FILENAME !== 'undefined' && ACTIVE_FILENAME && currentWorkspace.allImages) {
+            const matchedImg = currentWorkspace.allImages.find(img => img.filename === ACTIVE_FILENAME);
+            if (matchedImg) {
+                this.selectImage(matchedImg);
+            }
+        }
 
         // Hotkeys
         document.addEventListener('keyup', (e) => {
@@ -89,6 +100,11 @@ class Workspace {
             if (key === 'l') this.toggleLockBox();
             if (key === 'h') this.toggleImageVisibility();
             if (key === 'i') this.toggleIsolateMode();
+            if (key === 'a' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                editor.selectAllBoxes();
+                return;
+            }
             if (key === 'a') {
                 if (!this.keysPressed['g']) {
                     editor.toggleStickyMove();
@@ -217,6 +233,14 @@ class Workspace {
         this.updateSupervisedUI();
 
         currentImage = image;
+        if (typeof window.updateMyImageId === 'function') {
+            window.updateMyImageId(image.id);
+        }
+
+        // Update URL
+        if (window.history && window.history.pushState) {
+            window.history.pushState(null, '', `/project/${PROJECT_ID}/${encodeURIComponent(image.filename)}`);
+        }
 
         // Update Split Type Select
         const select = document.getElementById('splitTypeSelect');
@@ -227,7 +251,7 @@ class Workspace {
                 if (image.split_type === 'train') colorClasses = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
                 else if (image.split_type === 'val') colorClasses = 'bg-green-500/20 text-green-400 border-green-500/30';
                 else if (image.split_type === 'test') colorClasses = 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-                
+
                 select.className = `absolute top-4 right-4 px-3 py-1 pr-6 text-xs font-bold rounded-md shadow z-10 backdrop-blur-sm uppercase tracking-wider border cursor-pointer outline-none hover:opacity-80 transition-opacity ${colorClasses}`;
             } else {
                 select.className = 'hidden';
@@ -252,6 +276,7 @@ class Workspace {
         // Update Flag Button
         this.updateFlagButton();
         this.updateReviewButton();
+        this.renderImageTags();
 
         // Load into Canvas
         // Image URL: We need a route to serve the raw image.
@@ -287,12 +312,12 @@ class Workspace {
             // GUARD: If the user clicked another image while this was loading, discard
             if (loadSeq !== editor._loadSequence) return;
 
-            if (!img) { 
+            if (!img) {
                 editor.loading = false;
-                alert('Failed to load image'); 
-                return; 
+                alert('Failed to load image');
+                return;
             }
-            
+
             if (image.overlapThreshold !== undefined && image.overlapThreshold !== null) {
                 for (let i = 0; i < labels.length; i++) {
                     labels[i].isOverlapping = false;
@@ -307,9 +332,13 @@ class Workspace {
                     }
                 }
             }
-            
+
             editor.loadImage(img);
             editor.loadBoxes(labels);
+
+            if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                window.collabSocket.emit('request_sync', { image_id: image.id });
+            }
 
             // Trigger visual glow effect for active class filters
             const checkboxes = document.querySelectorAll('.class-filter-checkbox');
@@ -394,6 +423,199 @@ class Workspace {
         } catch (e) {
             console.error('Delete error:', e);
             alert('Failed to delete image: ' + e.message);
+        }
+    }
+
+    deleteCurrentImage() {
+        this.deleteImage();
+    }
+
+    handleCheckboxClick(event, imgId) {
+        const isChecked = event.target.checked;
+
+        if (event.shiftKey && this.lastCheckedId !== null) {
+            const idx1 = this.imageList.findIndex(img => img.id === this.lastCheckedId);
+            const idx2 = this.imageList.findIndex(img => img.id === imgId);
+
+            if (idx1 !== -1 && idx2 !== -1) {
+                const minIdx = Math.min(idx1, idx2);
+                const maxIdx = Math.max(idx1, idx2);
+
+                for (let i = minIdx; i <= maxIdx; i++) {
+                    const img = this.imageList[i];
+                    if (isChecked) {
+                        this.selectedImageIds.add(img.id);
+                    } else {
+                        this.selectedImageIds.delete(img.id);
+                    }
+
+                    const cb = document.querySelector(`.image-checkbox[data-id="${img.id}"]`);
+                    if (cb) {
+                        cb.checked = isChecked;
+                    }
+                }
+                this.lastCheckedId = imgId;
+                this.updateSelectionUI();
+                return;
+            }
+        }
+
+        if (isChecked) {
+            this.selectedImageIds.add(imgId);
+        } else {
+            this.selectedImageIds.delete(imgId);
+        }
+        this.lastCheckedId = imgId;
+        this.updateSelectionUI();
+    }
+
+    updateSelectionUI() {
+        const count = this.selectedImageIds.size;
+        const selectedCountEl = document.getElementById('selectedCount');
+        if (selectedCountEl) {
+            selectedCountEl.innerText = count;
+        }
+
+        const btnDeleteSelected = document.getElementById('btnDeleteSelected');
+        if (btnDeleteSelected) {
+            if (count > 0) {
+                btnDeleteSelected.disabled = false;
+                btnDeleteSelected.classList.remove('opacity-50', 'cursor-not-allowed');
+            } else {
+                btnDeleteSelected.disabled = true;
+                btnDeleteSelected.classList.add('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        const btnClearSelection = document.getElementById('btnClearSelection');
+        if (btnClearSelection) {
+            if (count > 0) {
+                btnClearSelection.classList.remove('hidden');
+            } else {
+                btnClearSelection.classList.add('hidden');
+            }
+        }
+
+        const batchActionPanel = document.getElementById('batchActionPanel');
+        if (batchActionPanel) {
+            if (count > 0) {
+                batchActionPanel.classList.remove('hidden');
+            } else {
+                batchActionPanel.classList.add('hidden');
+            }
+        }
+    }
+
+    clearImageSelection() {
+        this.selectedImageIds.clear();
+        this.lastCheckedId = null;
+        document.querySelectorAll('.image-checkbox').forEach(cb => {
+            cb.checked = false;
+        });
+        this.updateSelectionUI();
+    }
+
+    async deleteSelectedImages() {
+        const imageIds = Array.from(this.selectedImageIds);
+        if (imageIds.length === 0) return;
+
+        if (!confirm(`Bạn có chắc chắn muốn xóa ${imageIds.length} ảnh đã chọn không? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const res = await API.batchDeleteImages({ image_ids: imageIds });
+            if (res.message || res.success) {
+                const currentImageDeleted = this.selectedImageIds.has(currentImage ? currentImage.id : null);
+
+                let nextImageToSelect = null;
+                if (currentImageDeleted && currentImage) {
+                    const currentIndex = this.imageList.findIndex(img => img.id === currentImage.id);
+                    const remainingListed = this.imageList.filter(img => !this.selectedImageIds.has(img.id));
+                    if (remainingListed.length > 0) {
+                        const nextIndex = Math.min(currentIndex, remainingListed.length - 1);
+                        nextImageToSelect = remainingListed[nextIndex];
+                    }
+                }
+
+                // Remove from allImages
+                this.allImages = this.allImages.filter(img => !this.selectedImageIds.has(img.id));
+
+                // Clear selection
+                this.selectedImageIds.clear();
+                this.lastCheckedId = null;
+                this.updateSelectionUI();
+
+                // Reload list
+                await loadImages(false);
+
+                // Select next available image if needed
+                if (currentImageDeleted) {
+                    if (nextImageToSelect) {
+                        await this.selectImage(nextImageToSelect);
+                    } else if (this.imageList.length > 0) {
+                        await this.selectImage(this.imageList[0]);
+                    } else {
+                        currentImage = null;
+                        if (editor) editor.clearCanvas();
+                        document.getElementById('selectionInfo').innerHTML = 'No images left';
+                    }
+                }
+            } else {
+                alert(res.error || 'Failed to delete selected images');
+            }
+        } catch (e) {
+            console.error('Batch delete error:', e);
+            alert('Failed to delete: ' + e.message);
+        }
+    }
+
+    async deleteListedImages() {
+        const imageIds = this.imageList.map(img => img.id);
+        if (imageIds.length === 0) {
+            alert('Không có ảnh nào trong danh sách hiện tại để xóa.');
+            return;
+        }
+
+        if (!confirm(`Bạn có chắc chắn muốn xóa TẤT CẢ ${imageIds.length} ảnh trong danh sách hiện tại không? Hành động này không thể hoàn tác.`)) {
+            return;
+        }
+
+        try {
+            const res = await API.batchDeleteImages({ image_ids: imageIds });
+            if (res.message || res.success) {
+                const currentImageDeleted = imageIds.includes(currentImage ? currentImage.id : null);
+
+                // Remove from allImages
+                const deletedSet = new Set(imageIds);
+                this.allImages = this.allImages.filter(img => !deletedSet.has(img.id));
+
+                // Also remove deleted IDs from selectedImageIds if any were selected
+                imageIds.forEach(id => this.selectedImageIds.delete(id));
+                if (this.lastCheckedId && deletedSet.has(this.lastCheckedId)) {
+                    this.lastCheckedId = null;
+                }
+                this.updateSelectionUI();
+
+                // Reload list
+                await loadImages(false);
+
+                // If current image was deleted, select the first remaining listed image (if any)
+                if (currentImageDeleted) {
+                    if (this.imageList.length > 0) {
+                        await this.selectImage(this.imageList[0]);
+                    } else {
+                        currentImage = null;
+                        if (editor) editor.clearCanvas();
+                        document.getElementById('selectionInfo').innerHTML = 'No images left';
+                    }
+                }
+            } else {
+                alert(res.error || 'Failed to delete listed images');
+            }
+        } catch (e) {
+            console.error('Batch delete error:', e);
+            alert('Failed to delete: ' + e.message);
         }
     }
 
@@ -589,6 +811,183 @@ class Workspace {
         }
     }
 
+    async loadProjectTags() {
+        if (!this.projectTags) {
+            try {
+                const res = await fetch(`/api/projects/${PROJECT_ID}/tags`);
+                if (res.ok) {
+                    this.projectTags = await res.json();
+                } else {
+                    this.projectTags = [];
+                }
+            } catch (e) {
+                console.error("Failed to load tags", e);
+                this.projectTags = [];
+            }
+        }
+        return this.projectTags;
+    }
+
+    async openTagManager() {
+        window.location.href = `/project/${PROJECT_ID}/tags`;
+    }
+
+    renderTagManagerList() {
+        const container = document.getElementById('tagManagerList');
+        if (!this.projectTags || this.projectTags.length === 0) {
+            container.innerHTML = '<div class="text-sm text-content-muted p-2" data-i18n="no_tags">No tags available.</div>';
+            return;
+        }
+        container.innerHTML = this.projectTags.map(tag => `
+            <div class="flex items-center justify-between p-2 hover:bg-panel rounded border border-transparent hover:border-border transition-colors group">
+                <div class="flex items-center gap-2 flex-1">
+                    <input type="color" value="${tag.color}" class="w-6 h-6 rounded cursor-pointer border-none p-0" onchange="currentWorkspace.updateTagColor(${tag.id}, this.value)">
+                    <span class="text-sm text-content flex-1">${tag.name}</span>
+                </div>
+                <button type="button" class="text-content-muted hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1 ml-2" onclick="currentWorkspace.deleteTag(${tag.id})" title="Delete tag">
+                    <i class="fa-solid fa-trash text-xs"></i>
+                </button>
+            </div>
+        `).join('');
+    }
+
+    async addTag() {
+        const nameInput = document.getElementById('newTagName');
+        const colorInput = document.getElementById('newTagColor');
+        const name = nameInput.value.trim();
+        const color = colorInput.value;
+
+        if (!name) return;
+
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/tags`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, color })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                this.projectTags.push(data);
+                this.renderTagManagerList();
+                nameInput.value = '';
+            } else {
+                alert(data.error || 'Failed to add tag');
+            }
+        } catch (e) {
+            console.error('Add tag error:', e);
+            alert('Failed to add tag');
+        }
+    }
+
+    async deleteTag(tagId) {
+        if (!confirm('Are you sure you want to delete this tag?')) return;
+        try {
+            const res = await fetch(`/api/tags/${tagId}`, { method: 'DELETE' });
+            if (res.ok) {
+                this.projectTags = this.projectTags.filter(t => t.id !== tagId);
+                this.renderTagManagerList();
+                if (currentImage && currentImage.tags) {
+                    currentImage.tags = currentImage.tags.filter(t => t.id !== tagId);
+                    this.renderImageTags();
+                }
+            } else {
+                const data = await res.json();
+                alert(data.error || 'Failed to delete tag');
+            }
+        } catch (e) {
+            console.error('Delete tag error:', e);
+            alert('Failed to delete tag');
+        }
+    }
+
+    async updateTagColor(tagId, newColor) {
+        try {
+            const res = await fetch(`/api/tags/${tagId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ color: newColor })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                const tag = this.projectTags.find(t => t.id === tagId);
+                if (tag) tag.color = data.color;
+                if (currentImage && currentImage.tags) {
+                    const imgTag = currentImage.tags.find(t => t.id === tagId);
+                    if (imgTag) imgTag.color = data.color;
+                    this.renderImageTags();
+                }
+            }
+        } catch (e) {
+            console.error('Update tag error:', e);
+        }
+    }
+
+    async openTagSelector() {
+        if (!currentImage) return;
+        await this.loadProjectTags();
+        const container = document.getElementById('tagSelectorList');
+        if (!this.projectTags || this.projectTags.length === 0) {
+            container.innerHTML = '<div class="text-sm text-content-muted p-2">No tags available. Go to Tag Manager to create some.</div>';
+        } else {
+            const currentTagIds = (currentImage.tags || []).map(t => t.id);
+            container.innerHTML = this.projectTags.map(tag => `
+                <label class="flex items-center space-x-2 text-sm text-content hover:bg-panel p-2 rounded cursor-pointer border border-transparent hover:border-border transition-colors">
+                    <input type="checkbox" name="imageTag" value="${tag.id}" ${currentTagIds.includes(tag.id) ? 'checked' : ''} class="form-checkbox h-4 w-4 text-primary rounded border-border bg-surface focus:ring-primary focus:ring-offset-panel">
+                    <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${tag.color}"></span>
+                    <span class="flex-grow">${tag.name}</span>
+                </label>
+            `).join('');
+        }
+        document.getElementById('tagSelectorModal').classList.remove('hidden');
+    }
+
+    async saveImageTags() {
+        if (!currentImage) return;
+        const checkedBoxes = Array.from(document.querySelectorAll('input[name="imageTag"]:checked'));
+        const tagIds = checkedBoxes.map(cb => parseInt(cb.value));
+
+        try {
+            const res = await fetch(`/api/images/${currentImage.id}/tags`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ tag_ids: tagIds })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                currentImage.tags = data.tags;
+                this.renderImageTags();
+
+                const listImg = this.allImages.find(img => img.id === currentImage.id);
+                if (listImg) listImg.tags = data.tags;
+
+                if (typeof closeModal === 'function') {
+                    closeModal('tagSelectorModal');
+                }
+            } else {
+                const data = await res.json();
+                alert(data.error || 'Failed to save tags');
+            }
+        } catch (e) {
+            console.error('Save tags error:', e);
+            alert('Failed to save tags');
+        }
+    }
+
+    renderImageTags() {
+        const container = document.getElementById('currentImageTags');
+        if (!container) return;
+        if (!currentImage || !currentImage.tags || currentImage.tags.length === 0) {
+            container.innerHTML = '<span class="text-xs text-content-muted italic" data-i18n="no_tags_assigned">No tags assigned</span>';
+            return;
+        }
+        container.innerHTML = currentImage.tags.map(tag => `
+            <span class="text-xs px-2 py-0.5 rounded-full flex items-center gap-1.5" style="background-color: ${tag.color}20; color: ${tag.color}; border: 1px solid ${tag.color}40;">
+                <span class="w-1.5 h-1.5 rounded-full" style="background-color: ${tag.color}"></span>
+                ${tag.name}
+            </span>
+        `).join('');
+    }
+
     async save(silent = false) {
         if (!currentImage) return;
 
@@ -616,10 +1015,18 @@ class Workspace {
                 labels: boxes,
                 flag_status: currentImage.flag_status,
                 split_type: currentImage.split_type,
-                is_reviewed: currentImage.is_reviewed || false
+                is_reviewed: currentImage.is_reviewed || false,
+                save_time: Date.now()
             };
 
-            await API.saveLabel(data);
+            const result = await API.saveLabel(data);
+
+            if (result.ignored) {
+                if (!silent) {
+                    alert('Another user has already saved a newer version of this image. Your save was ignored to prevent overwriting newer data.');
+                }
+                return;
+            }
 
             if (typeof editor !== 'undefined') {
                 editor.isDirty = false;
@@ -653,6 +1060,17 @@ class Workspace {
                         }
                     }
                 }
+            }
+
+            if (window.collabSocket && window.collabSocket.connected) {
+                const uniqueClasses = Array.from(new Set(boxes.map(b => b.class_id))).sort((a, b) => a - b);
+                window.collabSocket.emit('notify_annotations_changed', {
+                    project_id: typeof PROJECT_ID !== 'undefined' ? PROJECT_ID : null,
+                    image_id: currentImage.id,
+                    user_name: localStorage.getItem('collab_username') || 'Someone',
+                    is_labeled: boxes.length > 0,
+                    classes: uniqueClasses
+                });
             }
 
             if (btnSpan && btn) {
@@ -841,12 +1259,12 @@ class Workspace {
         const toast = document.createElement('div');
         const bgColor = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
         toast.className = `fixed bottom-6 left-1/2 -translate-x-1/2 ${bgColor} text-white px-5 py-2.5 rounded-lg shadow-2xl text-sm font-medium z-[9999] transition-all duration-300 flex items-center gap-2`;
-        
+
         const icon = type === 'success' ? 'fa-circle-check' : type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info';
         toast.innerHTML = `<i class="fa-solid ${icon}"></i> ${message}`;
-        
+
         document.body.appendChild(toast);
-        
+
         // Animate in
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(-50%) translateY(20px)';
@@ -854,7 +1272,7 @@ class Workspace {
             toast.style.opacity = '1';
             toast.style.transform = 'translateX(-50%) translateY(0)';
         });
-        
+
         // Auto remove after 3s
         setTimeout(() => {
             toast.style.opacity = '0';
@@ -871,6 +1289,10 @@ class Workspace {
         const originalHtml = btn.innerHTML;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         btn.disabled = true;
+
+        if (typeof editor !== 'undefined') {
+            editor.clearAllBoxes();
+        }
 
         try {
             const data = await API.autoLabel(currentImage.id);
@@ -896,6 +1318,10 @@ class Workspace {
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         btn.disabled = true;
 
+        if (typeof editor !== 'undefined') {
+            editor.clearAllBoxes();
+        }
+
         try {
             const data = await API.autoLabel(currentImage.id);
             if (data.success) {
@@ -903,7 +1329,7 @@ class Workspace {
                     editor.loadBoxes(data.boxes);
                     this.isSupervisedMode = true;
                     this.updateSupervisedUI();
-                    
+
                     setTimeout(() => {
                         editor.canvas.discardActiveObject();
                         editor.selectNextBox(false);
@@ -911,7 +1337,7 @@ class Workspace {
                         if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
                             editor.isIsolationMode = true;
                             editor.updateIsolateView();
-                            
+
                             const btnIsolate = document.getElementById('btnIsolate');
                             if (btnIsolate) {
                                 btnIsolate.classList.add('text-yellow-500');
@@ -934,7 +1360,7 @@ class Workspace {
 
     startPreviewBoxes() {
         if (!currentImage || typeof editor === 'undefined' || !editor.canvas) return;
-        
+
         const boxes = editor.canvas.getObjects('rect');
         if (boxes.length === 0) {
             this.showToast(typeof window.t === 'function' ? window.t('no_boxes_preview') || 'No boxes to preview' : 'No boxes to preview', 'info');
@@ -943,7 +1369,7 @@ class Workspace {
 
         this.isSupervisedMode = true;
         this.updateSupervisedUI();
-        
+
         setTimeout(() => {
             const activeObj = editor.canvas.getActiveObject();
             if (!activeObj || activeObj.type !== 'rect') {
@@ -954,7 +1380,7 @@ class Workspace {
             if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
                 editor.isIsolationMode = true;
                 editor.updateIsolateView();
-                
+
                 const btnIsolate = document.getElementById('btnIsolate');
                 if (btnIsolate) {
                     btnIsolate.classList.add('text-yellow-500');
@@ -969,16 +1395,16 @@ class Workspace {
         if (!editor || !editor.canvas) return;
         const target = editor.canvas.getActiveObject();
         if (!target) return;
-        
+
         const padding = 100;
         const scaleX = editor.canvas.getWidth() / (target.width * target.scaleX + padding);
         const scaleY = editor.canvas.getHeight() / (target.height * target.scaleY + padding);
         let zoom = Math.min(scaleX, scaleY);
-        zoom = Math.min(zoom, 5); 
+        zoom = Math.min(zoom, 5);
         zoom = Math.max(zoom, 1);
-        
+
         editor.canvas.setZoom(zoom);
-        
+
         const boxCenterX = target.left + (target.width * target.scaleX) / 2;
         const boxCenterY = target.top + (target.height * target.scaleY) / 2;
         const vpw = editor.canvas.getWidth();
@@ -1018,7 +1444,7 @@ class Workspace {
             if (Math.abs(dy) > 10) return dy;
             return a.left - b.left;
         });
-        
+
         const current = editor.canvas.getActiveObject();
         if (current && current.type === 'rect') {
             const currentIdx = sorted.indexOf(current);
@@ -1027,13 +1453,13 @@ class Workspace {
                 return;
             }
         }
-        
+
         editor.selectNextBox(false);
         this.zoomToActiveBox();
         if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
             editor.isIsolationMode = true;
             editor.updateIsolateView();
-            
+
             const btnIsolate = document.getElementById('btnIsolate');
             if (btnIsolate) {
                 btnIsolate.classList.add('text-yellow-500');
@@ -1050,7 +1476,7 @@ class Workspace {
         if (typeof editor !== 'undefined' && !editor.isIsolationMode) {
             editor.isIsolationMode = true;
             editor.updateIsolateView();
-            
+
             const btnIsolate = document.getElementById('btnIsolate');
             if (btnIsolate) {
                 btnIsolate.classList.add('text-yellow-500');
@@ -1066,7 +1492,7 @@ class Workspace {
             if (this.isSupervisedMode) {
                 panel.classList.remove('hidden');
                 panel.classList.add('flex');
-                
+
                 const textEl = document.getElementById('supervisedModeText');
                 if (textEl && typeof editor !== 'undefined' && editor.canvas) {
                     const boxes = editor.canvas.getObjects('rect');
@@ -1125,13 +1551,26 @@ class Workspace {
                         const boxCenterX = box.left + (box.width * box.scaleX) / 2;
                         const boxCenterY = box.top + (box.height * box.scaleY) / 2;
                         return boxCenterX >= region.x && boxCenterX <= region.x + region.w &&
-                               boxCenterY >= region.y && boxCenterY <= region.y + region.h;
+                            boxCenterY >= region.y && boxCenterY <= region.y + region.h;
                     });
                     toRemove.forEach(box => editor.canvas.remove(box));
 
                     // Add the new boxes from AI
                     data.boxes.forEach(box => {
-                        editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, true);
+                        const rect = editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, true);
+                        if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                            window.collabSocket.emit('box_created', {
+                                image_id: currentImage.id,
+                                box: {
+                                    collabId: rect.collabId,
+                                    class_id: rect.classId,
+                                    x: box.x,
+                                    y: box.y,
+                                    w: box.w,
+                                    h: box.h
+                                }
+                            });
+                        }
                     });
                     editor.saveState();
                     if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
@@ -1249,7 +1688,7 @@ class Workspace {
     async changeSplitType(newType) {
         if (!currentImage) return;
         currentImage.split_type = newType;
-        
+
         // Update styling of the dropdown itself
         const select = document.getElementById('splitTypeSelect');
         if (select) {
@@ -1257,17 +1696,17 @@ class Workspace {
             if (newType === 'train') colorClasses = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
             else if (newType === 'val') colorClasses = 'bg-green-500/20 text-green-400 border-green-500/30';
             else if (newType === 'test') colorClasses = 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-            
+
             select.className = `absolute top-4 right-4 px-3 py-1 pr-6 text-xs font-bold rounded-md shadow z-10 backdrop-blur-sm uppercase tracking-wider border cursor-pointer outline-none hover:opacity-80 transition-opacity ${colorClasses}`;
         }
-        
+
         if (this.allImages) {
             const localImg = this.allImages.find(img => img.id === currentImage.id);
             if (localImg) {
                 localImg.split_type = newType;
             }
         }
-        
+
         // Automatically save to the server
         await this.save(true);
     }
@@ -1277,11 +1716,59 @@ class Workspace {
             window.updateSplitCounts();
         }
         document.getElementById('exportModal').classList.remove('hidden');
+        this.onExportScopeChange();
+    }
+
+    async onExportScopeChange() {
+        const scope = document.getElementById('exportScope').value;
+        const tagsSelection = document.getElementById('exportTagsSelection');
+
+        if (scope === 'tags') {
+            tagsSelection.classList.remove('hidden');
+            await this.populateExportTags();
+        } else {
+            tagsSelection.classList.add('hidden');
+        }
+        if (typeof window.updateSplitCounts === 'function') {
+            window.updateSplitCounts();
+        }
+    }
+
+    async populateExportTags() {
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/tags`);
+            if (res.ok) {
+                const tags = await res.json();
+                const container = document.getElementById('exportTagsList');
+                container.innerHTML = '';
+
+                if (tags.length === 0) {
+                    container.innerHTML = '<div class="text-sm text-content-muted p-2">Không có tag nào trong project này.</div>';
+                    return;
+                }
+
+                tags.forEach(tag => {
+                    const label = document.createElement('label');
+                    label.className = 'flex items-center space-x-2 text-sm text-content hover:bg-panel p-1 rounded cursor-pointer';
+                    label.innerHTML = `
+                        <input type="checkbox" name="exportTags" value="${tag.id}" class="form-checkbox h-4 w-4 text-primary rounded border-border bg-surface" onchange="if(typeof window.updateSplitCounts === 'function') window.updateSplitCounts()">
+                        <span class="w-3 h-3 rounded-full" style="background-color: ${tag.color}"></span>
+                        <span class="flex-grow">${tag.name}</span>
+                        <span class="text-xs bg-surface-alt px-1.5 py-0.5 rounded text-content-muted">${tag.image_count || 0}</span>
+                    `;
+                    container.appendChild(label);
+                });
+            }
+        } catch (e) {
+            console.error('Failed to fetch tags', e);
+        }
     }
 
     async executeExport() {
         const scope = document.getElementById('exportScope').value;
         const excludeFlagged = document.getElementById('exportExcludeFlagged').checked;
+        const exportModeEl = document.querySelector('input[name="exportMode"]:checked');
+        const exportMode = exportModeEl ? exportModeEl.value : 'all';
 
         const trainSplit = parseFloat(document.getElementById('exportTrainSplit').value) || 0;
         const valSplit = parseFloat(document.getElementById('exportValSplit').value) || 0;
@@ -1304,6 +1791,16 @@ class Workspace {
 
         if (scope === 'project') {
             criteria.project_ids = [PROJECT_ID];
+        } else if (scope === 'tags') {
+            const checkedTags = Array.from(document.querySelectorAll('input[name="exportTags"]:checked'))
+                .map(cb => parseInt(cb.value));
+
+            if (checkedTags.length === 0) {
+                alert('Vui lòng chọn ít nhất 1 tag để export.');
+                return;
+            }
+            criteria.project_ids = [PROJECT_ID];
+            criteria.tags = checkedTags;
         } else if (scope === 'view') {
             const urlParams = new URLSearchParams(window.location.search);
             const urlViewId = urlParams.get('view_id');
@@ -1327,6 +1824,10 @@ class Workspace {
 
         if (excludeFlagged) {
             criteria.exclude_flagged = true;
+        }
+
+        if (exportMode === 'tagged_only') {
+            criteria.has_any_tag = true;
         }
 
         const btn = document.querySelector('#exportModal button:last-child');
@@ -1539,9 +2040,9 @@ files.download(onnx_path)
             displayedMatches.forEach(img => {
                 const div = document.createElement('div');
                 div.className = 'px-3 py-2 cursor-pointer hover:bg-primary hover:text-content-inv text-left truncate border-b border-border last:border-b-0 flex items-center justify-between';
-                
-                const labelIcon = img.is_labeled 
-                    ? '<i class="fa-solid fa-check text-green-500 text-[10px]"></i>' 
+
+                const labelIcon = img.is_labeled
+                    ? '<i class="fa-solid fa-check text-green-500 text-[10px]"></i>'
                     : '<i class="fa-regular fa-circle text-content-muted text-[10px]"></i>';
 
                 div.innerHTML = `<span class="truncate pr-2">${img.filename}</span>${labelIcon}`;
@@ -1761,7 +2262,7 @@ files.download(onnx_path)
 
         for (let i = 0; i < files.length; i++) {
             const file = files[i];
-            
+
             // Bỏ qua các file có đuôi (1), (2)... (được coi là file trùng)
             if (duplicateSuffixRegex.test(file.name)) {
                 skippedCount++;
@@ -1777,7 +2278,7 @@ files.download(onnx_path)
         }
 
         if (addedFiles.length === 0) {
-            alert(`Đã bỏ qua ${skippedCount} file vì đã tồn tại trong dự án. Không có file mới nào để tải lên.`);
+            this.showToast(`Đã bỏ qua ${skippedCount} file vì đã tồn tại trong dự án. Không có file mới nào để tải lên.`, 'info');
             event.target.value = ''; // reset input
             return;
         }
@@ -1793,7 +2294,7 @@ files.download(onnx_path)
         const progressContainer = document.getElementById('uploadProgressContainer');
         const progressBar = document.getElementById('uploadProgressBar');
         const progressText = document.getElementById('uploadProgressText');
-        
+
         if (progressContainer) {
             progressContainer.classList.remove('hidden');
             if (progressBar) progressBar.style.width = '0%';
@@ -1820,7 +2321,7 @@ files.download(onnx_path)
                 await new Promise((resolve, reject) => {
                     const xhr = new XMLHttpRequest();
                     xhr.open('POST', `/api/projects/${PROJECT_ID}/upload`, true);
-                    
+
                     xhr.upload.onprogress = (event) => {
                         if (event.lengthComputable && totalBytes > 0) {
                             const currentTotalLoaded = uploadedBytesBeforeCurrentChunk + event.loaded;
@@ -1857,12 +2358,14 @@ files.download(onnx_path)
 
             await loadImages(true);
             await this.loadProjectInfo(); // Reload classes in case dataset files like classes.txt or data.yaml were uploaded
-            
+
             if (skippedCount > 0) {
-                alert(`Đã tải lên ${addedFiles.length} file. Đã bỏ qua ${skippedCount} file (do trùng tên hoặc đuôi (1), (2)).`);
+                this.showToast(`Đã tải lên ${addedFiles.length} file. Đã bỏ qua ${skippedCount} file (do trùng tên hoặc đuôi (1), (2)).`, 'info');
+            } else {
+                this.showToast(`Đã tải lên ${addedFiles.length} file thành công.`, 'success');
             }
         } catch (e) {
-            alert('Lỗi tải ảnh: ' + e.message);
+            this.showToast('Lỗi tải ảnh: ' + e.message, 'error');
         } finally {
             if (btn) {
                 btn.innerHTML = originalHtml;
@@ -1887,7 +2390,7 @@ files.download(onnx_path)
             const res = await fetch(`/api/projects/${PROJECT_ID}/class-examples`);
             if (!res.ok) throw new Error('Failed to load examples');
             const data = await res.json();
-            
+
             const classes = data.classes;
             this.classExamplesData = data.examples;
             this.classExamplesIndex = {};
@@ -1898,7 +2401,7 @@ files.download(onnx_path)
             }
 
             let html = '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">';
-            
+
             // We will render canvases and load images after HTML is set
             const renderTasks = [];
 
@@ -1921,7 +2424,7 @@ files.download(onnx_path)
 
                 if (examplesList && examplesList.length > 0) {
                     html += `<canvas id="example-canvas-${i}" class="max-w-full max-h-full object-contain shadow-sm border border-border rounded"></canvas>`;
-                    
+
                     if (examplesList.length > 1) {
                         html += `
                             <div class="absolute inset-0 flex items-center justify-between px-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1935,7 +2438,7 @@ files.download(onnx_path)
                             <div class="absolute bottom-2 right-2 bg-black/50 text-white text-xs px-2 py-1 rounded" id="example-counter-${i}">1/${examplesList.length}</div>
                         `;
                     }
-                    
+
                     renderTasks.push({ index: i, color: color });
                 } else {
                     html += `<div class="text-content-muted text-xs text-center"><i class="fa-regular fa-image text-2xl mb-2 opacity-50"></i><br>No examples yet</div>`;
@@ -1967,35 +2470,35 @@ files.download(onnx_path)
 
         let currentIndex = this.classExamplesIndex[classIndex];
         currentIndex += direction;
-        
+
         if (currentIndex < 0) currentIndex = examplesList.length - 1;
         if (currentIndex >= examplesList.length) currentIndex = 0;
-        
+
         this.classExamplesIndex[classIndex] = currentIndex;
-        
+
         const counter = document.getElementById(`example-counter-${classIndex}`);
         if (counter) {
             counter.innerText = `${currentIndex + 1}/${examplesList.length}`;
         }
-        
+
         this.renderClassExample(classIndex, color);
     }
 
     renderClassExample(classIndex, color) {
         const examplesList = this.classExamplesData[classIndex.toString()];
         if (!examplesList) return;
-        
+
         const currentIndex = this.classExamplesIndex[classIndex];
         const example = examplesList[currentIndex];
-        
+
         const img = new Image();
         img.onload = () => {
             const canvas = document.getElementById(`example-canvas-${classIndex}`);
             if (!canvas) return;
-            
+
             const ctx = canvas.getContext('2d');
             const [cx, cy, cw, ch] = example.bbox;
-            
+
             // YOLO relative to absolute
             const absW = cw * img.width;
             const absH = ch * img.height;
@@ -2011,15 +2514,15 @@ files.download(onnx_path)
 
             canvas.width = sw;
             canvas.height = sh;
-            
+
             // Draw cropped region
             ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-            
+
             // Draw bounding box
             ctx.strokeStyle = color;
             ctx.lineWidth = Math.max(2, sw / 150);
             ctx.strokeRect(absX - sx, absY - sy, absW, absH);
-            
+
             // Add subtle fill
             ctx.fillStyle = color + '33'; // 20% opacity
             ctx.fillRect(absX - sx, absY - sy, absW, absH);
@@ -2086,17 +2589,19 @@ function toggleSidebarFilters() {
 
 function copyImageName(event, filename) {
     event.preventDefault();
+    const el = event.currentTarget;
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
     navigator.clipboard.writeText(nameWithoutExt).then(() => {
-        const el = event.currentTarget;
-        const originalBg = el.style.backgroundColor;
-        const originalColor = el.style.color;
-        el.style.backgroundColor = '#10b981';
-        el.style.color = '#fff';
-        setTimeout(() => {
-            el.style.backgroundColor = originalBg;
-            el.style.color = originalColor;
-        }, 300);
+        if (el) {
+            const originalBg = el.style.backgroundColor;
+            const originalColor = el.style.color;
+            el.style.backgroundColor = '#10b981';
+            el.style.color = '#fff';
+            setTimeout(() => {
+                el.style.backgroundColor = originalBg;
+                el.style.color = originalColor;
+            }, 300);
+        }
     }).catch(err => {
         console.error('Failed to copy', err);
     });
@@ -2104,14 +2609,88 @@ function copyImageName(event, filename) {
 
 const currentWorkspace = new Workspace();
 
+let advancedClassFilterActive = false;
+let advancedSelectedClasses = [];
+
+function openAdvancedClassFilterModal() {
+    const modal = document.getElementById('advancedClassFilterModal');
+    const list = document.getElementById('advancedClassFilterList');
+    list.innerHTML = '';
+
+    if (typeof projectClasses !== 'undefined' && projectClasses && projectClasses.length > 0) {
+        projectClasses.forEach((cls, idx) => {
+            const isChecked = advancedSelectedClasses.includes(idx) ? 'checked' : '';
+            const color = editor.colors[idx % 20];
+            const div = document.createElement('div');
+            div.className = 'flex flex-col items-center justify-center p-2 hover:bg-panel rounded border border-transparent hover:border-border cursor-pointer text-center min-w-0';
+
+            div.innerHTML = `
+                <div class="flex items-center gap-1.5 mb-1.5">
+                    <input type="radio" name="adv_class_radio" value="${idx}" id="adv-class-${idx}" class="adv-class-radio text-primary focus:ring-primary w-3.5 h-3.5 cursor-pointer" ${isChecked}>
+                    <span class="inline-block w-2.5 h-2.5 rounded-full" style="background-color: ${color}"></span>
+                </div>
+                <label for="adv-class-${idx}" class="w-full cursor-pointer select-none text-[11px] font-medium text-content truncate block" title="${cls}">
+                    ${cls}
+                </label>
+            `;
+            // Click on the div to select the radio
+            div.onclick = (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL') {
+                    const radio = div.querySelector('input');
+                    radio.checked = true;
+                }
+            };
+            list.appendChild(div);
+        });
+    } else {
+        list.innerHTML = '<span class="italic text-content-muted">No classes available.</span>';
+    }
+
+    modal.classList.remove('hidden');
+}
+
+function closeAdvancedClassFilterModal() {
+    document.getElementById('advancedClassFilterModal').classList.add('hidden');
+}
+
+function clearAdvancedClassFilter() {
+    advancedClassFilterActive = false;
+    advancedSelectedClasses = [];
+
+    // Clear selections in the modal
+    const radios = document.querySelectorAll('.adv-class-radio');
+    radios.forEach(r => r.checked = false);
+
+    document.getElementById('advancedClassFilterModal').classList.add('hidden');
+    loadImages(false);
+}
+
+function applyAdvancedClassFilter() {
+    const selectedRadio = document.querySelector('.adv-class-radio:checked');
+    if (selectedRadio) {
+        advancedSelectedClasses = [parseInt(selectedRadio.value)];
+        advancedClassFilterActive = true;
+
+        // Uncheck normal class filter checkboxes to prevent conflict
+        const normalCheckboxes = document.querySelectorAll('.class-filter-checkbox');
+        normalCheckboxes.forEach(cb => cb.checked = false);
+    } else {
+        advancedClassFilterActive = false;
+        advancedSelectedClasses = [];
+    }
+
+    document.getElementById('advancedClassFilterModal').classList.add('hidden');
+    loadImages(false);
+}
+
 async function loadImages(fetchFromServer = true) {
     if (fetchFromServer || !currentWorkspace.allImages) {
         const viewFilterEl = document.getElementById('viewFilter');
-        
+
         // Parse view_id from URL
         const urlParams = new URLSearchParams(window.location.search);
         const urlViewId = urlParams.get('view_id');
-        
+
         if (urlViewId) {
             viewFilterEl.value = 'my_view';
             viewFilterEl.disabled = true;
@@ -2121,7 +2700,7 @@ async function loadImages(fetchFromServer = true) {
         const flag = document.getElementById('flagFilter').value;
 
         const filters = { project_id: PROJECT_ID };
-        
+
         if (urlViewId) {
             filters.view_id = urlViewId;
         } else if (view === 'my_view') {
@@ -2159,7 +2738,21 @@ async function loadImages(fetchFromServer = true) {
 
     // Filter images
     let filteredImages = currentWorkspace.allImages;
-    if (selectedClasses.length > 0) {
+    if (advancedClassFilterActive && advancedSelectedClasses.length > 0) {
+        // Advanced Filter: Image must contain ONLY the selected class(es)
+        filteredImages = filteredImages.filter(img => {
+            const imgClasses = img.classes || [];
+            // Get unique classes in this image
+            const uniqueImgClasses = [...new Set(imgClasses)];
+
+            // Check exact match: length must be same, and all selected classes must be present
+            if (uniqueImgClasses.length !== advancedSelectedClasses.length) {
+                return false;
+            }
+            return advancedSelectedClasses.every(c => uniqueImgClasses.includes(c));
+        });
+    } else if (selectedClasses.length > 0) {
+        // Normal Filter: Image must contain all selected classes (but can contain others)
         filteredImages = filteredImages.filter(img => {
             const imgClasses = img.classes || [];
             return selectedClasses.every(c => imgClasses.includes(c));
@@ -2169,9 +2762,10 @@ async function loadImages(fetchFromServer = true) {
     // Overlap filter
     const overlapInput = document.getElementById('overlapThresholdInput');
     const overlapThreshold = overlapInput ? parseFloat(overlapInput.value) : NaN;
-    
+
     // Add overlap info to images if threshold is set
     filteredImages.forEach(img => {
+        img.overlapThreshold = isNaN(overlapThreshold) ? null : overlapThreshold;
         img.overlapCount = 0;
         img.overlappingBoxes = new Set();
         if (!isNaN(overlapThreshold) && img.boxes && img.boxes.length > 1) {
@@ -2199,19 +2793,24 @@ async function loadImages(fetchFromServer = true) {
         container.innerHTML = filteredImages.map(img => {
             const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
             const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
-            
+
             // Overlap UI classes
-            const overlapClasses = (!isNaN(overlapThreshold) && img.overlapCount > 0) 
-                ? 'border-l-[3px] border-b-[3px] border-l-red-500 border-b-red-500' 
+            const overlapClasses = (!isNaN(overlapThreshold) && img.overlapCount > 0)
+                ? 'border-l-[3px] border-b-[3px] border-l-red-500 border-b-red-500'
                 : '';
 
             return `
             <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses} ${overlapClasses}" 
                  id="img-${img.id}" 
-                 onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}', is_reviewed: ${img.is_reviewed || false}, overlapThreshold: ${isNaN(overlapThreshold) ? 'null' : overlapThreshold}})"
+                 onclick="currentWorkspace.selectImage(currentWorkspace.allImages.find(i => i.id === ${img.id}))"
                  oncontextmenu="copyImageName(event, '${img.filename}')">
+                <input type="checkbox" class="image-checkbox rounded border-border bg-panel text-primary focus:ring-primary w-4 h-4 flex-shrink-0 mr-2" 
+                       data-id="${img.id}" 
+                       onclick="event.stopPropagation(); currentWorkspace.handleCheckboxClick(event, ${img.id})" 
+                       ${currentWorkspace.selectedImageIds.has(img.id) ? 'checked' : ''}>
                 <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
                 <div class="flex items-center gap-2">
+                    <div class="flex items-center gap-1 active-users-indicator" id="active-users-${img.id}"></div>
                     ${img.overlapCount > 0 ? `<span class="text-xs font-bold text-red-500 bg-red-500/20 px-1.5 py-0.5 rounded" title="${img.overlapCount} overlapping boxes">${img.overlapCount}</span>` : ''}
                     ${img.is_reviewed ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : ''}
                     ${img.flag_status === 'Flagged' ? '<i class="fa-solid fa-flag text-red-500"></i>' : ''}
@@ -2224,9 +2823,17 @@ async function loadImages(fetchFromServer = true) {
 
     currentWorkspace.imageList = filteredImages;
 
-    // Trigger canvas glow for the filtered classes if an image is loaded
+    const listedCountEl = document.getElementById('listedCount');
+    if (listedCountEl) {
+        listedCountEl.innerText = filteredImages.length;
+    }
+
     if (typeof editor !== 'undefined' && typeof currentImage !== 'undefined' && currentImage) {
         editor.triggerGlowForClasses(selectedClasses);
+    }
+
+    if (typeof window.updateAllUserIndicators === 'function') {
+        window.updateAllUserIndicators();
     }
 }
 
@@ -2264,24 +2871,24 @@ async function openAssignModal() {
         if (!projectIdInput) return;
         const projectId = projectIdInput.value;
         const stats = await API.getAssignStats(projectId);
-        
+
         if (stats.all.unassigned === 0) {
             alert('Lỗi: Tổng ảnh chưa phân công hiện tại là 0.');
             return;
         }
 
         document.getElementById('assignModal').classList.remove('hidden');
-        
+
         const select = document.querySelector('select[name="assign_mode"]');
         if (select) {
             const optionBoth = select.querySelector('option[value="both"]');
             const optionLabeled = select.querySelector('option[value="labeled"]');
             const optionUnlabeled = select.querySelector('option[value="unlabeled"]');
-            
+
             if (optionBoth) optionBoth.dataset.suffix = ` (${stats.all.assigned}/${stats.all.unassigned})`;
             if (optionLabeled) optionLabeled.dataset.suffix = ` (${stats.labeled.assigned}/${stats.labeled.unassigned})`;
             if (optionUnlabeled) optionUnlabeled.dataset.suffix = ` (${stats.unlabeled.assigned}/${stats.unlabeled.unassigned})`;
-            
+
             // Reapply translations to update the visible text with suffixes
             if (typeof applyTranslations === 'function') {
                 applyTranslations();
@@ -2330,7 +2937,7 @@ document.getElementById('assignForm').addEventListener('submit', async (e) => {
     // Kiểm tra logic trước khi submit
     const projectId = data.project_id;
     const stats = await API.getAssignStats(projectId);
-    
+
     let unassigned = 0;
     if (data.assign_mode === 'labeled') {
         unassigned = stats.labeled.unassigned;
@@ -2390,7 +2997,7 @@ document.getElementById('classSearch').addEventListener('input', (e) => {
 function updateClassListVisibility() {
     if (typeof editor === 'undefined' || !editor.canvas) return;
     const boxes = editor.getBoxesYOLO();
-    const presentClassIds = new Set(boxes.map(b => b.class_id));
+    const presentClassIds = new Set(boxes.map(b => parseInt(b.class_id)).filter(id => !isNaN(id)));
 
     // Calculate count for each class
     const classCounts = {};
@@ -2411,7 +3018,7 @@ function updateClassListVisibility() {
         const matchesSearch = classNameText.includes(term);
         const isPresent = presentClassIds.has(classId);
 
-        if (isPresent && matchesSearch) {
+        if (matchesSearch && isPresent) {
             el.style.display = 'flex';
         } else {
             el.style.display = 'none';
@@ -2429,20 +3036,65 @@ function updateClassListVisibility() {
             }
         }
     });
+}
+function toggleDropdown(event, buttonId, dropdownId, dropdownWidth) {
+    if (event) event.stopPropagation();
+    const btn = document.getElementById(buttonId);
+    const dropdown = document.getElementById(dropdownId);
+    if (!btn || !dropdown) return;
 
-    // If focusClassId is set but it's no longer present on canvas, unfocus it
-    if (editor.focusClassId !== null && !presentClassIds.has(editor.focusClassId)) {
-        editor.setFocusClass(editor.focusClassId); // Toggle off
-
-        // Remove highlight from the class item
-        const target = document.querySelector(`.class-item[data-class-id="${editor.focusClassId}"]`);
-        if (target) {
-            target.classList.remove('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
-            target.classList.add('bg-surface', 'text-content-muted', 'border-border');
+    // Hide other dropdowns first
+    const allDropdowns = ['autoLabelDropdown', 'sequenceDropdown'];
+    allDropdowns.forEach(id => {
+        if (id !== dropdownId) {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
         }
+    });
+
+    const isHidden = dropdown.classList.contains('hidden');
+    if (isHidden) {
+        dropdown.classList.remove('hidden');
+        positionFixedDropdown(btn, dropdown, dropdownWidth);
+    } else {
+        dropdown.classList.add('hidden');
     }
 }
-document.addEventListener('click', function (event) { const dropdown = document.getElementById('autoLabelDropdown'); if (dropdown && !dropdown.classList.contains('hidden') && !event.target.closest('#autoLabelDropdownWrapper')) { dropdown.classList.add('hidden'); } });
+
+function positionFixedDropdown(btn, dropdown, dropdownWidth) {
+    if (!btn || !dropdown || dropdown.classList.contains('hidden')) return;
+    const rect = btn.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    let leftPos = rect.left;
+    if (leftPos + dropdownWidth > window.innerWidth) {
+        leftPos = window.innerWidth - dropdownWidth - 8;
+    }
+    dropdown.style.left = leftPos + 'px';
+}
+
+document.addEventListener('click', function (event) {
+    // Hide autoLabelDropdown
+    const dropdown = document.getElementById('autoLabelDropdown');
+    if (dropdown && !dropdown.classList.contains('hidden') && !event.target.closest('#autoLabelDropdownWrapper')) {
+        dropdown.classList.add('hidden');
+    }
+    // Hide sequenceDropdown
+    const seqDropdown = document.getElementById('sequenceDropdown');
+    if (seqDropdown && !seqDropdown.classList.contains('hidden') && !event.target.closest('#btnShowSequenceNumbers') && !event.target.closest('#sequenceDropdown')) {
+        seqDropdown.classList.add('hidden');
+    }
+});
+
+window.addEventListener('resize', () => {
+    positionFixedDropdown(document.getElementById('btnAutoLabelToggle'), document.getElementById('autoLabelDropdown'), 192);
+    positionFixedDropdown(document.getElementById('btnShowSequenceNumbers'), document.getElementById('sequenceDropdown'), 192);
+});
+
+window.addEventListener('scroll', () => {
+    positionFixedDropdown(document.getElementById('btnAutoLabelToggle'), document.getElementById('autoLabelDropdown'), 192);
+    positionFixedDropdown(document.getElementById('btnShowSequenceNumbers'), document.getElementById('sequenceDropdown'), 192);
+}, true);
 
 function initSplitSlider() {
     const container = document.getElementById('splitSliderContainer');
@@ -2451,15 +3103,15 @@ function initSplitSlider() {
     const barTrain = document.getElementById('splitBarTrain');
     const barVal = document.getElementById('splitBarVal');
     const barTest = document.getElementById('splitBarTest');
-    
+
     const inputTrain = document.getElementById('exportTrainSplit');
     const inputVal = document.getElementById('exportValSplit');
     const inputTest = document.getElementById('exportTestSplit');
-    
+
     const lblTrainPct = document.getElementById('lblTrainPct');
     const lblValPct = document.getElementById('lblValPct');
     const lblTestPct = document.getElementById('lblTestPct');
-    
+
     const lblTrainCount = document.getElementById('lblTrainCount');
     const lblValCount = document.getElementById('lblValCount');
     const lblTestCount = document.getElementById('lblTestCount');
@@ -2501,12 +3153,37 @@ function initSplitSlider() {
         lblValPct.textContent = valPct;
         lblTestPct.textContent = testPct;
 
-        window.updateSplitCounts = function() {
+        window.updateSplitCounts = function () {
             let total = 0;
             if (currentWorkspace && currentWorkspace.allImages) {
-                total = currentWorkspace.allImages.length;
+                const scopeEl = document.getElementById('exportScope');
+                const excludeFlagged = document.getElementById('exportExcludeFlagged')?.checked;
+
+                let filteredImages = currentWorkspace.allImages.filter(img => img.is_labeled === true);
+
+                if (excludeFlagged) {
+                    filteredImages = filteredImages.filter(img => img.flag_status !== 'Flagged');
+                }
+
+                if (scopeEl && scopeEl.value === 'tags') {
+                    const checkedTags = Array.from(document.querySelectorAll('input[name="exportTags"]:checked')).map(el => parseInt(el.value));
+                    if (checkedTags.length > 0) {
+                        filteredImages = filteredImages.filter(img => {
+                            if (!img.tags || !Array.isArray(img.tags)) return false;
+                            return img.tags.some(t => checkedTags.includes(t.id));
+                        });
+                        total = filteredImages.length;
+                    } else {
+                        total = 0;
+                    }
+                } else if (scopeEl && scopeEl.value === 'current') {
+                    // For current image only
+                    total = 1;
+                } else {
+                    total = filteredImages.length;
+                }
             }
-            
+
             const trainCount = Math.round(total * trainPct / 100);
             const valCount = Math.round(total * valPct / 100);
             const testCount = total - trainCount - valCount;
@@ -2521,11 +3198,11 @@ function initSplitSlider() {
 
     function onMouseMove(e) {
         if (!isDragging1 && !isDragging2) return;
-        
+
         const rect = container.getBoundingClientRect();
         let x = e.clientX - rect.left;
         let pct = (x / rect.width) * 100;
-        
+
         if (pct < 0) pct = 0;
         if (pct > 100) pct = 100;
 

@@ -3,6 +3,32 @@ from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
 
+image_tags = db.Table('image_tags',
+    db.Column('image_id', db.Integer, db.ForeignKey('images.id'), primary_key=True),
+    db.Column('tag_id', db.Integer, db.ForeignKey('tags.id'), primary_key=True)
+)
+
+class Tag(db.Model):
+    __tablename__ = 'tags'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
+    color = db.Column(db.String(20), default='#3b82f6')
+
+    # Ensure unique tag names within a project
+    __table_args__ = (
+        db.UniqueConstraint('project_id', 'name', name='unique_project_tag'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'project_id': self.project_id,
+            'color': self.color
+        }
+
 class Project(db.Model):
     __tablename__ = 'projects'
     
@@ -57,6 +83,9 @@ class Image(db.Model):
         db.UniqueConstraint('project_id', 'filename', name='unique_project_image'),
     )
 
+    # Relationship for tags
+    tags = db.relationship('Tag', secondary=image_tags, backref=db.backref('images_list', lazy='dynamic'))
+
     def to_dict(self):
         return {
             'id': self.id,
@@ -66,7 +95,8 @@ class Image(db.Model):
             'is_labeled': self.is_labeled,
             'is_reviewed': self.is_reviewed,
             'flag_status': self.flag_status,
-            'split_type': self.split_type
+            'split_type': self.split_type,
+            'tags': [tag.to_dict() for tag in self.tags]
         }
 
 class AIModel(db.Model):

@@ -2,7 +2,7 @@
 from flask import Blueprint, jsonify, request, current_app
 # pyrefly: ignore [missing-import]
 import flask
-from models import db, Project, View, Image, AIModel
+from models import db, Project, View, Image, AIModel, Tag
 import os
 import utils
 from inference import YOLOInference, ClassificationInference
@@ -34,7 +34,13 @@ def get_classifier_engine():
             model_path = os.path.join(os.getcwd(), 'models', active_cls_model.filename)
             if os.path.exists(model_path):
                 classifier_engine = ClassificationInference(model_path)
+        else:
+            # Fallback to default if no active classification model is set
+            model_path = os.path.join(os.getcwd(), 'models', 'classifier.onnx')
+            if os.path.exists(model_path):
+                classifier_engine = ClassificationInference(model_path)
     return classifier_engine
+
 
 
 
@@ -60,6 +66,7 @@ def create_project():
         # Tự động quét và đồng bộ ảnh từ thư mục ngay khi tạo project
         try:
             utils.scan_and_sync_images(new_project)
+            utils.sync_dataset_tags(new_project)
         except Exception as scan_err:
             print(f"Error during auto-scanning: {scan_err}")
             
@@ -88,6 +95,7 @@ def update_project(project_id):
         if path_changed:
             try:
                 utils.scan_and_sync_images(project)
+                utils.sync_dataset_tags(project)
             except Exception as scan_err:
                 print(f"Error during auto-scanning in update: {scan_err}")
                 
@@ -128,11 +136,46 @@ def delete_image(image_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
 
+@api_bp.route('/images/batch-delete', methods=['POST'])
+def batch_delete_images():
+    data = request.json
+    image_ids = data.get('image_ids', [])
+    if not image_ids:
+        return jsonify({'message': 'No images specified'}), 200
+        
+    deleted_count = 0
+    try:
+        images = Image.query.filter(Image.id.in_(image_ids)).all()
+        for image in images:
+            project = Project.query.get(image.project_id)
+            if project:
+                image_path = os.path.join(project.root_path, image.filename)
+                if os.path.exists(image_path):
+                    os.remove(image_path)
+                    
+                name_no_ext = os.path.splitext(image.filename)[0]
+                label_path = os.path.join(project.root_path, f"{name_no_ext}.txt")
+                if os.path.exists(label_path):
+                    os.remove(label_path)
+            db.session.delete(image)
+            deleted_count += 1
+        db.session.commit()
+        return jsonify({'message': f'Successfully deleted {deleted_count} images'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+
 @api_bp.route('/projects/scan/<int:project_id>', methods=['POST'])
 def scan_project(project_id):
     project = Project.query.get_or_404(project_id)
-    added_count = utils.scan_and_sync_images(project)
-    return jsonify({'message': f'Scanned and synced. Added {added_count} new images.'})
+    try:
+        new_count = utils.scan_and_sync_images(project)
+        utils.sync_dataset_tags(project)
+        return jsonify({'message': f'Synced successfully. Added {new_count} new images.'})
+    except Exception as e:
+        print(f"Error scanning project {project_id}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # --- Uploads for Drag-and-Drop Project Creation ---
 ALLOWED_UPLOAD_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.txt', '.yaml', '.yml', '.JPG', '.JPEG', '.PNG', '.BMP'}
@@ -155,7 +198,7 @@ def upload_folder():
         if file.filename:
             basename = os.path.basename(file.filename)
             ext = os.path.splitext(basename)[1].lower()
-            if ext in {'.jpg', '.jpeg', '.png', '.bmp', '.txt', '.yaml', '.yml'}:
+            if ext in {'.jpg', '.jpeg', '.png', '.bmp', '.txt', '.yaml', '.yml', '.json'}:
                 dest_path = os.path.join(upload_dir, basename)
                 file.save(dest_path)
                 saved_count += 1
@@ -177,7 +220,7 @@ def upload_project_images(project_id):
         if file.filename:
             basename = os.path.basename(file.filename)
             ext = os.path.splitext(basename)[1].lower()
-            if ext in {'.jpg', '.jpeg', '.png', '.bmp', '.txt', '.yaml', '.yml', '.JPG', '.JPEG', '.PNG', '.BMP'}:
+            if ext in {'.jpg', '.jpeg', '.png', '.bmp', '.txt', '.yaml', '.yml', '.json', '.JPG', '.JPEG', '.PNG', '.BMP'}:
                 dest_path = os.path.join(project.root_path, basename)
                 file.save(dest_path)
                 saved_count += 1
@@ -185,6 +228,7 @@ def upload_project_images(project_id):
     if saved_count > 0 and not skip_sync:
         try:
             utils.scan_and_sync_images(project)
+            utils.sync_dataset_tags(project)
         except Exception as scan_err:
             print(f"Error during auto-scanning in upload: {scan_err}")
             
@@ -348,8 +392,24 @@ def batch_review():
 @api_bp.route('/save', methods=['POST'])
 def save_label():
     data = request.json
-    # data: { image_id, labels: [...], flag_status }
+    # data: { image_id, labels: [...], flag_status, save_time }
     image = Image.query.get_or_404(data['image_id'])
+    
+    save_time = data.get('save_time', 0)
+    project = Project.query.get(image.project_id)
+    label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+    
+    # Kiểm tra thời gian save mới nhất (check newest save time)
+    if os.path.exists(label_file) and save_time > 0:
+        file_mtime = os.path.getmtime(label_file) * 1000 # convert to ms
+        if save_time < file_mtime:
+            return jsonify({'message': 'Ignored older save. Another user saved newer data.', 'ignored': True}), 200
+
+    # Clear tọa độ của bounding box trước đó (clear previous bounding box coordinates)
+    if os.path.exists(label_file):
+        open(label_file, 'w').close()
+        
+    # Gọi đến hàm save() để lưu tọa độ của bounding box mới nhất
     utils.save_yolo_label(image, data['labels'])
     
     image.is_labeled = len(data.get('labels', [])) > 0
@@ -479,8 +539,14 @@ def export_dataset():
     if 'image_ids' in data:
         criteria['image_ids'] = data['image_ids']
     
+    if 'tags' in data:
+        criteria['tags'] = data['tags']
+        
     if 'exclude_flagged' in data:
         criteria['exclude_flagged'] = data['exclude_flagged']
+        
+    if 'has_any_tag' in data:
+        criteria['has_any_tag'] = data['has_any_tag']
         
     # Default to 'yolo' if not specified
     export_fmt = data.get('format', 'yolo')
@@ -547,10 +613,23 @@ def auto_label(image_id):
                 
                 if 'error' not in cls_result:
                     old_class_id = box['class_id']
-                    box['class_id'] = cls_result['class_id']
+                    predicted_name = cls_result.get('class_name')
+                    project_classes = utils.get_classes(project)
+                    if predicted_name in project_classes:
+                        project_class_id = project_classes.index(predicted_name)
+                    else:
+                        project_classes_lower = [c.lower() for c in project_classes]
+                        if predicted_name.lower() in project_classes_lower:
+                            project_class_id = project_classes_lower.index(predicted_name.lower())
+                        else:
+                            project_classes.append(predicted_name)
+                            utils.save_classes(project, project_classes)
+                            project_class_id = len(project_classes) - 1
+                    
+                    box['class_id'] = project_class_id
                     box['cls_confidence'] = cls_result['confidence']
-                    box['cls_class_name'] = cls_result['class_name']
-                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {cls_result['class_name']} ({cls_result['confidence']*100:.1f}%)\n")
+                    box['cls_class_name'] = predicted_name
+                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {predicted_name} ({cls_result['confidence']*100:.1f}%)\n")
             sys.stderr.flush()
         sys.stderr.write(f"[AutoLabel] Classifier done.\n")
         sys.stderr.flush()
@@ -611,6 +690,23 @@ def classify_boxes():
             
         crop = img[ymin:ymax, xmin:xmax]
         cls_result = classifier.predict(crop)
+        
+        if 'error' not in cls_result:
+            predicted_name = cls_result.get('class_name')
+            project_classes = utils.get_classes(project)
+            if predicted_name in project_classes:
+                project_class_id = project_classes.index(predicted_name)
+            else:
+                project_classes_lower = [c.lower() for c in project_classes]
+                if predicted_name.lower() in project_classes_lower:
+                    project_class_id = project_classes_lower.index(predicted_name.lower())
+                else:
+                    project_classes.append(predicted_name)
+                    utils.save_classes(project, project_classes)
+                    project_class_id = len(project_classes) - 1
+            
+            cls_result['class_id'] = project_class_id
+            
         results.append(cls_result)
         
     return jsonify({'success': True, 'results': results})
@@ -1204,3 +1300,119 @@ def test_models():
             os.remove(temp_path)
             
     return jsonify(results)
+
+# --- Tags ---
+@api_bp.route('/projects/<int:project_id>/tags', methods=['GET'])
+def get_tags(project_id):
+    tags = Tag.query.filter_by(project_id=project_id).all()
+    result = []
+    for tag in tags:
+        tag_dict = tag.to_dict()
+        tag_dict['image_count'] = tag.images_list.count()
+        result.append(tag_dict)
+    return jsonify(result)
+
+@api_bp.route('/projects/<int:project_id>/tags', methods=['POST'])
+def create_tag(project_id):
+    data = request.json
+    name = data.get('name')
+    color = data.get('color', '#3b82f6')
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    
+    existing = Tag.query.filter_by(project_id=project_id, name=name).first()
+    if existing:
+        return jsonify({'error': 'Tag already exists'}), 400
+        
+    tag = Tag(name=name, project_id=project_id, color=color)
+    db.session.add(tag)
+    db.session.commit()
+    return jsonify(tag.to_dict()), 201
+
+@api_bp.route('/tags/<int:tag_id>', methods=['PUT'])
+def update_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    data = request.json
+    if 'name' in data:
+        existing = Tag.query.filter_by(project_id=tag.project_id, name=data['name']).first()
+        if existing and existing.id != tag_id:
+            return jsonify({'error': 'Tag name already exists'}), 400
+        tag.name = data['name']
+    if 'color' in data:
+        tag.color = data['color']
+        
+    db.session.commit()
+    return jsonify(tag.to_dict())
+
+@api_bp.route('/tags/<int:tag_id>', methods=['DELETE'])
+def delete_tag(tag_id):
+    tag = Tag.query.get_or_404(tag_id)
+    try:
+        db.session.delete(tag)
+        db.session.commit()
+        return jsonify({'message': 'Tag deleted'})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+@api_bp.route('/images/<int:image_id>/tags', methods=['POST'])
+def set_image_tags(image_id):
+    image = Image.query.get_or_404(image_id)
+    data = request.json
+    tag_ids = data.get('tag_ids', [])
+    
+    tags = Tag.query.filter(Tag.id.in_(tag_ids), Tag.project_id == image.project_id).all()
+    image.tags = tags
+    db.session.commit()
+    
+    return jsonify({'message': 'Tags updated', 'tags': [t.to_dict() for t in image.tags]})
+
+@api_bp.route('/projects/<int:project_id>/images_paginated', methods=['GET'])
+def get_images_paginated(project_id):
+    Project.query.get_or_404(project_id)
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 50, type=int)
+    
+    if limit > 200:
+        limit = 200
+        
+    query = Image.query.filter_by(project_id=project_id)
+    total = query.count()
+    images = query.offset((page - 1) * limit).limit(limit).all()
+    
+    return jsonify({
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'images': [img.to_dict() for img in images]
+    })
+
+@api_bp.route('/projects/<int:project_id>/bulk_assign_tags', methods=['POST'])
+def bulk_assign_tags(project_id):
+    Project.query.get_or_404(project_id)
+    data = request.json
+    image_ids = data.get('image_ids', []) # Can be "all" or list of ids
+    tag_ids = data.get('tag_ids', [])
+    action = data.get('action', 'assign') # assign, unassign, set
+    
+    tags = Tag.query.filter(Tag.id.in_(tag_ids), Tag.project_id == project_id).all()
+    
+    if image_ids == 'all':
+        images = Image.query.filter_by(project_id=project_id).all()
+    else:
+        images = Image.query.filter(Image.id.in_(image_ids), Image.project_id == project_id).all()
+        
+    for image in images:
+        if action == 'set':
+            image.tags = list(tags)
+        elif action == 'assign':
+            for t in tags:
+                if t not in image.tags:
+                    image.tags.append(t)
+        elif action == 'unassign':
+            for t in tags:
+                if t in image.tags:
+                    image.tags.remove(t)
+                    
+    db.session.commit()
+    return jsonify({'message': f'Bulk tags updated for {len(images)} images', 'success': True})

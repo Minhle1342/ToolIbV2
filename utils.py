@@ -3,7 +3,7 @@ import glob
 import shutil
 import yaml
 import random
-from models import db, Image, Project, View
+from models import db, Image, Project, View, Tag
 
 try:
     import cv2
@@ -117,6 +117,57 @@ def scan_and_sync_images(project):
     
     db.session.commit()
     return new_images_count
+
+def sync_dataset_tags(project):
+    """
+    Syncs tags from dataset_tags.json if it exists in the project root.
+    """
+    tags_file = os.path.join(project.root_path, 'dataset_tags.json')
+    if not os.path.exists(tags_file):
+        return
+        
+    import json
+    try:
+        with open(tags_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            
+        project_tags = data.get('project_tags', [])
+        images_data = data.get('images', {})
+        
+        # Ensure tags exist
+        tag_map = {}
+        existing_tags = Tag.query.filter_by(project_id=project.id).all()
+        for t in existing_tags:
+            tag_map[t.name] = t
+            
+        for pt in project_tags:
+            name = pt.get('name')
+            color = pt.get('color', '#3B82F6')
+            if name and name not in tag_map:
+                new_tag = Tag(name=name, color=color, project_id=project.id)
+                db.session.add(new_tag)
+                tag_map[name] = new_tag
+                
+        db.session.commit()
+        
+        # Assign tags to images
+        db_images = Image.query.filter_by(project_id=project.id).all()
+        img_dict = {img.filename: img for img in db_images}
+        
+        for filename, tag_names in images_data.items():
+            if filename in img_dict:
+                img = img_dict[filename]
+                current_tags = set(t.name for t in img.tags)
+                
+                for t_name in tag_names:
+                    if t_name in tag_map and t_name not in current_tags:
+                        img.tags.append(tag_map[t_name])
+                        current_tags.add(t_name)
+                        
+        db.session.commit()
+        
+    except Exception as e:
+        print(f"Error syncing dataset tags: {e}")
 
 def assign_images_to_view(view_id, count, project_id, assign_mode='both'):
     """
@@ -232,6 +283,13 @@ def export_dataset(criteria, splits=None, format='yolo'):
         # All images in a view (labeled or not? User usually wants labeled. Let's filter labeled=True by default)
         target_images = Image.query.filter_by(view_id=criteria['view_id'], is_labeled=True).all()
         
+    elif criteria.get('tags') and criteria.get('project_ids'):
+        target_images = Image.query.filter(
+            Image.project_id.in_(criteria['project_ids']),
+            Image.tags.any(Tag.id.in_(criteria['tags'])),
+            Image.is_labeled==True
+        ).all()
+        
     elif criteria.get('project_ids'):
         # Multiple projects
         target_images = Image.query.filter(
@@ -242,6 +300,9 @@ def export_dataset(criteria, splits=None, format='yolo'):
     # Filter out flagged images if requested
     if criteria.get('exclude_flagged', False):
          target_images = [img for img in target_images if img.flag_status != 'Flagged']
+         
+    if criteria.get('has_any_tag', False):
+         target_images = [img for img in target_images if len(img.tags) > 0]
          
     if not target_images:
          return {'status': 'error', 'message': 'No images found matching criteria.'}
@@ -395,6 +456,34 @@ def export_dataset(criteria, splits=None, format='yolo'):
     yaml_path = os.path.join(base_export_dir, 'data.yaml')
     with open(yaml_path, 'w', encoding='utf-8') as f:
         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+
+    import json
+    tags_metadata = {
+        'project_tags': [],
+        'images': {}
+    }
+    used_tags = {}
+    
+    for split_set in [train_set, val_set, test_set]:
+        for item in split_set:
+            img = item['image_obj']
+            exported_filename = item['filename']
+            if getattr(img, 'tags', None):
+                tag_names = []
+                for tag in img.tags:
+                    tag_names.append(tag.name)
+                    if tag.name not in used_tags:
+                        used_tags[tag.name] = tag.color
+                if tag_names:
+                    tags_metadata['images'][exported_filename] = tag_names
+                
+    for name, color in used_tags.items():
+        tags_metadata['project_tags'].append({'name': name, 'color': color})
+        
+    if used_tags:
+        tags_json_path = os.path.join(base_export_dir, 'dataset_tags.json')
+        with open(tags_json_path, 'w', encoding='utf-8') as f:
+            json.dump(tags_metadata, f, ensure_ascii=False, indent=4)
 
     return {
         'status': 'success',

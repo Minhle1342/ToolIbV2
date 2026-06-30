@@ -229,6 +229,11 @@
     <button onclick="closeFullscreen(); event.stopPropagation();" class="absolute top-6 right-6 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg hover:shadow-white/20" title="Thoát (Esc)">
         <i class="fa-solid fa-xmark text-2xl font-bold"></i>
     </button>
+
+    <!-- Toggle Center Points Button -->
+    <button id="fsToggleCenterBtn" onclick="toggleCenterPoints(); event.stopPropagation();" class="absolute top-[5.5rem] right-6 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg" title="Bật/tắt tọa độ tâm">
+        <i class="fa-solid fa-crosshairs text-xl"></i>
+    </button>
     
     <!-- Prev Button -->
     <button id="fsPrevBtn" onclick="fsNavigate(-1); event.stopPropagation();" class="absolute left-6 top-1/2 -translate-y-1/2 z-[110] flex items-center justify-center w-12 h-12 rounded-full bg-white/10 text-white border border-white/20 cursor-pointer hover:bg-white/20 hover:scale-110 active:scale-95 transition-all shadow-lg" title="Ảnh trước (←)">
@@ -821,6 +826,7 @@
                 
                 const canvas = document.createElement('canvas');
                 canvas.className = 'max-w-full max-h-full object-contain';
+                canvas.predictions = res.predictions;
                 wrapper.appendChild(canvas);
                 
                 // Glowing zoom button inside the image container
@@ -837,6 +843,7 @@
                 img.onload = () => {
                     canvas.width = img.width;
                     canvas.height = img.height;
+                    canvas.originalImage = img;
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0);
                     
@@ -891,11 +898,11 @@
                 const col = c.closest('.flex.flex-col');
                 const titleEl = col ? col.querySelector('.font-bold.text-sm') : null;
                 const name = titleEl ? titleEl.querySelector('span')?.textContent || modelName : modelName;
-                fsCanvasList.push({ canvas: c, name: name });
+                fsCanvasList.push({ canvas: c, name: name, predictions: c.predictions });
             });
         }
         if (fsCanvasList.length === 0) {
-            fsCanvasList = [{ canvas: sourceCanvas, name: modelName }];
+            fsCanvasList = [{ canvas: sourceCanvas, name: modelName, predictions: sourceCanvas.predictions }];
         }
 
         fsCurrentIndex = fsCanvasList.findIndex(item => item.canvas === sourceCanvas);
@@ -919,7 +926,33 @@
         fsCtx.clearRect(0, 0, fsCanvas.width, fsCanvas.height);
         fsCanvas.width = item.canvas.width;
         fsCanvas.height = item.canvas.height;
-        fsCtx.drawImage(item.canvas, 0, 0);
+        
+        if (fsShowCenterPoints) {
+            // Draw original image without bounding boxes
+            if (item.canvas.originalImage) {
+                fsCtx.drawImage(item.canvas.originalImage, 0, 0);
+            } else {
+                fsCtx.drawImage(item.canvas, 0, 0);
+            }
+            
+            // Draw center points
+            if (item.predictions) {
+                item.predictions.forEach(p => {
+                    const cx = (p.bbox[0] + p.bbox[2]) / 2;
+                    const cy = (p.bbox[1] + p.bbox[3]) / 2;
+                    fsCtx.beginPath();
+                    fsCtx.arc(cx, cy, Math.max(3, item.canvas.width / 200), 0, 2 * Math.PI, false);
+                    fsCtx.fillStyle = 'red';
+                    fsCtx.fill();
+                    fsCtx.lineWidth = 1;
+                    fsCtx.strokeStyle = 'white';
+                    fsCtx.stroke();
+                });
+            }
+        } else {
+            // Draw canvas with bounding boxes
+            fsCtx.drawImage(item.canvas, 0, 0);
+        }
 
         const counter = fsCanvasList.length > 1 ? ` <span class="text-white/50 text-xs font-mono">(${fsCurrentIndex + 1}/${fsCanvasList.length})</span>` : '';
         fsTitle.innerHTML = `<i class="fa-solid fa-brain text-primary"></i> <span>${item.name}</span>${counter}`;
@@ -935,6 +968,20 @@
         const newIndex = fsCurrentIndex + direction;
         if (newIndex < 0 || newIndex >= fsCanvasList.length) return;
         fsCurrentIndex = newIndex;
+        fsShowCurrent();
+    }
+
+    let fsShowCenterPoints = false;
+    function toggleCenterPoints() {
+        fsShowCenterPoints = !fsShowCenterPoints;
+        const btn = document.getElementById('fsToggleCenterBtn');
+        if (fsShowCenterPoints) {
+            btn.classList.add('bg-primary');
+            btn.classList.remove('bg-white/10');
+        } else {
+            btn.classList.remove('bg-primary');
+            btn.classList.add('bg-white/10');
+        }
         fsShowCurrent();
     }
 
