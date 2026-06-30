@@ -1382,6 +1382,10 @@ class Editor {
         this.renderMagnifier(activeObj);
         this.updateSelectionInfo(activeObj);
 
+        if (typeof currentWorkspace !== 'undefined' && typeof currentWorkspace.zoomToActiveBox === 'function') {
+            currentWorkspace.zoomToActiveBox();
+        }
+
         if (this.isIsolationMode) {
             this.updateIsolateView();
         }
@@ -1542,18 +1546,6 @@ class Editor {
         const target = sorted[nextIndex];
         this.canvas.setActiveObject(target);
         this.onSelect({ selected: [target] });
-
-        // Pan viewport to center the selected box on screen
-        const zoom = this.canvas.getZoom();
-        const boxCenterX = target.left + (target.width * target.scaleX) / 2;
-        const boxCenterY = target.top + (target.height * target.scaleY) / 2;
-        const vpw = this.canvas.getWidth();
-        const vph = this.canvas.getHeight();
-
-        const vpt = this.canvas.viewportTransform.slice(); // copy current transform
-        vpt[4] = vpw / 2 - boxCenterX * zoom;
-        vpt[5] = vph / 2 - boxCenterY * zoom;
-        this.canvas.setViewportTransform(vpt);
     }
 
     centerBoxIfObscured(rect) {
