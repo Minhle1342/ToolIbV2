@@ -6,3 +6,5 @@ exported_dataset/
 models/
 yolo_labeling.db
 classification_crops/
+cert.pem
+key.pem
