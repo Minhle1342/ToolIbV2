@@ -48,3 +48,9 @@
     --color-text-inv-val: #ffffff;
   }
 }
+
+/* Ensure z-[99999] utility class is always compiled and active */
+.z-\[99999\] {
+  z-index: 99999 !important;
+}
+

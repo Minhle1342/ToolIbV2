@@ -56,11 +56,11 @@ if ((Test-Path "package.json") -and -not (Test-Path "node_modules")) {
 # Tự động mở trình duyệt web sau 1.5 giây
 Start-Job -ScriptBlock {
     Start-Sleep -Milliseconds 1500
-    Start-Process "http://localhost:5000"
+    Start-Process "https://localhost:5000"
 } | Out-Null
 
 # Khởi chạy Flask App
-Write-Host "[SERVER] Đang khởi chạy Flask server tại http://localhost:5000..." -ForegroundColor Cyan
+Write-Host "[SERVER] Đang khởi chạy Flask server bảo mật tại https://localhost:5000..." -ForegroundColor Cyan
 Write-Host "[LƯU Ý] Nhấn Ctrl + C trong cửa sổ này để tắt Server." -ForegroundColor DarkGray
 Write-Host "----------------------------------------------------------" -ForegroundColor Gray
 

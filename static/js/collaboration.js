@@ -32,6 +32,513 @@
     let activeChatSid = null;
     let activeChatUserName = null;
 
+    // Voice Call State and WebRTC Helpers
+    let localStream = null;
+    let peerConnection = null;
+    let voiceCallTargetSid = null;
+    let voiceCallState = 'idle'; // 'idle', 'calling', 'ringing', 'connected'
+    let callTimerInterval = null;
+    let callStartTime = null;
+
+    let incomingRingInterval = null;
+    let incomingRingContext = null;
+    let outgoingRingInterval = null;
+    let outgoingRingContext = null;
+
+    const rtcConfig = {
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' }
+        ]
+    };
+
+    function startIncomingRingtone() {
+        stopIncomingRingtone();
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        incomingRingContext = new AudioContext();
+        
+        function playRingCycle() {
+            if (!incomingRingContext || incomingRingContext.state === 'closed') return;
+            const now = incomingRingContext.currentTime;
+            const osc1 = incomingRingContext.createOscillator();
+            const osc2 = incomingRingContext.createOscillator();
+            const gain = incomingRingContext.createGain();
+            
+            osc1.frequency.setValueAtTime(440, now);
+            osc2.frequency.setValueAtTime(554.37, now);
+            
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.1, now + 0.1);
+            gain.gain.linearRampToValueAtTime(0.1, now + 0.8);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+            
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(incomingRingContext.destination);
+            
+            osc1.start(now);
+            osc2.start(now);
+            osc1.stop(now + 1.5);
+            osc2.stop(now + 1.5);
+        }
+        
+        playRingCycle();
+        incomingRingInterval = setInterval(playRingCycle, 2000);
+    }
+
+    function stopIncomingRingtone() {
+        if (incomingRingInterval) {
+            clearInterval(incomingRingInterval);
+            incomingRingInterval = null;
+        }
+        if (incomingRingContext) {
+            incomingRingContext.close().catch(() => {});
+            incomingRingContext = null;
+        }
+    }
+
+    function startOutgoingRingtone() {
+        stopOutgoingRingtone();
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        outgoingRingContext = new AudioContext();
+        
+        function playRingback() {
+            if (!outgoingRingContext || outgoingRingContext.state === 'closed') return;
+            const now = outgoingRingContext.currentTime;
+            const osc1 = outgoingRingContext.createOscillator();
+            const osc2 = outgoingRingContext.createOscillator();
+            const gain = outgoingRingContext.createGain();
+            
+            osc1.frequency.setValueAtTime(440, now);
+            osc2.frequency.setValueAtTime(480, now);
+            
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.05, now + 0.1);
+            gain.gain.linearRampToValueAtTime(0.05, now + 1.2);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
+            
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(outgoingRingContext.destination);
+            
+            osc1.start(now);
+            osc2.start(now);
+            osc1.stop(now + 1.6);
+            osc2.stop(now + 1.6);
+        }
+        
+        playRingback();
+        outgoingRingInterval = setInterval(playRingback, 3000);
+    }
+
+    function stopOutgoingRingtone() {
+        if (outgoingRingInterval) {
+            clearInterval(outgoingRingInterval);
+            outgoingRingInterval = null;
+        }
+        if (outgoingRingContext) {
+            outgoingRingContext.close().catch(() => {});
+            outgoingRingContext = null;
+        }
+    }
+
+    function updateCallTimer() {
+        const timerEl = document.getElementById('collabActiveCallTimer');
+        if (!timerEl || !callStartTime) return;
+        const diff = Math.floor((Date.now() - callStartTime) / 1000);
+        const mins = String(Math.floor(diff / 60)).padStart(2, '0');
+        const secs = String(diff % 60).padStart(2, '0');
+        timerEl.textContent = `${mins}:${secs}`;
+    }
+
+    function startCallTimer() {
+        callStartTime = Date.now();
+        updateCallTimer();
+        if (callTimerInterval) clearInterval(callTimerInterval);
+        callTimerInterval = setInterval(updateCallTimer, 1000);
+    }
+
+    function stopCallTimer() {
+        if (callTimerInterval) {
+            clearInterval(callTimerInterval);
+            callTimerInterval = null;
+        }
+        callStartTime = null;
+    }
+
+    function playNotificationSound() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) return;
+            const ctx = new AudioContext();
+            const now = ctx.currentTime;
+            const duration = 2.0;
+
+            const mainGain = ctx.createGain();
+            mainGain.gain.setValueAtTime(0.12, now);
+            // Decay over 2 seconds
+            mainGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+            mainGain.connect(ctx.destination);
+
+            // A warm chime using sine waves: C5, E5, G5, C6
+            const notes = [
+                { freq: 523.25, delay: 0.0 },
+                { freq: 659.25, delay: 0.1 },
+                { freq: 783.99, delay: 0.2 },
+                { freq: 1046.50, delay: 0.3 }
+            ];
+
+            notes.forEach(note => {
+                const osc = ctx.createOscillator();
+                const gainNode = ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(note.freq, now + note.delay);
+
+                // Note envelope
+                gainNode.gain.setValueAtTime(0, now);
+                gainNode.gain.linearRampToValueAtTime(0.3, now + note.delay + 0.03);
+                gainNode.gain.exponentialRampToValueAtTime(0.0001, now + note.delay + 1.2);
+
+                osc.connect(gainNode);
+                gainNode.connect(mainGain);
+
+                osc.start(now + note.delay);
+                osc.stop(now + duration);
+            });
+
+            // Auto-close context after exactly 2 seconds + some buffer
+            setTimeout(() => {
+                ctx.close().catch(() => {});
+            }, 2100);
+        } catch (e) {
+            console.warn('[Collab] Audio notification error:', e);
+        }
+    }
+
+    let remoteCandidateQueue = [];
+    let remoteAudioElement = null;
+
+    function playRemoteStream(stream) {
+        if (!remoteAudioElement) {
+            remoteAudioElement = document.createElement('audio');
+            remoteAudioElement.id = 'collabRemoteAudio';
+            remoteAudioElement.autoplay = true;
+            document.body.appendChild(remoteAudioElement);
+        }
+        remoteAudioElement.srcObject = stream;
+    }
+
+    function cleanupWebRTC() {
+        stopCallTimer();
+        stopIncomingRingtone();
+        stopOutgoingRingtone();
+        
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            localStream = null;
+        }
+        if (peerConnection) {
+            peerConnection.close();
+            peerConnection = null;
+        }
+        if (remoteAudioElement) {
+            remoteAudioElement.srcObject = null;
+            remoteAudioElement.remove();
+            remoteAudioElement = null;
+        }
+        remoteCandidateQueue = [];
+        voiceCallTargetSid = null;
+        voiceCallState = 'idle';
+    }
+
+    async function startWebRTCCall(targetSid) {
+        try {
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            peerConnection = new RTCPeerConnection(rtcConfig);
+            
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+            
+            peerConnection.ontrack = (event) => {
+                console.log('[Collab] Received remote track');
+                playRemoteStream(event.streams[0]);
+            };
+            
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && socket && socket.connected) {
+                    socket.emit('collab_wertc_signal', {
+                        target_sid: targetSid,
+                        signal: { type: 'candidate', candidate: event.candidate }
+                    });
+                }
+            };
+            
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            
+            socket.emit('collab_wertc_signal', {
+                target_sid: targetSid,
+                signal: { type: 'offer', sdp: offer.sdp }
+            });
+            
+        } catch (err) {
+            console.error('[Collab] WebRTC start call error:', err);
+            showToastError("Không thể truy cập microphone.");
+            cleanupWebRTC();
+            hideCallUI();
+        }
+    }
+
+    async function acceptWebRTCCall(targetSid) {
+        try {
+            stopIncomingRingtone();
+            
+            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            
+            peerConnection = new RTCPeerConnection(rtcConfig);
+            
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+            
+            peerConnection.ontrack = (event) => {
+                console.log('[Collab] Received remote track');
+                playRemoteStream(event.streams[0]);
+            };
+            
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate && socket && socket.connected) {
+                    socket.emit('collab_wertc_signal', {
+                        target_sid: targetSid,
+                        signal: { type: 'candidate', candidate: event.candidate }
+                    });
+                }
+            };
+            
+            socket.emit('collab_accept_call', { target_sid: targetSid });
+            
+            showCallUI('connected', remoteUsers[targetSid]?.user_name || 'User', targetSid);
+            
+        } catch (err) {
+            console.error('[Collab] WebRTC accept call error:', err);
+            showToastError("Không thể truy cập microphone.");
+            if (socket && socket.connected) {
+                socket.emit('collab_reject_call', { target_sid: targetSid });
+            }
+            cleanupWebRTC();
+            hideCallUI();
+        }
+    }
+
+    function showToastInfo(message) {
+        const notifContainer = document.getElementById('collabNotificationContainer');
+        if (!notifContainer) return;
+
+        const toast = document.createElement('div');
+        toast.className = 'collab-toast-enter pointer-events-auto bg-slate-900 border border-slate-700/50 rounded-xl shadow-xl p-3 flex gap-2.5 items-center backdrop-blur-md w-72';
+        toast.innerHTML = `
+            <div class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                <i class="fa-solid fa-circle-info text-xs"></i>
+            </div>
+            <div class="flex-1 text-[11px] text-left text-slate-300 font-semibold">
+                ${message}
+            </div>
+        `;
+        notifContainer.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-10px)';
+            toast.style.transition = 'all 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    }
+
+    function showToastError(message) {
+        const notifContainer = document.getElementById('collabNotificationContainer');
+        if (!notifContainer) return;
+
+        const toast = document.createElement('div');
+        toast.className = 'collab-toast-enter pointer-events-auto bg-slate-900 border border-red-500/30 rounded-xl shadow-xl p-3 flex gap-2.5 items-center backdrop-blur-md w-72';
+        toast.innerHTML = `
+            <div class="flex-shrink-0 w-6 h-6 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center">
+                <i class="fa-solid fa-circle-exclamation text-xs"></i>
+            </div>
+            <div class="flex-1 text-[11px] text-left text-slate-300 font-semibold">
+                ${message}
+            </div>
+        `;
+        notifContainer.appendChild(toast);
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(-10px)';
+            toast.style.transition = 'all 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 4000);
+    }
+
+    function ensureCallUI() {
+        if (document.getElementById('collabCallWidget')) return;
+        
+        const widget = document.createElement('div');
+        widget.id = 'collabCallWidget';
+        widget.className = 'fixed bottom-6 right-6 z-[9999] hidden transition-all duration-300 transform scale-95 opacity-0';
+        
+        widget.innerHTML = `
+            <div class="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl p-5 w-80 text-white flex flex-col items-center space-y-4">
+                <div class="w-full flex items-center justify-between">
+                    <span class="text-[10px] font-bold tracking-wider uppercase text-blue-400">Cuộc gọi thoại</span>
+                    <div id="collabCallStatusIndicator" class="flex items-center gap-1.5">
+                        <span id="collabCallStatusDot" class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                        <span id="collabCallStatusText" class="text-[11px] font-medium text-slate-300">Đang gọi...</span>
+                    </div>
+                </div>
+
+                <div class="flex flex-col items-center space-y-2">
+                    <div id="collabCallAvatar" class="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold shadow-lg border border-slate-700 select-none transition-all text-white">
+                        U
+                    </div>
+                    <div id="collabCallName" class="text-sm font-bold text-white">UserName</div>
+                    <div id="collabActiveCallTimer" class="text-xs text-slate-400 font-mono">00:00</div>
+                </div>
+
+                <div class="w-full pt-2 flex items-center justify-center gap-3">
+                    <button id="collabCallMuteBtn" class="w-11 h-11 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center transition-all border border-slate-700/50 hidden" title="Mute/Unmute Mic">
+                        <i class="fa-solid fa-microphone text-sm"></i>
+                    </button>
+                    <button id="collabCallAcceptBtn" class="w-12 h-12 rounded-full bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white flex items-center justify-center transition-all shadow-lg shadow-emerald-500/20 hidden" title="Nhận cuộc gọi">
+                        <i class="fa-solid fa-phone text-lg text-white"></i>
+                    </button>
+                    <button id="collabCallRejectBtn" class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/20 hidden" title="Từ chối">
+                        <i class="fa-solid fa-phone-slash text-lg text-white"></i>
+                    </button>
+                    <button id="collabCallHangupBtn" class="w-12 h-12 rounded-full bg-red-600 hover:bg-red-500 active:scale-95 text-white flex items-center justify-center transition-all shadow-lg shadow-red-500/20" title="Gác máy / Hủy gọi">
+                        <i class="fa-solid fa-phone-slash text-lg text-white"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(widget);
+
+        document.getElementById('collabCallAcceptBtn').onclick = () => {
+            if (voiceCallTargetSid) {
+                acceptWebRTCCall(voiceCallTargetSid);
+            }
+        };
+
+        document.getElementById('collabCallRejectBtn').onclick = () => {
+            if (voiceCallTargetSid) {
+                socket.emit('collab_reject_call', { target_sid: voiceCallTargetSid });
+                cleanupWebRTC();
+                hideCallUI();
+            }
+        };
+
+        document.getElementById('collabCallHangupBtn').onclick = () => {
+            if (voiceCallTargetSid) {
+                if (voiceCallState === 'calling') {
+                    socket.emit('collab_cancel_call', { target_sid: voiceCallTargetSid });
+                } else {
+                    socket.emit('collab_hangup', { target_sid: voiceCallTargetSid });
+                }
+                cleanupWebRTC();
+                hideCallUI();
+            }
+        };
+
+        let isMuted = false;
+        document.getElementById('collabCallMuteBtn').onclick = () => {
+            if (localStream) {
+                isMuted = !isMuted;
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = !isMuted;
+                });
+                const muteBtn = document.getElementById('collabCallMuteBtn');
+                if (isMuted) {
+                    muteBtn.className = 'w-11 h-11 rounded-full bg-red-600/20 hover:bg-red-600/30 text-red-500 flex items-center justify-center transition-all border border-red-500/30';
+                    muteBtn.innerHTML = '<i class="fa-solid fa-microphone-slash text-sm"></i>';
+                } else {
+                    muteBtn.className = 'w-11 h-11 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center transition-all border border-slate-700/50';
+                    muteBtn.innerHTML = '<i class="fa-solid fa-microphone text-sm"></i>';
+                }
+            }
+        };
+    }
+
+    function showCallUI(state, name, sid) {
+        ensureCallUI();
+        const widget = document.getElementById('collabCallWidget');
+        const nameEl = document.getElementById('collabCallName');
+        const avatarEl = document.getElementById('collabCallAvatar');
+        const statusTextEl = document.getElementById('collabCallStatusText');
+        const statusDotEl = document.getElementById('collabCallStatusDot');
+        
+        const acceptBtn = document.getElementById('collabCallAcceptBtn');
+        const rejectBtn = document.getElementById('collabCallRejectBtn');
+        const hangupBtn = document.getElementById('collabCallHangupBtn');
+        const muteBtn = document.getElementById('collabCallMuteBtn');
+        const timerEl = document.getElementById('collabActiveCallTimer');
+
+        nameEl.textContent = name;
+        
+        const remoteUser = remoteUsers[sid] || {};
+        const initials = name.slice(0, 2).toUpperCase();
+        avatarEl.textContent = initials;
+        avatarEl.style.backgroundColor = remoteUser.color || '#4f46e5';
+
+        // Reset mute button
+        muteBtn.className = 'w-11 h-11 rounded-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 flex items-center justify-center transition-all border border-slate-700/50';
+        muteBtn.innerHTML = '<i class="fa-solid fa-microphone text-sm"></i>';
+
+        widget.classList.remove('hidden');
+        setTimeout(() => {
+            widget.classList.remove('scale-95', 'opacity-0');
+            widget.classList.add('scale-100', 'opacity-100');
+        }, 10);
+
+        if (state === 'ringing') {
+            statusTextEl.textContent = 'Cuộc gọi đến...';
+            statusDotEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse';
+            acceptBtn.classList.remove('hidden');
+            rejectBtn.classList.remove('hidden');
+            hangupBtn.classList.add('hidden');
+            muteBtn.classList.add('hidden');
+            timerEl.textContent = 'Đang đổ chuông';
+        } else if (state === 'calling') {
+            statusTextEl.textContent = 'Đang gọi...';
+            statusDotEl.className = 'w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse';
+            acceptBtn.classList.add('hidden');
+            rejectBtn.classList.add('hidden');
+            hangupBtn.classList.remove('hidden');
+            muteBtn.classList.add('hidden');
+            timerEl.textContent = 'Đang đổ chuông...';
+        } else if (state === 'connected') {
+            statusTextEl.textContent = 'Đang kết nối';
+            statusDotEl.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse';
+            acceptBtn.classList.add('hidden');
+            rejectBtn.classList.add('hidden');
+            hangupBtn.classList.remove('hidden');
+            muteBtn.classList.remove('hidden');
+            
+            startCallTimer();
+        }
+    }
+
+    function hideCallUI() {
+        const widget = document.getElementById('collabCallWidget');
+        if (!widget) return;
+        widget.classList.remove('scale-100', 'opacity-100');
+        widget.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => {
+            widget.classList.add('hidden');
+        }, 300);
+    }
+
     function ensureChatUI() {
         if (document.getElementById('collabChatModal')) return;
 
@@ -239,6 +746,7 @@
 
     function showNotificationToast(senderSid, senderName, message) {
         ensureChatUI();
+        playNotificationSound();
         const notifContainer = document.getElementById('collabNotificationContainer');
         if (!notifContainer) return;
 
@@ -321,6 +829,7 @@
 
         // Initialize Chat UI
         ensureChatUI();
+        ensureCallUI();
     }
 
     // 3. Connect Socket.IO
@@ -363,6 +872,11 @@
             clearAllCursors();
             remoteUsers = {};
             updateUsersList();
+            
+            if (voiceCallState !== 'idle') {
+                cleanupWebRTC();
+                hideCallUI();
+            }
         });
 
         // Collaboration events
@@ -387,6 +901,11 @@
 
         socket.on('user_disconnected', (data) => {
             console.log('[Collab] User left:', data.sid);
+            if (data.sid === voiceCallTargetSid) {
+                showToastInfo("Đối phương đã ngắt kết nối.");
+                cleanupWebRTC();
+                hideCallUI();
+            }
             if (remoteUsers[data.sid]) {
                 delete remoteUsers[data.sid];
                 const cursorEl = document.getElementById(`collab-cursor-${data.sid}`);
@@ -611,6 +1130,103 @@
             showNotificationToast(data.sender_sid, data.sender_name, data.message);
         });
 
+        socket.on('collab_incoming_call', (data) => {
+            if (voiceCallState !== 'idle') {
+                socket.emit('collab_reject_call', { target_sid: data.caller_sid });
+                return;
+            }
+            voiceCallTargetSid = data.caller_sid;
+            voiceCallState = 'ringing';
+            
+            showCallUI('ringing', data.caller_name, data.caller_sid);
+            startIncomingRingtone();
+        });
+
+        socket.on('collab_call_cancelled', () => {
+            showToastInfo("Cuộc gọi bị hủy bởi người gọi.");
+            cleanupWebRTC();
+            hideCallUI();
+        });
+
+        socket.on('collab_call_accepted', (data) => {
+            stopOutgoingRingtone();
+            showCallUI('connected', remoteUsers[data.target_sid]?.user_name || 'User', data.target_sid);
+            startWebRTCCall(data.target_sid);
+        });
+
+        socket.on('collab_call_rejected', (data) => {
+            showToastInfo("Cuộc gọi bị từ chối.");
+            cleanupWebRTC();
+            hideCallUI();
+        });
+
+        socket.on('collab_wertc_signal', async (data) => {
+            const { sender_sid, signal } = data;
+            if (sender_sid !== voiceCallTargetSid) return;
+            
+            try {
+                if (signal.type === 'offer') {
+                    if (!peerConnection) {
+                        peerConnection = new RTCPeerConnection(rtcConfig);
+                        
+                        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        localStream.getTracks().forEach(track => {
+                            peerConnection.addTrack(track, localStream);
+                        });
+                        
+                        peerConnection.ontrack = (event) => {
+                            console.log('[Collab] Received remote track');
+                            playRemoteStream(event.streams[0]);
+                        };
+                        
+                        peerConnection.onicecandidate = (event) => {
+                            if (event.candidate && socket && socket.connected) {
+                                socket.emit('collab_wertc_signal', {
+                                    target_sid: sender_sid,
+                                    signal: { type: 'candidate', candidate: event.candidate }
+                                });
+                            }
+                        };
+                    }
+                    
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    socket.emit('collab_wertc_signal', {
+                        target_sid: sender_sid,
+                        signal: { type: 'answer', sdp: answer.sdp }
+                    });
+                    
+                    while (remoteCandidateQueue.length > 0) {
+                        const cand = remoteCandidateQueue.shift();
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+                    }
+                } else if (signal.type === 'answer') {
+                    if (peerConnection) {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: signal.sdp }));
+                        while (remoteCandidateQueue.length > 0) {
+                            const cand = remoteCandidateQueue.shift();
+                            await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+                        }
+                    }
+                } else if (signal.type === 'candidate') {
+                    if (peerConnection && peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                    } else {
+                        remoteCandidateQueue.push(signal.candidate);
+                    }
+                }
+            } catch (err) {
+                console.error('[Collab] Error handling WebRTC signal:', err);
+            }
+        });
+
+        socket.on('collab_call_hungup', () => {
+            showToastInfo("Cuộc gọi đã kết thúc.");
+            cleanupWebRTC();
+            hideCallUI();
+        });
+
         socket.on('annotations_changed', (data) => {
             if (typeof currentWorkspace !== 'undefined' && currentWorkspace.allImages) {
                 const img = currentWorkspace.allImages.find(i => i.id === data.image_id);
@@ -751,6 +1367,90 @@
         document.querySelectorAll('[id^="collab-highlight-"]').forEach(el => el.remove());
     }
 
+    function triggerVoiceCall(targetSid, targetUser) {
+        if (voiceCallState !== 'idle') {
+            showToastError("Bạn đang có một cuộc gọi khác.");
+            return;
+        }
+        voiceCallTargetSid = targetSid;
+        voiceCallState = 'calling';
+        
+        showCallUI('calling', targetUser.user_name || 'User', targetSid);
+        startOutgoingRingtone();
+        
+        socket.emit('collab_call_user', { target_sid: targetSid });
+    }
+
+    function showAvatarContextMenu(e, sid, user) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        // Remove existing context menu if any
+        const existingMenu = document.getElementById('collabAvatarContextMenu');
+        if (existingMenu) existingMenu.remove();
+
+        const menu = document.createElement('div');
+        menu.id = 'collabAvatarContextMenu';
+        menu.className = 'fixed bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-2xl py-1.5 w-36 text-white z-[99999] text-[11px] flex flex-col transition-all duration-150 transform scale-95 opacity-0';
+        menu.style.zIndex = '99999';
+        
+        // Calculate safe position
+        let x = e.clientX;
+        let y = e.clientY;
+        const menuWidth = 144; // w-36 = 144px
+        const menuHeight = 76; // approximate height for 2 items
+
+        if (x + menuWidth > window.innerWidth) {
+            x = window.innerWidth - menuWidth - 8;
+        }
+        if (y + menuHeight > window.innerHeight) {
+            y = window.innerHeight - menuHeight - 8;
+        }
+
+        menu.style.left = `${x}px`;
+        menu.style.top = `${y}px`;
+
+        menu.innerHTML = `
+            <button id="ctxMenuChatBtn" class="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors flex items-center gap-2 text-slate-300 hover:text-white font-medium">
+                <i class="fa-regular fa-comment text-blue-400 w-4 text-center"></i> Nhắn tin
+            </button>
+            <button id="ctxMenuCallBtn" class="w-full text-left px-3 py-2 hover:bg-slate-800 transition-colors flex items-center gap-2 text-slate-300 hover:text-white font-medium">
+                <i class="fa-solid fa-phone text-emerald-400 w-4 text-center"></i> Gọi thoại
+            </button>
+        `;
+
+        document.body.appendChild(menu);
+
+        // Force reflow and animate in
+        menu.getBoundingClientRect();
+        menu.classList.remove('scale-95', 'opacity-0');
+        menu.classList.add('scale-100', 'opacity-100');
+
+        menu.querySelector('#ctxMenuChatBtn').onclick = () => {
+            openChatWithUser(sid, user);
+            menu.remove();
+        };
+
+        menu.querySelector('#ctxMenuCallBtn').onclick = () => {
+            triggerVoiceCall(sid, user);
+            menu.remove();
+        };
+
+        // Close menu on clicking outside
+        const closeMenu = (event) => {
+            if (!menu.contains(event.target)) {
+                menu.remove();
+                document.removeEventListener('click', closeMenu);
+                document.removeEventListener('contextmenu', closeMenu);
+            }
+        };
+
+        setTimeout(() => {
+            document.addEventListener('click', closeMenu);
+            document.addEventListener('contextmenu', closeMenu);
+        }, 50);
+    }
+
     // 5. Update Online Users Avatar List in Header
     function updateUsersList() {
         const listEl = document.getElementById('collabUsersList');
@@ -769,24 +1469,29 @@
             avatar.className = `w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm border select-none transition-all relative group cursor-pointer`;
             avatar.style.backgroundColor = user.color;
 
-            // Click to navigate to user's active image
+            // Left click behavior: call user if same image, else navigate to image
             avatar.addEventListener('click', () => {
-                if (user.image_id) {
-                    if (typeof currentWorkspace !== 'undefined' && currentWorkspace.allImages) {
-                        const targetImg = currentWorkspace.allImages.find(img => String(img.id) === String(user.image_id));
-                        if (targetImg) {
-                            currentWorkspace.selectImage(targetImg);
-                        } else {
-                            console.warn('[Collab] Target image not found in workspace list:', user.image_id);
+                if (isSameImage) {
+                    triggerVoiceCall(sid, user);
+                } else {
+                    if (user.image_id) {
+                        if (typeof currentWorkspace !== 'undefined' && currentWorkspace.allImages) {
+                            const targetImg = currentWorkspace.allImages.find(img => String(img.id) === String(user.image_id));
+                            if (targetImg) {
+                                currentWorkspace.selectImage(targetImg);
+                            } else {
+                                console.warn('[Collab] Target image not found in workspace list:', user.image_id);
+                            }
                         }
+                    } else {
+                        showToastInfo(`${user.user_name} đang ở phòng chờ.`);
                     }
                 }
             });
 
-            // Right click to show chat modal to send message
+            // Right click to show custom context menu
             avatar.addEventListener('contextmenu', (e) => {
-                e.preventDefault();
-                openChatWithUser(sid, user);
+                showAvatarContextMenu(e, sid, user);
             });
 
             if (isSameImage) {
@@ -807,8 +1512,8 @@
             tooltip.style.transform = 'translateX(-50%)';
 
             const statusText = isSameImage
-                ? '<span class="text-green-400 font-medium">Đang cùng xem ảnh này</span>'
-                : (user.image_id ? '<span class="text-gray-400">Đang xem ảnh khác</span>' : '<span class="text-gray-500">Đang ở phòng chờ</span>');
+                ? '<span class="text-green-400 font-medium"><i class="fa-solid fa-phone mr-1"></i> Nhấp để gọi thoại</span>'
+                : (user.image_id ? '<span class="text-gray-400">Đang xem ảnh khác (Nhấp để xem cùng)</span>' : '<span class="text-gray-500">Đang ở phòng chờ</span>');
 
             tooltip.innerHTML = `
                 <div class="font-bold">${user.user_name}</div>

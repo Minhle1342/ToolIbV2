@@ -251,6 +251,157 @@ def handle_send_direct_message(data):
         }, room=target_sid)
 
 
+@socketio.on('collab_call_user')
+def handle_collab_call_user(data):
+    from flask import request
+    target_sid = data.get('target_sid')
+    sender_sid = request.sid
+    sender_info = active_users.get(sender_sid)
+    if sender_info and target_sid:
+        emit('collab_incoming_call', {
+            'caller_sid': sender_sid,
+            'caller_name': sender_info.get('user_name', 'Someone')
+        }, room=target_sid)
+
+
+@socketio.on('collab_cancel_call')
+def handle_collab_cancel_call(data):
+    target_sid = data.get('target_sid')
+    if target_sid:
+        emit('collab_call_cancelled', room=target_sid)
+
+
+@socketio.on('collab_accept_call')
+def handle_collab_accept_call(data):
+    from flask import request
+    target_sid = data.get('target_sid')
+    sender_sid = request.sid
+    if target_sid:
+        emit('collab_call_accepted', {
+            'target_sid': sender_sid
+        }, room=target_sid)
+
+
+@socketio.on('collab_reject_call')
+def handle_collab_reject_call(data):
+    from flask import request
+    target_sid = data.get('target_sid')
+    sender_sid = request.sid
+    if target_sid:
+        emit('collab_call_rejected', {
+            'target_sid': sender_sid
+        }, room=target_sid)
+
+
+@socketio.on('collab_wertc_signal')
+def handle_collab_wertc_signal(data):
+    from flask import request
+    target_sid = data.get('target_sid')
+    signal = data.get('signal')
+    sender_sid = request.sid
+    if target_sid and signal:
+        emit('collab_wertc_signal', {
+            'sender_sid': sender_sid,
+            'signal': signal
+        }, room=target_sid)
+
+
+@socketio.on('collab_hangup')
+def handle_collab_hangup(data):
+    target_sid = data.get('target_sid')
+    if target_sid:
+        emit('collab_call_hungup', room=target_sid)
+
+
+
+def check_and_generate_certificates():
+    import os
+    import socket
+    import ipaddress
+    import datetime
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    key_path = os.path.join(basedir, "key.pem")
+    cert_path = os.path.join(basedir, "cert.pem")
+    
+    if os.path.exists(key_path) and os.path.exists(cert_path):
+        return key_path, cert_path
+
+    # Helper to get local IP
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('10.254.254.254', 1))
+        local_ip = s.getsockname()[0]
+    except Exception:
+        local_ip = '127.0.0.1'
+    finally:
+        s.close()
+
+    print(f"[SSL] Generating self-signed certificate for host IP: {local_ip}...")
+    # Generate private key
+    key = rsa.generate_private_key(
+        public_exponent=65537,
+        key_size=2048,
+    )
+    
+    # Subject & Issuer
+    subject = issuer = x509.Name([
+        x509.NameAttribute(NameOID.COUNTRY_NAME, "VN"),
+        x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Hanoi"),
+        x509.NameAttribute(NameOID.LOCALITY_NAME, "Hanoi"),
+        x509.NameAttribute(NameOID.ORGANIZATION_NAME, "YOLO Labeling Hub"),
+        x509.NameAttribute(NameOID.COMMON_NAME, local_ip),
+    ])
+    
+    # Set up SANs (Subject Alternative Names)
+    sans = [
+        x509.DNSName("localhost"),
+        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+    ]
+    
+    if local_ip != "127.0.0.1":
+        try:
+            sans.append(x509.IPAddress(ipaddress.IPv4Address(local_ip)))
+        except Exception:
+            pass
+
+    cert = x509.CertificateBuilder().subject_name(
+        subject
+    ).issuer_name(
+        issuer
+    ).public_key(
+        key.public_key()
+    ).serial_number(
+        x509.random_serial_number()
+    ).not_valid_before(
+        datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=1)
+    ).not_valid_after(
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=3650)
+    ).add_extension(
+        x509.SubjectAlternativeName(sans),
+        critical=False,
+    ).sign(key, hashes.SHA256())
+    
+    # Write files
+    with open(key_path, "wb") as f:
+        f.write(key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
+        
+    with open(cert_path, "wb") as f:
+        f.write(cert.public_bytes(serialization.Encoding.PEM))
+        
+    print(f"[SSL] Certificate generated successfully: cert.pem, key.pem")
+    return key_path, cert_path
+
+
 if __name__ == '__main__':
     app = create_app()
     with app.app_context():
@@ -264,5 +415,8 @@ if __name__ == '__main__':
                 conn.commit()
         except Exception:
             pass # Column already exists
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000)
+            
+    # Check/generate certs and run Socket.IO over HTTPS
+    key_path, cert_path = check_and_generate_certificates()
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000, keyfile=key_path, certfile=cert_path)
 
