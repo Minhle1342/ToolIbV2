@@ -75,7 +75,17 @@ class Workspace {
                 return;
             }
 
-            if (e.key === 'Delete' || e.key === 'Backspace' || key === 'q') {
+            if (key === 'q') {
+                if (typeof editor !== 'undefined' && editor.focusClassId !== null) {
+                    editor.setFocusClass(editor.focusClassId);
+                    document.querySelectorAll('.class-item').forEach(el => {
+                        el.classList.remove('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
+                        el.classList.add('bg-surface', 'text-content-muted', 'border-border');
+                    });
+                } else {
+                    editor.deleteSelected();
+                }
+            } else if (e.key === 'Delete' || e.key === 'Backspace') {
                 editor.deleteSelected();
             }
             if (key === 's' && (e.ctrlKey || e.metaKey)) {
@@ -2125,6 +2135,20 @@ files.download(onnx_path)
             }
             if (obj.__labelText) {
                 obj.__labelText.set('text', className);
+            }
+            
+            if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                window.collabSocket.emit('box_updated', {
+                    image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                    collabId: obj.collabId,
+                    class_id: classIdx,
+                    left: obj.left,
+                    top: obj.top,
+                    scaleX: obj.scaleX,
+                    scaleY: obj.scaleY,
+                    width: obj.width,
+                    height: obj.height
+                });
             }
         });
 

@@ -644,6 +644,32 @@ class Editor {
                 return;
             }
 
+            // Q key to clear focus and reset view
+            if (e.code === 'KeyQ' || e.key === 'q' || e.key === 'Q') {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+                    return; // Ignore if typing in input/textarea
+                }
+
+                const activeObj = this.canvas.getActiveObject();
+                if (activeObj) {
+                    this.canvas.discardActiveObject();
+                    
+                    if (!this.showBoxes) {
+                        const rects = this.canvas.getObjects('rect');
+                        rects.forEach(r => r.set({ visible: false, evented: false, selectable: false }));
+                    }
+
+                    if (typeof window.updateMyActiveBox === 'function') {
+                        window.updateMyActiveBox(null);
+                    }
+                }
+                
+                // Reset zoom and pan to initial display
+                this.resetView();
+                this.canvas.requestRenderAll();
+                return;
+            }
+
             // Arrow key navigation between bounding boxes
             if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
                 // Ignore if typing in input/textarea
@@ -1711,6 +1737,20 @@ class Editor {
 
                     // Add confidence tooltip/label if needed
                     obj.label = `${cls.name} (${(pred.confidence * 100).toFixed(1)}%)`;
+                    
+                    if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                        window.collabSocket.emit('box_updated', {
+                            image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                            collabId: obj.collabId,
+                            class_id: pred.class_id,
+                            left: obj.left,
+                            top: obj.top,
+                            scaleX: obj.scaleX,
+                            scaleY: obj.scaleY,
+                            width: obj.width,
+                            height: obj.height
+                        });
+                    }
                 }
                 changedCount++;
             }
@@ -1923,6 +1963,20 @@ class Editor {
                         stroke: cls.color,
                         classId: id
                     });
+                    
+                    if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                        window.collabSocket.emit('box_updated', {
+                            image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                            collabId: obj.collabId,
+                            class_id: id,
+                            left: obj.left,
+                            top: obj.top,
+                            scaleX: obj.scaleX,
+                            scaleY: obj.scaleY,
+                            width: obj.width,
+                            height: obj.height
+                        });
+                    }
                 }
             });
 

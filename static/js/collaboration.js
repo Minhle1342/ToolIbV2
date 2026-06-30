@@ -440,13 +440,25 @@
                 const rects = editor.canvas.getObjects('rect');
                 const box = rects.find(r => r.collabId === data.collabId);
                 if (box) {
+                    if (data.class_id !== undefined && data.class_id !== box.classId) {
+                        box.classId = data.class_id;
+                        const cls = editor.classes.find(c => c.id === data.class_id) || { color: 'white', name: 'Unknown' };
+                        
+                        if (box.__labelTag) {
+                            box.__labelTag.set('fill', cls.color);
+                        }
+                        if (box.__labelText) {
+                            box.__labelText.set('text', cls.name);
+                        }
+                    }
+
                     box.set({
-                        left: data.left,
-                        top: data.top,
-                        scaleX: data.scaleX,
-                        scaleY: data.scaleY,
-                        width: data.width,
-                        height: data.height
+                        left: data.left !== undefined ? data.left : box.left,
+                        top: data.top !== undefined ? data.top : box.top,
+                        scaleX: data.scaleX !== undefined ? data.scaleX : box.scaleX,
+                        scaleY: data.scaleY !== undefined ? data.scaleY : box.scaleY,
+                        width: data.width !== undefined ? data.width : box.width,
+                        height: data.height !== undefined ? data.height : box.height
                     });
 
                     // Temporarily lock/highlight it to show it is being edited
