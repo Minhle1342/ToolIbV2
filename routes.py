@@ -4,6 +4,8 @@ from flask import Blueprint, jsonify, request, current_app
 import flask
 from models import db, Project, View, Image, AIModel, Tag
 import os
+import shutil
+from datetime import datetime
 import utils
 from inference import YOLOInference, ClassificationInference
 
@@ -114,6 +116,8 @@ def delete_project(project_id):
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
+
+
 
 @api_bp.route('/images/<int:image_id>', methods=['DELETE'])
 def delete_image(image_id):
@@ -1416,3 +1420,88 @@ def bulk_assign_tags(project_id):
                     
     db.session.commit()
     return jsonify({'message': f'Bulk tags updated for {len(images)} images', 'success': True})
+
+# --- Backup ---
+@api_bp.route('/projects/<int:project_id>/backup', methods=['POST'])
+def backup_project(project_id):
+    import shutil, zipfile
+    from datetime import datetime
+    project = Project.query.get_or_404(project_id)
+    backup_dir = os.path.join(os.getcwd(), 'project_backup')
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    backup_filename = f"backup_{project.id}_{project.name}_{timestamp}.zip"
+    backup_path = os.path.join(backup_dir, backup_filename)
+    
+    try:
+        if os.path.exists(project.root_path):
+            with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(project.root_path):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, project.root_path)
+                        zipf.write(file_path, arcname)
+            return jsonify({'message': 'Backup successful', 'backup_file': backup_filename}), 200
+        else:
+            return jsonify({'error': 'Project folder not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/projects/<int:project_id>/backups', methods=['GET'])
+def get_project_backups(project_id):
+    project = Project.query.get_or_404(project_id)
+    backup_dir = os.path.join(os.getcwd(), 'project_backup')
+    
+    if not os.path.exists(backup_dir):
+        return jsonify([])
+        
+    backups = []
+    prefix = f"backup_{project.id}_"
+    for file in os.listdir(backup_dir):
+        if file.startswith(prefix) and file.endswith('.zip'):
+            file_path = os.path.join(backup_dir, file)
+            size = os.path.getsize(file_path)
+            created_at = os.path.getctime(file_path)
+            backups.append({
+                'filename': file,
+                'size': size,
+                'created_at': created_at
+            })
+            
+    # Sort by created_at descending
+    backups.sort(key=lambda x: x['created_at'], reverse=True)
+    return jsonify(backups)
+
+@api_bp.route('/projects/<int:project_id>/restore', methods=['POST'])
+def restore_project(project_id):
+    import shutil, zipfile
+    project = Project.query.get_or_404(project_id)
+    data = request.json
+    filename = data.get('filename')
+    
+    if not filename:
+        return jsonify({'error': 'Filename is required'}), 400
+        
+    backup_path = os.path.join(os.getcwd(), 'project_backup', filename)
+    
+    if not os.path.exists(backup_path):
+        return jsonify({'error': 'Backup file not found'}), 404
+        
+    try:
+        if os.path.exists(project.root_path):
+            shutil.rmtree(project.root_path)
+        os.makedirs(project.root_path, exist_ok=True)
+        
+        with zipfile.ZipFile(backup_path, 'r') as zipf:
+            zipf.extractall(project.root_path)
+            
+        try:
+            utils.scan_and_sync_images(project)
+            utils.sync_dataset_tags(project)
+        except Exception as scan_err:
+            print(f"Error during auto-scanning in restore: {scan_err}")
+            
+        return jsonify({'message': 'Restore successful'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

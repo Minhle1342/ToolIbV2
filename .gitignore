@@ -8,3 +8,4 @@ yolo_labeling.db
 classification_crops/
 cert.pem
 key.pem
+project_backup/

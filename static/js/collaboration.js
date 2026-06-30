@@ -58,32 +58,32 @@
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         incomingRingContext = new AudioContext();
-        
+
         function playRingCycle() {
             if (!incomingRingContext || incomingRingContext.state === 'closed') return;
             const now = incomingRingContext.currentTime;
             const osc1 = incomingRingContext.createOscillator();
             const osc2 = incomingRingContext.createOscillator();
             const gain = incomingRingContext.createGain();
-            
+
             osc1.frequency.setValueAtTime(440, now);
             osc2.frequency.setValueAtTime(554.37, now);
-            
+
             gain.gain.setValueAtTime(0, now);
             gain.gain.linearRampToValueAtTime(0.1, now + 0.1);
             gain.gain.linearRampToValueAtTime(0.1, now + 0.8);
             gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
-            
+
             osc1.connect(gain);
             osc2.connect(gain);
             gain.connect(incomingRingContext.destination);
-            
+
             osc1.start(now);
             osc2.start(now);
             osc1.stop(now + 1.5);
             osc2.stop(now + 1.5);
         }
-        
+
         playRingCycle();
         incomingRingInterval = setInterval(playRingCycle, 2000);
     }
@@ -94,7 +94,7 @@
             incomingRingInterval = null;
         }
         if (incomingRingContext) {
-            incomingRingContext.close().catch(() => {});
+            incomingRingContext.close().catch(() => { });
             incomingRingContext = null;
         }
     }
@@ -104,32 +104,32 @@
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
         outgoingRingContext = new AudioContext();
-        
+
         function playRingback() {
             if (!outgoingRingContext || outgoingRingContext.state === 'closed') return;
             const now = outgoingRingContext.currentTime;
             const osc1 = outgoingRingContext.createOscillator();
             const osc2 = outgoingRingContext.createOscillator();
             const gain = outgoingRingContext.createGain();
-            
+
             osc1.frequency.setValueAtTime(440, now);
             osc2.frequency.setValueAtTime(480, now);
-            
+
             gain.gain.setValueAtTime(0, now);
             gain.gain.linearRampToValueAtTime(0.05, now + 0.1);
             gain.gain.linearRampToValueAtTime(0.05, now + 1.2);
             gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.5);
-            
+
             osc1.connect(gain);
             osc2.connect(gain);
             gain.connect(outgoingRingContext.destination);
-            
+
             osc1.start(now);
             osc2.start(now);
             osc1.stop(now + 1.6);
             osc2.stop(now + 1.6);
         }
-        
+
         playRingback();
         outgoingRingInterval = setInterval(playRingback, 3000);
     }
@@ -140,7 +140,7 @@
             outgoingRingInterval = null;
         }
         if (outgoingRingContext) {
-            outgoingRingContext.close().catch(() => {});
+            outgoingRingContext.close().catch(() => { });
             outgoingRingContext = null;
         }
     }
@@ -212,7 +212,7 @@
 
             // Auto-close context after exactly 2 seconds + some buffer
             setTimeout(() => {
-                ctx.close().catch(() => {});
+                ctx.close().catch(() => { });
             }, 2100);
         } catch (e) {
             console.warn('[Collab] Audio notification error:', e);
@@ -236,7 +236,7 @@
         stopCallTimer();
         stopIncomingRingtone();
         stopOutgoingRingtone();
-        
+
         if (localStream) {
             localStream.getTracks().forEach(track => track.stop());
             localStream = null;
@@ -258,18 +258,18 @@
     async function startWebRTCCall(targetSid) {
         try {
             localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
+
             peerConnection = new RTCPeerConnection(rtcConfig);
-            
+
             localStream.getTracks().forEach(track => {
                 peerConnection.addTrack(track, localStream);
             });
-            
+
             peerConnection.ontrack = (event) => {
                 console.log('[Collab] Received remote track');
                 playRemoteStream(event.streams[0]);
             };
-            
+
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate && socket && socket.connected) {
                     socket.emit('collab_wertc_signal', {
@@ -278,15 +278,15 @@
                     });
                 }
             };
-            
+
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            
+
             socket.emit('collab_wertc_signal', {
                 target_sid: targetSid,
                 signal: { type: 'offer', sdp: offer.sdp }
             });
-            
+
         } catch (err) {
             console.error('[Collab] WebRTC start call error:', err);
             showToastError("Không thể truy cập microphone.");
@@ -298,20 +298,20 @@
     async function acceptWebRTCCall(targetSid) {
         try {
             stopIncomingRingtone();
-            
+
             localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            
+
             peerConnection = new RTCPeerConnection(rtcConfig);
-            
+
             localStream.getTracks().forEach(track => {
                 peerConnection.addTrack(track, localStream);
             });
-            
+
             peerConnection.ontrack = (event) => {
                 console.log('[Collab] Received remote track');
                 playRemoteStream(event.streams[0]);
             };
-            
+
             peerConnection.onicecandidate = (event) => {
                 if (event.candidate && socket && socket.connected) {
                     socket.emit('collab_wertc_signal', {
@@ -320,11 +320,11 @@
                     });
                 }
             };
-            
+
             socket.emit('collab_accept_call', { target_sid: targetSid });
-            
+
             showCallUI('connected', remoteUsers[targetSid]?.user_name || 'User', targetSid);
-            
+
         } catch (err) {
             console.error('[Collab] WebRTC accept call error:', err);
             showToastError("Không thể truy cập microphone.");
@@ -384,11 +384,11 @@
 
     function ensureCallUI() {
         if (document.getElementById('collabCallWidget')) return;
-        
+
         const widget = document.createElement('div');
         widget.id = 'collabCallWidget';
         widget.className = 'fixed bottom-6 right-6 z-[9999] hidden transition-all duration-300 transform scale-95 opacity-0';
-        
+
         widget.innerHTML = `
             <div class="bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-2xl shadow-2xl p-5 w-80 text-white flex flex-col items-center space-y-4">
                 <div class="w-full flex items-center justify-between">
@@ -477,7 +477,7 @@
         const avatarEl = document.getElementById('collabCallAvatar');
         const statusTextEl = document.getElementById('collabCallStatusText');
         const statusDotEl = document.getElementById('collabCallStatusDot');
-        
+
         const acceptBtn = document.getElementById('collabCallAcceptBtn');
         const rejectBtn = document.getElementById('collabCallRejectBtn');
         const hangupBtn = document.getElementById('collabCallHangupBtn');
@@ -485,7 +485,7 @@
         const timerEl = document.getElementById('collabActiveCallTimer');
 
         nameEl.textContent = name;
-        
+
         const remoteUser = remoteUsers[sid] || {};
         const initials = name.slice(0, 2).toUpperCase();
         avatarEl.textContent = initials;
@@ -524,7 +524,7 @@
             rejectBtn.classList.add('hidden');
             hangupBtn.classList.remove('hidden');
             muteBtn.classList.remove('hidden');
-            
+
             startCallTimer();
         }
     }
@@ -591,6 +591,10 @@
                               rows="3" 
                               class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-white placeholder-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none transition-all"
                               placeholder="Nhập tin nhắn..."></textarea>
+                    <div class="flex items-center gap-2 text-xs text-slate-300">
+                        <input type="checkbox" id="collabChatSendAllCheck" class="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-blue-500 focus:ring-offset-slate-900 cursor-pointer">
+                        <label for="collabChatSendAllCheck" class="cursor-pointer select-none">Gửi tin nhắn cho tất cả</label>
+                    </div>
                     <div class="flex justify-end gap-2 text-xs">
                         <button id="collabChatCancelBtn" class="px-5 py-1.5 bg-slate-850 hover:bg-slate-800 text-slate-300 font-semibold rounded-lg border border-slate-800 transition-all">Hủy</button>
                         <button id="collabChatSendBtn" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg transition-all flex items-center gap-1.5 shadow-lg shadow-blue-500/10">
@@ -645,15 +649,28 @@
         const sendMessage = () => {
             const input = document.getElementById('collabChatMessageInput');
             const message = input.value.trim();
-            if (!message || !activeChatSid) return;
+            const sendAllCheck = document.getElementById('collabChatSendAllCheck');
+            const isSendAll = sendAllCheck && sendAllCheck.checked;
+
+            if (!message) return;
+            if (!isSendAll && !activeChatSid) return;
 
             if (socket && socket.connected) {
-                socket.emit('send_direct_message', {
-                    target_sid: activeChatSid,
-                    message: message
-                });
-
-                showToastSent(activeChatUserName);
+                if (isSendAll) {
+                    for (const sid in remoteUsers) {
+                        socket.emit('send_direct_message', {
+                            target_sid: sid,
+                            message: message
+                        });
+                    }
+                    showToastSent('Tất cả mọi người');
+                } else {
+                    socket.emit('send_direct_message', {
+                        target_sid: activeChatSid,
+                        message: message
+                    });
+                    showToastSent(activeChatUserName);
+                }
             }
             closeChat();
         };
@@ -665,6 +682,18 @@
                 sendMessage();
             }
         };
+
+        const sendAllCheck = document.getElementById('collabChatSendAllCheck');
+        if (sendAllCheck) {
+            sendAllCheck.onchange = (e) => {
+                const targetNameSpan = document.getElementById('collabChatTargetName');
+                if (e.target.checked) {
+                    targetNameSpan.textContent = 'Tất cả mọi người';
+                } else {
+                    targetNameSpan.textContent = activeChatUserName || 'User';
+                }
+            };
+        }
 
         // Bind events for View Message Modal
         const closeViewMessage = () => {
@@ -712,6 +741,11 @@
         activeChatUserName = user.user_name || 'User';
         document.getElementById('collabChatTargetName').textContent = activeChatUserName;
         document.getElementById('collabChatMessageInput').value = '';
+
+        const sendAllCheck = document.getElementById('collabChatSendAllCheck');
+        if (sendAllCheck) {
+            sendAllCheck.checked = false;
+        }
 
         const chatModal = document.getElementById('collabChatModal');
         chatModal.classList.remove('hidden');
@@ -830,6 +864,25 @@
         // Initialize Chat UI
         ensureChatUI();
         ensureCallUI();
+
+        // Initialize Users Modal UI
+        const btnCollabUsersModal = document.getElementById('btnCollabUsersModal');
+        const collabUsersModalWrapper = document.getElementById('collabUsersModalWrapper');
+        const closeCollabUsersModal = document.getElementById('closeCollabUsersModal');
+
+        if (btnCollabUsersModal && collabUsersModalWrapper && closeCollabUsersModal) {
+            btnCollabUsersModal.addEventListener('click', () => {
+                collabUsersModalWrapper.classList.remove('hidden');
+            });
+            closeCollabUsersModal.addEventListener('click', () => {
+                collabUsersModalWrapper.classList.add('hidden');
+            });
+            collabUsersModalWrapper.addEventListener('click', (e) => {
+                if (e.target === collabUsersModalWrapper) {
+                    collabUsersModalWrapper.classList.add('hidden');
+                }
+            });
+        }
     }
 
     // 3. Connect Socket.IO
@@ -872,7 +925,7 @@
             clearAllCursors();
             remoteUsers = {};
             updateUsersList();
-            
+
             if (voiceCallState !== 'idle') {
                 cleanupWebRTC();
                 hideCallUI();
@@ -962,7 +1015,7 @@
                     if (data.class_id !== undefined && data.class_id !== box.classId) {
                         box.classId = data.class_id;
                         const cls = editor.classes.find(c => c.id === data.class_id) || { color: 'white', name: 'Unknown' };
-                        
+
                         if (box.__labelTag) {
                             box.__labelTag.set('fill', cls.color);
                         }
@@ -1137,7 +1190,7 @@
             }
             voiceCallTargetSid = data.caller_sid;
             voiceCallState = 'ringing';
-            
+
             showCallUI('ringing', data.caller_name, data.caller_sid);
             startIncomingRingtone();
         });
@@ -1163,22 +1216,22 @@
         socket.on('collab_wertc_signal', async (data) => {
             const { sender_sid, signal } = data;
             if (sender_sid !== voiceCallTargetSid) return;
-            
+
             try {
                 if (signal.type === 'offer') {
                     if (!peerConnection) {
                         peerConnection = new RTCPeerConnection(rtcConfig);
-                        
+
                         localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                         localStream.getTracks().forEach(track => {
                             peerConnection.addTrack(track, localStream);
                         });
-                        
+
                         peerConnection.ontrack = (event) => {
                             console.log('[Collab] Received remote track');
                             playRemoteStream(event.streams[0]);
                         };
-                        
+
                         peerConnection.onicecandidate = (event) => {
                             if (event.candidate && socket && socket.connected) {
                                 socket.emit('collab_wertc_signal', {
@@ -1188,7 +1241,7 @@
                             }
                         };
                     }
-                    
+
                     await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: signal.sdp }));
                     const answer = await peerConnection.createAnswer();
                     await peerConnection.setLocalDescription(answer);
@@ -1196,7 +1249,7 @@
                         target_sid: sender_sid,
                         signal: { type: 'answer', sdp: answer.sdp }
                     });
-                    
+
                     while (remoteCandidateQueue.length > 0) {
                         const cand = remoteCandidateQueue.shift();
                         await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
@@ -1235,7 +1288,7 @@
                     if (data.classes) {
                         img.classes = data.classes;
                     }
-                    
+
                     const el = document.getElementById(`img-${data.image_id}`);
                     if (el) {
                         const iconContainer = el.querySelector('.flex.items-center.gap-2');
@@ -1374,10 +1427,10 @@
         }
         voiceCallTargetSid = targetSid;
         voiceCallState = 'calling';
-        
+
         showCallUI('calling', targetUser.user_name || 'User', targetSid);
         startOutgoingRingtone();
-        
+
         socket.emit('collab_call_user', { target_sid: targetSid });
     }
 
@@ -1393,7 +1446,7 @@
         menu.id = 'collabAvatarContextMenu';
         menu.className = 'fixed bg-slate-900/95 backdrop-blur-md border border-slate-700/50 rounded-xl shadow-2xl py-1.5 w-36 text-white z-[99999] text-[11px] flex flex-col transition-all duration-150 transform scale-95 opacity-0';
         menu.style.zIndex = '99999';
-        
+
         // Calculate safe position
         let x = e.clientX;
         let y = e.clientY;
@@ -1451,34 +1504,105 @@
         }, 50);
     }
 
-    // 5. Update Online Users Avatar List in Header
+    // 5. Update Online Users Avatar List in Modal
     function updateUsersList() {
         const listEl = document.getElementById('collabUsersList');
+        const emptyState = document.getElementById('collabUsersEmpty');
+        const countBadge = document.getElementById('collabUsersCount');
+        const modalCount = document.getElementById('collabUsersModalCount');
+
         if (!listEl) return;
 
         listEl.innerHTML = '';
 
         const currentImageId = (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null;
 
+        const userIds = Object.keys(remoteUsers);
+        const userCount = userIds.length;
+
+        // Update counts
+        if (countBadge) {
+            countBadge.textContent = userCount;
+            if (userCount > 0) {
+                countBadge.classList.remove('hidden');
+            } else {
+                countBadge.classList.add('hidden');
+            }
+        }
+        if (modalCount) modalCount.textContent = userCount;
+
+        // Update empty state
+        if (emptyState) {
+            if (userCount === 0) {
+                emptyState.classList.remove('hidden');
+            } else {
+                emptyState.classList.add('hidden');
+            }
+        }
+
         for (const [sid, user] of Object.entries(remoteUsers)) {
             const initials = user.user_name ? user.user_name.slice(0, 2).toUpperCase() : '??';
-            const avatar = document.createElement('div');
 
+            const listItem = document.createElement('div');
+            listItem.className = 'flex items-center gap-3 p-2 hover:bg-panel rounded-lg cursor-pointer transition-colors group';
+
+            const avatar = document.createElement('div');
             const isSameImage = user.image_id === currentImageId && currentImageId !== null;
 
-            avatar.className = `w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shadow-sm border select-none transition-all relative group cursor-pointer`;
+            avatar.className = `w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-[11px] font-bold text-white shadow-sm border select-none transition-all relative`;
             avatar.style.backgroundColor = user.color;
 
+            if (isSameImage) {
+                avatar.style.borderColor = user.color;
+                avatar.classList.add('ring-2', 'ring-offset-1', 'ring-offset-surface');
+                avatar.style.setProperty('--tw-ring-color', user.color);
+            } else {
+                avatar.style.borderColor = 'rgba(255,255,255,0.2)';
+            }
+            avatar.textContent = initials;
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = 'flex flex-col flex-grow min-w-0';
+
+            const nameEl = document.createElement('div');
+            nameEl.className = 'text-sm font-semibold text-content truncate';
+            nameEl.textContent = user.user_name;
+
+            const statusEl = document.createElement('div');
+            statusEl.className = 'text-xs truncate ' + (isSameImage ? 'text-green-400 font-medium' : 'text-content-muted');
+
+            if (isSameImage) {
+                statusEl.innerHTML = '<i class="fa-solid fa-location-dot mr-1"></i>Đang xem cùng ảnh';
+            } else if (user.image_id) {
+                statusEl.textContent = 'Đang xem ảnh khác';
+            } else {
+                statusEl.textContent = 'Đang ở phòng chờ';
+            }
+
+            infoDiv.appendChild(nameEl);
+            infoDiv.appendChild(statusEl);
+
+            const actionIcon = document.createElement('div');
+            actionIcon.className = 'text-content-muted opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0';
+            actionIcon.innerHTML = isSameImage ? '<i class="fa-solid fa-phone"></i>' : '<i class="fa-solid fa-image"></i>';
+
+            listItem.appendChild(avatar);
+            listItem.appendChild(infoDiv);
+            listItem.appendChild(actionIcon);
+
             // Left click behavior: call user if same image, else navigate to image
-            avatar.addEventListener('click', () => {
+            listItem.addEventListener('click', () => {
                 if (isSameImage) {
                     triggerVoiceCall(sid, user);
+                    // Hide modal after action
+                    document.getElementById('collabUsersModalWrapper')?.classList.add('hidden');
                 } else {
                     if (user.image_id) {
                         if (typeof currentWorkspace !== 'undefined' && currentWorkspace.allImages) {
                             const targetImg = currentWorkspace.allImages.find(img => String(img.id) === String(user.image_id));
                             if (targetImg) {
                                 currentWorkspace.selectImage(targetImg);
+                                document.getElementById('collabUsersModalWrapper')?.classList.add('hidden');
                             } else {
                                 console.warn('[Collab] Target image not found in workspace list:', user.image_id);
                             }
@@ -1490,37 +1614,11 @@
             });
 
             // Right click to show custom context menu
-            avatar.addEventListener('contextmenu', (e) => {
+            listItem.addEventListener('contextmenu', (e) => {
                 showAvatarContextMenu(e, sid, user);
             });
 
-            if (isSameImage) {
-                avatar.style.borderColor = user.color;
-                avatar.classList.add('ring-2', 'ring-offset-1', 'ring-offset-sidebar');
-                // Use inline style for custom ring color
-                avatar.style.setProperty('--tw-ring-color', user.color);
-            } else {
-                avatar.style.borderColor = 'rgba(255,255,255,0.2)';
-            }
-
-            avatar.textContent = initials;
-
-            // Simple HTML Tooltip
-            const tooltip = document.createElement('div');
-            tooltip.className = 'collab-tooltip absolute bottom-full mb-2 hidden group-hover:block bg-slate-900/95 text-white text-[10px] py-1.5 px-2.5 rounded shadow-lg whitespace-nowrap z-50 pointer-events-none border border-slate-700/50';
-            tooltip.style.left = '50%';
-            tooltip.style.transform = 'translateX(-50%)';
-
-            const statusText = isSameImage
-                ? '<span class="text-green-400 font-medium"><i class="fa-solid fa-phone mr-1"></i> Nhấp để gọi thoại</span>'
-                : (user.image_id ? '<span class="text-gray-400">Đang xem ảnh khác (Nhấp để xem cùng)</span>' : '<span class="text-gray-500">Đang ở phòng chờ</span>');
-
-            tooltip.innerHTML = `
-                <div class="font-bold">${user.user_name}</div>
-                <div>${statusText}</div>
-            `;
-            avatar.appendChild(tooltip);
-            listEl.appendChild(avatar);
+            listEl.appendChild(listItem);
         }
     }
 

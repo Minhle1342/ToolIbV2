@@ -404,8 +404,10 @@ class Editor {
                 const pointer = this.canvas.getPointer(opt.e);
                 
                 // Store drag start coordinates for sweep selection
-                this.sweepStartX = pointer.x;
-                this.sweepStartY = pointer.y;
+                if (this.currentMode === 'select') {
+                    this.sweepStartX = pointer.x;
+                    this.sweepStartY = pointer.y;
+                }
 
                 const rects = this.canvas.getObjects('rect');
                 let clickedRect = null;
@@ -581,6 +583,58 @@ class Editor {
                 this.isPanning = false;
                 // Restore selection if in select mode
                 this.canvas.selection = (this.currentMode === 'select');
+            } else if (this.isDrawing) {
+                this.isDrawing = false;
+                this.rect.setCoords();
+
+                // If too small, remove
+                if (this.rect.width < 5 || this.rect.height < 5) {
+                    this.canvas.remove(this.rect);
+                } else {
+                    if (this.currentMode === 'auto_label_region') {
+                        const region = {
+                            x: this.rect.left,
+                            y: this.rect.top,
+                            w: this.rect.width,
+                            h: this.rect.height
+                        };
+                        this.canvas.remove(this.rect);
+                        this.setMode('select');
+                        if (typeof currentWorkspace !== 'undefined' && currentWorkspace.autoLabelRegion) {
+                            currentWorkspace.autoLabelRegion(region);
+                        }
+                    } else {
+                        this.sortBoxesByArea();
+                        // Auto-switch to select mode
+                        this.setMode('select');
+                        // Auto-select the new box
+                        this.canvas.setActiveObject(this.rect);
+                        this.onSelect({ selected: [this.rect] });
+                        
+                        // Send real-time box creation
+                        if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
+                            const scaleX = this.rect.scaleX || 1;
+                            const scaleY = this.rect.scaleY || 1;
+                            const w = (this.rect.width * scaleX) / this.imageWidth;
+                            const h = (this.rect.height * scaleY) / this.imageHeight;
+                            const x = (this.rect.left + (this.rect.width * scaleX) / 2) / this.imageWidth;
+                            const y = (this.rect.top + (this.rect.height * scaleY) / 2) / this.imageHeight;
+
+                            window.collabSocket.emit('box_created', {
+                                image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
+                                box: {
+                                    collabId: this.rect.collabId,
+                                    class_id: this.rect.classId,
+                                    x: x,
+                                    y: y,
+                                    w: w,
+                                    h: h
+                                }
+                            });
+                        }
+                    }
+                }
+                this.rect = null;
             } else if (!this.showBoxes && this.sweepStartX !== undefined && this.sweepStartY !== undefined) {
                 const pointer = this.canvas.getPointer(opt.e);
                 const dx = Math.abs(pointer.x - this.sweepStartX);
@@ -634,58 +688,6 @@ class Editor {
                 
                 this.sweepStartX = undefined;
                 this.sweepStartY = undefined;
-            } else if (this.isDrawing) {
-                this.isDrawing = false;
-                this.rect.setCoords();
-
-                // If too small, remove
-                if (this.rect.width < 5 || this.rect.height < 5) {
-                    this.canvas.remove(this.rect);
-                } else {
-                    if (this.currentMode === 'auto_label_region') {
-                        const region = {
-                            x: this.rect.left,
-                            y: this.rect.top,
-                            w: this.rect.width,
-                            h: this.rect.height
-                        };
-                        this.canvas.remove(this.rect);
-                        this.setMode('select');
-                        if (typeof currentWorkspace !== 'undefined' && currentWorkspace.autoLabelRegion) {
-                            currentWorkspace.autoLabelRegion(region);
-                        }
-                    } else {
-                        this.sortBoxesByArea();
-                        // Auto-switch to select mode
-                        this.setMode('select');
-                        // Auto-select the new box
-                        this.canvas.setActiveObject(this.rect);
-                        this.onSelect({ selected: [this.rect] });
-                        
-                        // Send real-time box creation
-                        if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
-                            const scaleX = this.rect.scaleX || 1;
-                            const scaleY = this.rect.scaleY || 1;
-                            const w = (this.rect.width * scaleX) / this.imageWidth;
-                            const h = (this.rect.height * scaleY) / this.imageHeight;
-                            const x = (this.rect.left + (this.rect.width * scaleX) / 2) / this.imageWidth;
-                            const y = (this.rect.top + (this.rect.height * scaleY) / 2) / this.imageHeight;
-
-                            window.collabSocket.emit('box_created', {
-                                image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
-                                box: {
-                                    collabId: this.rect.collabId,
-                                    class_id: this.rect.classId,
-                                    x: x,
-                                    y: y,
-                                    w: w,
-                                    h: h
-                                }
-                            });
-                        }
-                    }
-                }
-                this.rect = null;
             }
         });
 
