@@ -818,6 +818,7 @@ class Workspace {
                     }
                 }
             }
+            editor.setMode('select');
         }
     }
 

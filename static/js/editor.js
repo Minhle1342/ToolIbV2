@@ -81,6 +81,59 @@ class Editor {
         }));
     }
 
+    getAbsoluteRect(rect) {
+        const matrix = rect.calcTransformMatrix();
+        const halfW = rect.width / 2;
+        const halfH = rect.height / 2;
+        const localCorners = [
+            { x: -halfW, y: -halfH },
+            { x: halfW, y: -halfH },
+            { x: halfW, y: halfH },
+            { x: -halfW, y: halfH }
+        ];
+        const canvasCorners = localCorners.map(p => fabric.util.transformPoint(p, matrix));
+        const xs = canvasCorners.map(p => p.x);
+        const ys = canvasCorners.map(p => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        return {
+            left: minX,
+            top: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        };
+    }
+
+    getViewportRect(rect) {
+        const matrix = rect.calcTransformMatrix();
+        const vpt = this.canvas.viewportTransform;
+        const combinedMatrix = fabric.util.multiplyTransformMatrices(vpt, matrix);
+        const halfW = rect.width / 2;
+        const halfH = rect.height / 2;
+        const localCorners = [
+            { x: -halfW, y: -halfH },
+            { x: halfW, y: -halfH },
+            { x: halfW, y: halfH },
+            { x: -halfW, y: halfH }
+        ];
+        const viewportCorners = localCorners.map(p => fabric.util.transformPoint(p, combinedMatrix));
+        const xs = viewportCorners.map(p => p.x);
+        const ys = viewportCorners.map(p => p.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+        return {
+            left: minX,
+            top: minY,
+            width: maxX - minX,
+            height: maxY - minY
+        };
+    }
+
+
     resizeCanvas() {
         const wrapper = document.getElementById('canvasWrapper');
         this.canvas.setWidth(wrapper.clientWidth);
@@ -917,7 +970,7 @@ class Editor {
                     
                     rects.forEach(rect => {
                         const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
-                        const bound = rect.getBoundingRect();
+                        const bound = this.getViewportRect(rect);
                         const cx = bound.left + bound.width / 2;
                         const cy = bound.top + bound.height / 2;
                         
@@ -967,7 +1020,7 @@ class Editor {
                 offCtx.fillStyle = '#fff';
                 const boxes = this.canvas.getObjects('rect').filter(o => o.classId === this.focusClassId);
                 boxes.forEach(box => {
-                    const bound = box.getBoundingRect();
+                    const bound = this.getViewportRect(box);
                     offCtx.fillRect(bound.left, bound.top, bound.width, bound.height);
                 });
 
@@ -1068,11 +1121,15 @@ class Editor {
                     Object.keys(rectsByClass).forEach(cid => {
                         const classId = parseInt(cid);
                         const list = rectsByClass[cid];
-                        list.sort((a, b) => a.top - b.top || a.left - b.left);
+                        list.sort((a, b) => {
+                            const absA = this.getAbsoluteRect(a);
+                            const absB = this.getAbsoluteRect(b);
+                            return absA.top - absB.top || absA.left - absB.left;
+                        });
                         const cls = this.classes.find(c => c.id === classId) || { color: '#00C2FF' };
 
                         list.forEach((rect, index) => {
-                            const bound = rect.getBoundingRect();
+                            const bound = this.getViewportRect(rect);
                             drawBadge((index + 1).toString(), cls.color, bound.left, bound.top);
                         });
                     });
@@ -1085,24 +1142,26 @@ class Editor {
                         for (let j = i + 1; j < n; j++) {
                             const r1 = rects[i];
                             const r2 = rects[j];
+                            const b1 = this.getAbsoluteRect(r1);
+                            const b2 = this.getAbsoluteRect(r2);
 
                             // Giao thoa trục X
-                            const minX1 = r1.left;
-                            const maxX1 = r1.left + r1.width;
-                            const minX2 = r2.left;
-                            const maxX2 = r2.left + r2.width;
+                            const minX1 = b1.left;
+                            const maxX1 = b1.left + b1.width;
+                            const minX2 = b2.left;
+                            const maxX2 = b2.left + b2.width;
                             const overlapX = Math.max(0, Math.min(maxX1, maxX2) - Math.max(minX1, minX2));
-                            const overlapRatioX1 = overlapX / r1.width;
-                            const overlapRatioX2 = overlapX / r2.width;
+                            const overlapRatioX1 = overlapX / b1.width;
+                            const overlapRatioX2 = overlapX / b2.width;
 
                             // Giao thoa trục Y
-                            const minY1 = r1.top;
-                            const maxY1 = r1.top + r1.height;
-                            const minY2 = r2.top;
-                            const maxY2 = r2.top + r2.height;
+                            const minY1 = b1.top;
+                            const maxY1 = b1.top + b1.height;
+                            const minY2 = b2.top;
+                            const maxY2 = b2.top + b2.height;
                             const overlapY = Math.max(0, Math.min(maxY1, maxY2) - Math.max(minY1, minY2));
-                            const overlapRatioY1 = overlapY / r1.height;
-                            const overlapRatioY2 = overlapY / r2.height;
+                            const overlapRatioY1 = overlapY / b1.height;
+                            const overlapRatioY2 = overlapY / b2.height;
 
                             // Điều kiện nối cạnh (chung cột):
                             // 1. Giao thoa X > 30%
@@ -1138,8 +1197,9 @@ class Editor {
                                 }
                             }
 
-                            const minX = Math.min(...compRects.map(r => r.left));
-                            const maxX = Math.max(...compRects.map(r => r.left + r.width));
+                            const absRects = compRects.map(r => this.getAbsoluteRect(r));
+                            const minX = Math.min(...absRects.map(r => r.left));
+                            const maxX = Math.max(...absRects.map(r => r.left + r.width));
                             columns.push({ rects: compRects, minX, maxX });
                         }
                     }
@@ -1148,29 +1208,30 @@ class Editor {
                     let globalIndex = 1;
 
                     columns.forEach((col, colIndex) => {
-                        col.rects.sort((a, b) => a.top - b.top);
+                        col.rects.sort((a, b) => this.getAbsoluteRect(a).top - this.getAbsoluteRect(b).top);
 
                         // Optionally draw a column bounding box (like the image shows a big orange/green box)
                         if (col.rects.length > 0) {
-                            const minY = Math.min(...col.rects.map(r => r.getBoundingRect().top));
-                            const maxY = Math.max(...col.rects.map(r => {
-                                const b = r.getBoundingRect();
-                                return b.top + b.height;
-                            }));
+                            const viewRects = col.rects.map(r => this.getViewportRect(r));
+                            const colMinX = Math.min(...viewRects.map(r => r.left));
+                            const colMaxX = Math.max(...viewRects.map(r => r.left + r.width));
+                            const colMinY = Math.min(...viewRects.map(r => r.top));
+                            const colMaxY = Math.max(...viewRects.map(r => r.top + r.height));
+
                             // Subtle background fill
                             ctx.fillStyle = 'rgba(255, 140, 0, 0.05)';
-                            ctx.fillRect(col.minX, minY, col.maxX - col.minX, maxY - minY);
+                            ctx.fillRect(colMinX, colMinY, colMaxX - colMinX, colMaxY - colMinY);
 
                             // Dashed vivid border
                             ctx.strokeStyle = '#FF8C00'; // Dark Orange
                             ctx.lineWidth = 2;
                             ctx.setLineDash([6, 4]); // 6px dash, 4px gap
-                            ctx.strokeRect(col.minX, minY, col.maxX - col.minX, maxY - minY);
+                            ctx.strokeRect(colMinX, colMinY, colMaxX - colMinX, colMaxY - colMinY);
                             ctx.setLineDash([]); // reset dash
                         }
 
                         col.rects.forEach((rect, idx) => {
-                            const bound = rect.getBoundingRect();
+                            const bound = this.getViewportRect(rect);
                             const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
                             const badgeTitle = idx === 0 ? `Col ${colIndex + 1}` : null;
                             drawBadge(globalIndex.toString(), cls.color, bound.left, bound.top, badgeTitle);
@@ -1600,7 +1661,6 @@ class Editor {
     }
 
     selectAllBoxes() {
-        if (!this.showBoxes) return;
         const rects = this.canvas.getObjects().filter(obj => obj.type === 'rect');
         if (rects.length === 0) return;
 
@@ -1609,17 +1669,34 @@ class Editor {
             this.setMode('select');
         }
 
+        // If boxes are currently hidden, temporarily make them visible/selectable so Fabric can select them
+        if (!this.showBoxes) {
+            rects.forEach(rect => {
+                rect.set({ visible: true, evented: true, selectable: true });
+            });
+        }
+
+        let targetObj = null;
+
         if (rects.length === 1) {
             this.canvas.setActiveObject(rects[0]);
-            this.onSelect({ selected: [rects[0]] });
+            targetObj = rects[0];
         } else {
             const activeSelection = new fabric.ActiveSelection(rects, {
                 canvas: this.canvas
             });
             this.canvas.setActiveObject(activeSelection);
-            this.onSelect({ selected: rects });
+            targetObj = activeSelection;
         }
+
+        this.ensureBoxInView(targetObj);
         this.canvas.requestRenderAll();
+    }
+
+    ensureBoxInView(rect) {
+        if (typeof this.centerBoxIfObscured === 'function') {
+            this.centerBoxIfObscured(rect);
+        }
     }
 
 
@@ -1770,7 +1847,7 @@ class Editor {
         this.canvas.getObjects().forEach(obj => {
             if (obj.type !== 'rect') return;
 
-            const rect = obj.getBoundingRect(true);
+            const rect = this.getAbsoluteRect(obj);
             const cx = (rect.left + rect.width / 2) / this.imageWidth;
             const cy = (rect.top + rect.height / 2) / this.imageHeight;
             const nw = rect.width / this.imageWidth;
