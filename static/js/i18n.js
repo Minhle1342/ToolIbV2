@@ -30,6 +30,7 @@ const translations = {
         "tool_hide": "Hide/Show Image (H)",
         "tool_auto": "Auto Label (Magic Wand)",
         "tool_sequence_numbers": "Show Bounding Box Sequence Numbers",
+        "tool_zoom_on_focus": "Toggle Zoom on Focus",
         "tool_hide_boxes": "Hide/Show Bounding Boxes",
         "auto_current": "Current Canvas",
         "auto_all": "All Unlabeled Images",
@@ -107,7 +108,9 @@ const translations = {
         "dashboard_uploadError": "Upload error!",
         "dashboard_failed": "Failed",
         "dashboard_errorMsg": "Error: {0}",
-        "unsaved_changes_warning": "Please save your changes before switching to another image!"
+        "dashboard_delete_password_prompt": "Enter password to delete this project:",
+        "dashboard_delete_password_incorrect": "Incorrect password! Project was not deleted.",
+        "unsaved_changes_warning": "You have unsaved changes! Click OK to switch image anyway without saving, or Cancel to stay."
     },
     vi: {
         // Base
@@ -140,6 +143,7 @@ const translations = {
         "tool_hide": "Ẩn/Hiện Ảnh (H)",
         "tool_auto": "Gán nhãn tự động",
         "tool_sequence_numbers": "Hiển thị số thứ tự Bounding Box",
+        "tool_zoom_on_focus": "Bật/Tắt phóng to khi focus",
         "tool_hide_boxes": "Ẩn/Hiện Bounding Box",
         "auto_current": "Ảnh hiện tại",
         "auto_all": "Tất cả ảnh chưa gán nhãn",
@@ -217,7 +221,9 @@ const translations = {
         "dashboard_uploadError": "Lỗi tải lên!",
         "dashboard_failed": "Thất bại",
         "dashboard_errorMsg": "Lỗi: {0}",
-        "unsaved_changes_warning": "Vui lòng lưu thay đổi trước khi chuyển sang ảnh khác!"
+        "dashboard_delete_password_prompt": "Nhập mật khẩu để xóa dự án này:",
+        "dashboard_delete_password_incorrect": "Mật khẩu không chính xác! Không thể xóa dự án.",
+        "unsaved_changes_warning": "Bạn có thay đổi chưa lưu! Bấm OK để tiếp tục chuyển ảnh mà không lưu, hoặc Cancel để ở lại."
     }
 };
 

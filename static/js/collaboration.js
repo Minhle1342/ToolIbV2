@@ -1307,6 +1307,30 @@
                             }
                         }
                     }
+
+                    // AUTO-RELOAD: If the user is currently viewing this image,
+                    // reload the latest boxes from the server to keep canvas in sync
+                    const currentImageId = (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null;
+                    if (data.image_id === currentImageId && typeof editor !== 'undefined' && editor && editor.canvas) {
+                        // Only reload if the editor is not currently dirty (user has unsaved local changes)
+                        if (!editor.isDirty) {
+                            (async () => {
+                                try {
+                                    const labels = await API.getLabel(data.image_id);
+                                    // Guard: make sure user is still on the same image
+                                    const stillSameImage = (typeof currentImage !== 'undefined' && currentImage && currentImage.id === data.image_id);
+                                    if (stillSameImage && labels) {
+                                        editor.loadBoxes(labels);
+                                        console.log(`[Collab] Auto-reloaded ${labels.length} boxes for image ${data.image_id} after remote save.`);
+                                    }
+                                } catch (err) {
+                                    console.error('[Collab] Error auto-reloading boxes after annotations_changed:', err);
+                                }
+                            })();
+                        } else {
+                            console.log(`[Collab] Skipped auto-reload for image ${data.image_id} — local editor has unsaved changes.`);
+                        }
+                    }
                 }
             }
         });

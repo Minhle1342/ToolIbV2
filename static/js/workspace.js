@@ -9,6 +9,7 @@ class Workspace {
         this.keysPressed = {};
         this.selectedImageIds = new Set();
         this.lastCheckedId = null;
+        this.zoomOnFocus = localStorage.getItem('zoomOnFocus') !== 'false';
         this.init();
         this.imageList = [];
     }
@@ -159,7 +160,7 @@ class Workspace {
             }
         });
 
-
+        this.updateZoomOnFocusUI();
     }
 
     async loadProjectInfo() {
@@ -234,8 +235,9 @@ class Workspace {
     async selectImage(image) {
         if (typeof editor !== 'undefined' && editor.isDirty) {
             const msg = typeof window.t === 'function' ? window.t('unsaved_changes_warning') : 'Vui lòng lưu thay đổi trước khi chuyển sang ảnh khác!';
-            alert(msg);
-            return;
+            if (!confirm(msg)) {
+                return;
+            }
         }
 
         // Reset supervised mode when switching image
@@ -798,6 +800,25 @@ class Workspace {
         }
     }
 
+    toggleZoomOnFocus() {
+        this.zoomOnFocus = !this.zoomOnFocus;
+        localStorage.setItem('zoomOnFocus', this.zoomOnFocus);
+        this.updateZoomOnFocusUI();
+    }
+
+    updateZoomOnFocusUI() {
+        const btn = document.getElementById('btnToggleZoomOnFocus');
+        if (btn) {
+            if (this.zoomOnFocus) {
+                btn.classList.add('text-blue-500');
+                btn.classList.remove('text-content-muted');
+            } else {
+                btn.classList.remove('text-blue-500');
+                btn.classList.add('text-content-muted');
+            }
+        }
+    }
+
     toggleBoxesVisibility() {
         if (typeof editor !== 'undefined') {
             const active = editor.toggleBoxesVisibility();
@@ -1035,6 +1056,16 @@ class Workspace {
             if (result.ignored) {
                 if (!silent) {
                     alert('Another user has already saved a newer version of this image. Your save was ignored to prevent overwriting newer data.');
+                }
+                // Reload the latest boxes from the server so user sees up-to-date data
+                try {
+                    const latestLabels = await API.getLabel(currentImage.id);
+                    if (latestLabels && typeof editor !== 'undefined') {
+                        editor.loadBoxes(latestLabels);
+                        console.log(`[Save] Reloaded ${latestLabels.length} boxes after ignored save.`);
+                    }
+                } catch (reloadErr) {
+                    console.error('[Save] Error reloading boxes after ignored save:', reloadErr);
                 }
                 return;
             }
@@ -1408,13 +1439,17 @@ class Workspace {
         if (!target) return;
 
         const padding = 100;
-        const scaleX = editor.canvas.getWidth() / (target.width * target.scaleX + padding);
-        const scaleY = editor.canvas.getHeight() / (target.height * target.scaleY + padding);
-        let zoom = Math.min(scaleX, scaleY);
-        zoom = Math.min(zoom, 5);
-        zoom = Math.max(zoom, 1);
-
-        editor.canvas.setZoom(zoom);
+        let zoom;
+        if (this.zoomOnFocus) {
+            const scaleX = editor.canvas.getWidth() / (target.width * target.scaleX + padding);
+            const scaleY = editor.canvas.getHeight() / (target.height * target.scaleY + padding);
+            zoom = Math.min(scaleX, scaleY);
+            zoom = Math.min(zoom, 5);
+            zoom = Math.max(zoom, 1);
+            editor.canvas.setZoom(zoom);
+        } else {
+            zoom = editor.canvas.getZoom();
+        }
 
         const boxCenterX = target.left + (target.width * target.scaleX) / 2;
         const boxCenterY = target.top + (target.height * target.scaleY) / 2;

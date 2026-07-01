@@ -22,23 +22,32 @@
         <h2 class="text-xl font-bold text-content mb-6" data-i18n="dashboard_createProjectTitle">Create New Project</h2>
         <form id="createProjectForm" class="space-y-4">
             <div class="space-y-1">
-                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_projectName">Project Name</label>
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_projectName">Project
+                    Name</label>
                 <input type="text" name="name" id="create_name"
                     class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
                     required>
             </div>
             <div class="space-y-1">
-                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_imagesFolderPath">Images Folder Path (Absolute)</label>
+                <label class="block text-sm font-medium text-content-muted"
+                    data-i18n="dashboard_imagesFolderPath">Images Folder Path (Absolute)</label>
                 <div class="space-y-2">
                     <input type="text" name="root_path" id="root_path_input"
                         class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
                         required placeholder="C:\Path\To\Images">
-                    <div id="images_dropzone" class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-all bg-surface/30 group">
-                        <i class="fa-solid fa-cloud-arrow-up text-primary text-3xl mb-2 group-hover:scale-110 transition-transform"></i>
-                        <p class="text-xs text-content font-medium" data-i18n="dashboard_dragDrop">Kéo & thả thư mục ảnh vào đây, hoặc click để chọn thư mục</p>
-                        <p class="text-[10px] text-content-muted mt-1 font-normal" data-i18n="dashboard_supportedFormats">Hỗ trợ JPG, PNG, BMP, JPEG (và file nhãn .txt, .json tương ứng nếu có)</p>
+                    <div id="images_dropzone"
+                        class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-all bg-surface/30 group">
+                        <i
+                            class="fa-solid fa-cloud-arrow-up text-primary text-3xl mb-2 group-hover:scale-110 transition-transform"></i>
+                        <p class="text-xs text-content font-medium" data-i18n="dashboard_dragDrop">Kéo & thả thư mục ảnh
+                            vào đây, hoặc click để chọn thư mục</p>
+                        <p class="text-[10px] text-content-muted mt-1 font-normal"
+                            data-i18n="dashboard_supportedFormats">Hỗ trợ JPG, PNG, BMP, JPEG (và file nhãn .txt, .json
+                            tương ứng nếu có)</p>
                         <input type="file" id="images_file_input" class="hidden" webkitdirectory directory multiple>
-                        <div id="images_upload_status" class="hidden text-xs mt-3 font-semibold px-3 py-1.5 rounded bg-surface/50 border border-border inline-block"></div>
+                        <div id="images_upload_status"
+                            class="hidden text-xs mt-3 font-semibold px-3 py-1.5 rounded bg-surface/50 border border-border inline-block">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -47,7 +56,8 @@
                     class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
                     onclick="closeModal('createProjectModal')" data-i18n="dashboard_btnCancel">Cancel</button>
                 <button type="submit"
-                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors" data-i18n="dashboard_btnCreate">Create</button>
+                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors"
+                    data-i18n="dashboard_btnCreate">Create</button>
             </div>
         </form>
     </div>
@@ -60,23 +70,33 @@
         <form id="editProjectForm" class="space-y-4">
             <input type="hidden" name="id" id="edit_project_id">
             <div class="space-y-1">
-                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_projectName">Project Name</label>
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_projectName">Project
+                    Name</label>
                 <input type="text" name="name" id="edit_name"
                     class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
                     required>
             </div>
             <div class="space-y-1">
-                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_imagesFolderPath">Images Folder Path (Absolute)</label>
+                <label class="block text-sm font-medium text-content-muted"
+                    data-i18n="dashboard_imagesFolderPath">Images Folder Path (Absolute)</label>
                 <div class="space-y-2">
                     <input type="text" name="root_path" id="edit_root_path_input"
                         class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
                         required placeholder="C:\Path\To\Images">
-                    <div id="edit_images_dropzone" class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-all bg-surface/30 group">
-                        <i class="fa-solid fa-cloud-arrow-up text-primary text-3xl mb-2 group-hover:scale-110 transition-transform"></i>
-                        <p class="text-xs text-content font-medium" data-i18n="dashboard_dragDropEdit">Kéo & thả thư mục ảnh mới vào đây, hoặc click để chọn</p>
-                        <p class="text-[10px] text-content-muted mt-1 font-normal" data-i18n="dashboard_supportedFormats">Hỗ trợ JPG, PNG, BMP, JPEG (và file nhãn .txt, .json tương ứng nếu có)</p>
-                        <input type="file" id="edit_images_file_input" class="hidden" webkitdirectory directory multiple>
-                        <div id="edit_images_upload_status" class="hidden text-xs mt-3 font-semibold px-3 py-1.5 rounded bg-surface/50 border border-border inline-block"></div>
+                    <div id="edit_images_dropzone"
+                        class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary hover:bg-primary/5 transition-all bg-surface/30 group">
+                        <i
+                            class="fa-solid fa-cloud-arrow-up text-primary text-3xl mb-2 group-hover:scale-110 transition-transform"></i>
+                        <p class="text-xs text-content font-medium" data-i18n="dashboard_dragDropEdit">Kéo & thả thư mục
+                            ảnh mới vào đây, hoặc click để chọn</p>
+                        <p class="text-[10px] text-content-muted mt-1 font-normal"
+                            data-i18n="dashboard_supportedFormats">Hỗ trợ JPG, PNG, BMP, JPEG (và file nhãn .txt, .json
+                            tương ứng nếu có)</p>
+                        <input type="file" id="edit_images_file_input" class="hidden" webkitdirectory directory
+                            multiple>
+                        <div id="edit_images_upload_status"
+                            class="hidden text-xs mt-3 font-semibold px-3 py-1.5 rounded bg-surface/50 border border-border inline-block">
+                        </div>
                     </div>
                 </div>
             </div>
@@ -85,26 +105,36 @@
                     class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
                     onclick="closeModal('editProjectModal')" data-i18n="dashboard_btnCancel">Cancel</button>
                 <button type="submit"
-                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors" data-i18n="dashboard_btnSaveChanges">Save Changes</button>
+                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors"
+                    data-i18n="dashboard_btnSaveChanges">Save Changes</button>
             </div>
         </form>
     </div>
 </div>
 <!-- Full-screen Loading Overlay -->
-<div id="loadingOverlay" class="fixed inset-0 bg-black/70 z-[100] hidden flex-col items-center justify-center backdrop-blur-sm">
-    <div class="bg-panel p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border border-border">
+<div id="loadingOverlay"
+    class="fixed inset-0 bg-black/70 z-[100] hidden flex-col items-center justify-center backdrop-blur-sm">
+    <div
+        class="bg-panel p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border border-border">
         <i class="fa-solid fa-circle-notch fa-spin text-primary text-5xl mb-6"></i>
         <h3 id="loadingOverlayTitle" class="text-xl font-bold text-content mb-2 text-center">Đang xử lý...</h3>
-        <p id="loadingOverlayDesc" class="text-sm text-content-muted text-center mb-6" data-i18n="dashboard_loadingDesc">Vui lòng không đóng trình duyệt hoặc làm mới trang.</p>
-        
+        <p id="loadingOverlayDesc" class="text-sm text-content-muted text-center mb-6"
+            data-i18n="dashboard_loadingDesc">Vui lòng không đóng trình duyệt hoặc làm mới trang.</p>
+
         <!-- Indeterminate Progress Bar -->
         <div class="w-full bg-surface rounded-full h-2 overflow-hidden">
-            <div class="bg-primary h-full w-1/2 rounded-full animate-[progress_2s_ease-in-out_infinite]" style="animation: progress 2s ease-in-out infinite alternate;"></div>
+            <div class="bg-primary h-full w-1/2 rounded-full animate-[progress_2s_ease-in-out_infinite]"
+                style="animation: progress 2s ease-in-out infinite alternate;"></div>
         </div>
         <style>
             @keyframes progress {
-                0% { transform: translateX(-100%); }
-                100% { transform: translateX(200%); }
+                0% {
+                    transform: translateX(-100%);
+                }
+
+                100% {
+                    transform: translateX(200%);
+                }
             }
         </style>
     </div>
@@ -114,14 +144,16 @@
 <div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="manageBackupsModal">
     <div class="bg-panel rounded-lg shadow-xl w-full max-w-2xl p-6 border border-border flex flex-col max-h-[80vh]">
         <h2 class="text-xl font-bold text-content mb-2" data-i18n="dashboard_manageBackupsTitle">Quản lý sao lưu</h2>
-        <p class="text-sm text-content-muted mb-6">Dự án: <span id="backup_project_name" class="font-semibold text-content"></span></p>
-        
+        <p class="text-sm text-content-muted mb-6">Dự án: <span id="backup_project_name"
+                class="font-semibold text-content"></span></p>
+
         <input type="hidden" id="backup_project_id">
-        
+
         <div class="overflow-y-auto flex-1 bg-surface/30 rounded border border-border p-4 mb-6">
             <div id="backupsList" class="space-y-3">
                 <!-- Backups will be listed here -->
-                <div class="text-center text-content-muted py-8 text-sm italic" data-i18n="dashboard_loadingBackups">Đang tải danh sách sao lưu...</div>
+                <div class="text-center text-content-muted py-8 text-sm italic" data-i18n="dashboard_loadingBackups">
+                    Đang tải danh sách sao lưu...</div>
             </div>
         </div>
 
@@ -207,18 +239,23 @@
     function editProject(id) {
         const p = allProjects.find(item => item.id === id);
         if (!p) return;
-        
+
         document.getElementById('edit_project_id').value = p.id;
         document.getElementById('edit_name').value = p.name;
         document.getElementById('edit_root_path_input').value = p.root_path;
-        
+
         // Reset drag & drop statuses
         document.getElementById('edit_images_upload_status').classList.add('hidden');
-        
+
         openModal('editProjectModal');
     }
 
     async function deleteProject(id) {
+        const password = prompt(window.t ? window.t('dashboard_delete_password_prompt') : 'Nhập mật khẩu để xóa dự án này:');
+        if (password !== 'nlm1342') {
+            window.showToast(window.t ? window.t('dashboard_delete_password_incorrect') : 'Mật khẩu không chính xác! Không thể xóa dự án.', 'error');
+            return;
+        }
         if (confirm(window.t ? window.t('dashboard_confirmDelete') : 'Are you sure you want to delete this project? This will only remove metadata from DB, image files will remain.')) {
             const res = await API.deleteProject(id);
             if (res.error) {
@@ -238,7 +275,7 @@
 
     async function backupProject(id, name) {
         if (confirm(window.t ? window.t('dashboard_confirmBackup', name) || `Are you sure you want to backup project "${name}"?` : `Are you sure you want to backup project "${name}"?`)) {
-            showLoadingOverlay(window.t ? window.t('dashboard_backingUp') || 'Đang tạo bản sao lưu...' : 'Đang tạo bản sao lưu...');
+            showLoadingOverlay(window.t ? window.t('Đang backup dữ liệu') || 'Đang tạo bản sao lưu...' : 'Đang tạo bản sao lưu...');
             try {
                 const response = await fetch(`/api/projects/${id}/backup`, { method: 'POST' });
                 const result = await response.json();
@@ -268,9 +305,9 @@
         try {
             const response = await fetch(`/api/projects/${id}/backups`);
             const backups = await response.json();
-            
+
             if (!response.ok) throw new Error(backups.error || 'Failed to load backups');
-            
+
             if (backups.length === 0) {
                 listContainer.innerHTML = `<div class="text-center text-content-muted py-8 text-sm italic" data-i18n="dashboard_noBackups">Không có bản sao lưu nào.</div>`;
                 return;
@@ -300,7 +337,7 @@
         if (confirm(window.t ? window.t('dashboard_confirmRestore') || 'Bạn có chắc chắn muốn khôi phục bản sao lưu này? Cảnh báo: Dữ liệu hiện tại của dự án sẽ bị ghi đè.' : 'Bạn có chắc chắn muốn khôi phục bản sao lưu này? Cảnh báo: Dữ liệu hiện tại của dự án sẽ bị ghi đè.')) {
             showLoadingOverlay(window.t ? window.t('dashboard_restoring') || 'Đang khôi phục dự án...' : 'Đang khôi phục dự án...');
             try {
-                const response = await fetch(`/api/projects/${projectId}/restore`, { 
+                const response = await fetch(`/api/projects/${projectId}/restore`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ filename: backupName })
@@ -358,7 +395,7 @@
     // Recursively parse dropped items (files and folders) with parallel processing for ultra-fast performance
     async function getFilesFromDroppedItems(items) {
         const files = [];
-        
+
         async function traverseDirectory(entry) {
             if (entry.isFile) {
                 const file = await new Promise((resolve) => entry.file(resolve));
@@ -368,7 +405,7 @@
                 const readEntriesBatch = () => new Promise((resolve, reject) => {
                     dirReader.readEntries(resolve, reject);
                 });
-                
+
                 let entries = await readEntriesBatch();
                 while (entries.length > 0) {
                     // Chạy song song duyệt các thư mục con để tối ưu tốc độ cho thư mục nhiều file (>500 file)
@@ -377,7 +414,7 @@
                 }
             }
         }
-        
+
         // Chạy song song tất cả các item gốc được kéo thả vào
         const itemPromises = Array.from(items)
             .filter(item => item.kind === 'file')
@@ -387,7 +424,7 @@
                     await traverseDirectory(entry);
                 }
             });
-            
+
         await Promise.all(itemPromises);
         return files;
     }
@@ -476,7 +513,7 @@
 
             if (isDirectory) {
                 // Chia để trị (Divide and Conquer): chia nhỏ hơn nữa (BATCH_SIZE = 15) giúp tải ổn định với số lượng file > 500
-                const BATCH_SIZE = 15; 
+                const BATCH_SIZE = 15;
                 const chunks = [];
                 for (let i = 0; i < validFiles.length; i += BATCH_SIZE) {
                     chunks.push(validFiles.slice(i, i + BATCH_SIZE));
@@ -489,11 +526,11 @@
                 try {
                     for (let index = 0; index < chunks.length; index++) {
                         const chunk = chunks[index];
-                        
+
                         // Cơ chế thử lại tự động (Automatic Retry) 3 lần nếu có sự cố mạng/quá tải server
                         let retryCount = 3;
                         let successChunk = false;
-                        
+
                         while (retryCount > 0 && !successChunk) {
                             try {
                                 const percent = Math.round((index / chunks.length) * 100);
