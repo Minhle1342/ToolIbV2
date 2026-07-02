@@ -32,7 +32,8 @@
     --color-text-inv-val: #ffffff;
   }
 
-  .pink-mode {
+  :root[data-theme="pink"],
+  body[data-theme="pink"] {
     /* Pastel Pink Theme */
     --color-surface-val: #fff0f5;       /* LavenderBlush */
     --color-sidebar-val: #ffe4e1;       /* MistyRose */
@@ -53,4 +54,3 @@
 .z-\[99999\] {
   z-index: 99999 !important;
 }
-

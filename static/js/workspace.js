@@ -9,6 +9,8 @@ class Workspace {
         this.keysPressed = {};
         this.selectedImageIds = new Set();
         this.lastCheckedId = null;
+        this.copiedBoxes = null;
+        this.copiedFromImageId = null;
         this.zoomOnFocus = localStorage.getItem('zoomOnFocus') !== 'false';
         this.init();
         this.imageList = [];
@@ -47,6 +49,20 @@ class Workspace {
 
             const key = e.key.toLowerCase();
             this.keysPressed[key] = true;
+
+            if ((e.ctrlKey || e.metaKey) && key === 'c') {
+                if (this.copySelectedBoxes()) {
+                    e.preventDefault();
+                    return;
+                }
+            }
+
+            if ((e.ctrlKey || e.metaKey) && key === 'v') {
+                if (this.pasteCopiedBoxes()) {
+                    e.preventDefault();
+                    return;
+                }
+            }
 
             if (this.keysPressed['g'] && this.keysPressed['a']) {
                 e.preventDefault();
@@ -161,6 +177,79 @@ class Workspace {
         });
 
         this.updateZoomOnFocusUI();
+    }
+
+    getActiveRectObjects() {
+        if (typeof editor === 'undefined' || !editor.canvas) return [];
+
+        const activeObj = editor.canvas.getActiveObject();
+        if (!activeObj) return [];
+
+        if (activeObj.type === 'activeSelection') {
+            return activeObj.getObjects().filter(obj => obj.type === 'rect');
+        }
+
+        if (activeObj.type === 'rect') {
+            return [activeObj];
+        }
+
+        return [];
+    }
+
+    copySelectedBoxes() {
+        const activeRects = this.getActiveRectObjects();
+        if (!activeRects.length) return false;
+
+        this.copiedBoxes = activeRects.map((rect) => {
+            const matrix = rect.calcTransformMatrix();
+            const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+            const width = Math.abs(rect.width * rect.scaleX);
+            const height = Math.abs(rect.height * rect.scaleY);
+
+            return {
+                class_id: rect.classId,
+                x: center.x / editor.imageWidth,
+                y: center.y / editor.imageHeight,
+                w: width / editor.imageWidth,
+                h: height / editor.imageHeight
+            };
+        });
+        this.copiedFromImageId = currentImage ? currentImage.id : null;
+        this.showToast(`Copied ${this.copiedBoxes.length} bounding box${this.copiedBoxes.length > 1 ? 'es' : ''}`, 'success');
+        return true;
+    }
+
+    pasteCopiedBoxes() {
+        if (!this.copiedBoxes || this.copiedBoxes.length === 0) return false;
+        if (!currentImage || typeof editor === 'undefined' || !editor.canvas) return false;
+        if (editor.loading) {
+            this.showToast('Please wait for the image to finish loading before pasting.', 'info');
+            return true;
+        }
+
+        editor.setMode('select');
+        editor.canvas.discardActiveObject();
+
+        const pastedBoxes = [];
+        this.copiedBoxes.forEach((box) => {
+            const pasted = editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, false);
+            pastedBoxes.push(pasted);
+        });
+
+        if (pastedBoxes.length === 1) {
+            editor.canvas.setActiveObject(pastedBoxes[0]);
+            editor.onSelect({ selected: [pastedBoxes[0]] });
+        } else if (pastedBoxes.length > 1) {
+            const selection = new fabric.ActiveSelection(pastedBoxes, { canvas: editor.canvas });
+            editor.canvas.setActiveObject(selection);
+            editor.onSelect({ selected: pastedBoxes });
+        }
+
+        editor.canvas.requestRenderAll();
+        editor.saveState();
+        void this.save(true);
+        this.showToast(`Pasted ${pastedBoxes.length} bounding box${pastedBoxes.length > 1 ? 'es' : ''}`, 'success');
+        return true;
     }
 
     async loadProjectInfo() {
@@ -2899,7 +2988,19 @@ async function loadImages(fetchFromServer = true) {
 
 function selectClass(id, el) {
     editor.setActiveClass(id);
-    editor.setFocusClass(id);
+    const activeRects = (typeof editor !== 'undefined' && editor.canvas)
+        ? editor.canvas.getActiveObjects().filter(obj => obj.type === 'rect')
+        : [];
+    const hasActiveRectSelection = activeRects.length > 0;
+
+    if (hasActiveRectSelection) {
+        if (editor.focusClassId !== null) {
+            editor.focusClassId = null;
+            editor.canvas.requestRenderAll();
+        }
+    } else {
+        editor.setFocusClass(id);
+    }
 
     document.querySelectorAll('.class-item').forEach(e => {
         e.classList.remove('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
@@ -2911,7 +3012,7 @@ function selectClass(id, el) {
         target = document.querySelector(`.class-item[data-class-id="${id}"]`);
     }
 
-    if (target && editor.focusClassId === id) {
+    if (target && !hasActiveRectSelection && editor.focusClassId === id) {
         target.classList.remove('bg-surface', 'text-content-muted', 'border-border');
         target.classList.add('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
     }

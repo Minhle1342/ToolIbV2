@@ -737,10 +737,118 @@
     </div>
 </div>
 
+<!-- Backup Management Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="backupModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-2xl p-6 border border-border flex flex-col max-h-[80vh]">
+        <div class="flex justify-between items-start gap-4 mb-4">
+            <div>
+                <h2 class="text-xl font-bold text-content" data-i18n="dashboard_manageBackupsTitle">Qu&#7843;n l&#253; sao l&#432;u</h2>
+                <p class="text-sm text-content-muted mt-1">Project #<span id="backupProjectIdText">{{ project_id }}</span></p>
+            </div>
+            <button type="button" onclick="closeModal('backupModal')"
+                class="text-content-muted hover:text-content transition-colors">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <div class="overflow-y-auto flex-1 bg-surface/30 rounded border border-border p-4 mb-6">
+            <div id="backupList" class="space-y-3">
+                <div class="text-center text-content-muted py-8 text-sm italic">&#272;ang t&#7843;i danh s&#225;ch sao l&#432;u...</div>
+            </div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-auto">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="closeModal('backupModal')" data-i18n="dashboard_btnClose">&#272;&#243;ng</button>
+        </div>
+    </div>
+</div>
+
 <!-- Send project_id to JS -->
 <script>
     const PROJECT_ID = "{{ project_id }}";
     const ACTIVE_FILENAME = "{{ active_filename if active_filename else '' }}";
+
+    function openModal(id) {
+        document.getElementById(id)?.classList.remove('hidden');
+    }
+
+    async function openBackupModal() {
+        openModal('backupModal');
+        await loadBackupList();
+    }
+
+    async function loadBackupList() {
+        const listContainer = document.getElementById('backupList');
+        if (!listContainer) return;
+
+        listContainer.innerHTML = '<div class="text-center text-content-muted py-8 text-sm italic">&#272;ang t&#7843;i danh s&#225;ch sao l&#432;u...</div>';
+
+        try {
+            const response = await fetch(`/api/projects/${PROJECT_ID}/backups`);
+            const backups = await response.json();
+
+            if (!response.ok) throw new Error(backups.error || 'Failed to load backups');
+
+            if (!backups.length) {
+                listContainer.innerHTML = '<div class="text-center text-content-muted py-8 text-sm italic">Kh&#244;ng c&#243; b&#7843;n sao l&#432;u n&#224;o.</div>';
+                return;
+            }
+
+            listContainer.innerHTML = backups.map((backup) => {
+                const date = new Date(backup.created_at * 1000).toLocaleString('vi-VN');
+                const escapedFilename = escapeHtml(backup.filename);
+                const encodedFilename = encodeURIComponent(backup.filename);
+
+                return `
+                    <div class="bg-panel rounded p-4 border border-border flex justify-between items-center gap-4 hover:border-primary/50 transition-colors">
+                        <div class="min-w-0">
+                            <div class="text-content font-medium text-sm mb-1 truncate" title="${escapedFilename}">${escapedFilename}</div>
+                            <div class="text-xs text-content-muted"><i class="fa-regular fa-clock mr-1"></i>${date}</div>
+                        </div>
+                        <button onclick="restoreProjectBackup(decodeURIComponent('${encodedFilename}'))"
+                            class="bg-primary/10 hover:bg-primary text-primary hover:text-content-inv px-3 py-1.5 rounded text-sm transition-colors flex items-center gap-2 flex-shrink-0">
+                            <i class="fa-solid fa-rotate-left"></i>
+                            <span>Kh&#244;i ph&#7909;c</span>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        } catch (error) {
+            listContainer.innerHTML = `<div class="text-center text-red-500 py-8 text-sm">${error.message}</div>`;
+        }
+    }
+
+    async function restoreProjectBackup(filename) {
+        if (!confirm('Ban co chac chan muon khoi phuc ban sao luu nay? Du lieu hien tai se bi ghi de.')) return;
+
+        try {
+            const response = await fetch(`/api/projects/${PROJECT_ID}/restore`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename }),
+            });
+            const result = await response.json();
+
+            if (!response.ok) throw new Error(result.error || 'Restore failed');
+
+            window.showToast?.(result.message || 'Restore successful!', 'success');
+            closeModal('backupModal');
+        } catch (error) {
+            window.showToast?.('Restore failed: ' + error.message, 'error');
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;',
+        }[char]));
+    }
 </script>
 <script src="{{ url_for('static', filename='js/fabric.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>

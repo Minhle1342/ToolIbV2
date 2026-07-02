@@ -103,12 +103,52 @@
             localStorage.setItem('sidebar-collapsed', !isCollapsed);
         }
 
-        function toggleTheme() {
+        function applyTheme(theme) {
+            const isPink = theme === 'pink';
+            const root = document.documentElement;
             const body = document.body;
-            body.classList.toggle('pink-mode');
-            const isPink = body.classList.contains('pink-mode');
+            const vars = isPink ? {
+                '--color-surface-val': '#fff0f5',
+                '--color-sidebar-val': '#ffe4e1',
+                '--color-panel-val': '#ffffff',
+                '--color-border-val': '#ffb6c1',
+                '--color-primary-val': '#ff69b4',
+                '--color-secondary-val': '#ff1493',
+                '--color-accent-val': '#ff6347',
+                '--color-text-val': '#4a4a4a',
+                '--color-text-muted-val': '#8b8b8b',
+                '--color-text-inv-val': '#ffffff',
+            } : {
+                '--color-surface-val': '#0d1117',
+                '--color-sidebar-val': '#1f2937',
+                '--color-panel-val': '#111827',
+                '--color-border-val': '#374151',
+                '--color-primary-val': '#3b82f6',
+                '--color-secondary-val': '#22c55e',
+                '--color-accent-val': '#eab308',
+                '--color-text-val': '#e5e7eb',
+                '--color-text-muted-val': '#9ca3af',
+                '--color-text-inv-val': '#ffffff',
+            };
+
+            root.dataset.theme = isPink ? 'pink' : 'dark';
+            body.classList.toggle('pink-mode', isPink);
+            body.dataset.theme = isPink ? 'pink' : 'dark';
+
+            Object.entries(vars).forEach(([name, value]) => {
+                root.style.setProperty(name, value);
+                body.style.setProperty(name, value);
+            });
+
             localStorage.setItem('theme', isPink ? 'pink' : 'dark');
         }
+
+        function toggleTheme() {
+            const isPink = localStorage.getItem('theme') !== 'pink';
+            applyTheme(isPink ? 'pink' : 'dark');
+        }
+
+        window.toggleTheme = toggleTheme;
 
         // Restore state
         // Sidebar
@@ -124,9 +164,7 @@
         }
 
         // Theme
-        if (localStorage.getItem('theme') === 'pink') {
-            document.body.classList.add('pink-mode');
-        }
+        applyTheme(localStorage.getItem('theme') === 'pink' ? 'pink' : 'dark');
 
         // Global Toast
         window.showToast = function(message, type = 'info') {
