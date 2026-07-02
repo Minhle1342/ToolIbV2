@@ -111,6 +111,28 @@
         </form>
     </div>
 </div>
+<!-- Delete Password Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="deletePasswordModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-md p-6 border border-border">
+        <h2 class="text-xl font-bold text-content mb-2">Xác nhận mật khẩu</h2>
+        <p class="text-sm text-content-muted mb-4">Nhập mật khẩu để tiếp tục xóa dự án.</p>
+        <form id="deletePasswordForm" class="space-y-4">
+            <div class="space-y-1">
+                <label for="deletePasswordInput" class="block text-sm font-medium text-content-muted">Mật khẩu</label>
+                <input type="password" id="deletePasswordInput"
+                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
+                    autocomplete="current-password" required>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button type="button"
+                    class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                    onclick="resolveDeletePassword(null)">Hủy</button>
+                <button type="submit"
+                    class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors">Xác nhận</button>
+            </div>
+        </form>
+    </div>
+</div>
 <!-- Delete Project Modal -->
 <div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="deleteProjectModal">
     <div class="bg-panel rounded-lg shadow-xl w-full max-w-lg p-6 border border-border">
@@ -194,6 +216,7 @@
 </div>
 
 <script>
+    let pendingDeletePasswordResolver = null;
     let pendingDeleteProjectResolver = null;
 
     function openModal(id) {
@@ -202,6 +225,26 @@
 
     function closeModal(id) {
         document.getElementById(id).classList.add('hidden');
+    }
+
+    function openDeletePasswordModal() {
+        const input = document.getElementById('deletePasswordInput');
+        if (input) input.value = '';
+        openModal('deletePasswordModal');
+        setTimeout(() => {
+            if (input) input.focus();
+        }, 0);
+        return new Promise((resolve) => {
+            pendingDeletePasswordResolver = resolve;
+        });
+    }
+
+    function resolveDeletePassword(password) {
+        closeModal('deletePasswordModal');
+        if (pendingDeletePasswordResolver) {
+            pendingDeletePasswordResolver(password);
+        }
+        pendingDeletePasswordResolver = null;
     }
 
     function openDeleteProjectModal(projectId, projectName) {
@@ -346,7 +389,10 @@
 
     async function deleteProject(id) {
         const project = allProjects.find(item => item.id === id);
-        const password = prompt(window.t ? window.t('dashboard_delete_password_prompt') : 'Nhập mật khẩu để xóa dự án này:');
+        const password = await openDeletePasswordModal();
+        if (password === null) {
+            return;
+        }
         if (password !== 'nlm1342') {
             window.showToast(window.t ? window.t('dashboard_delete_password_incorrect') : 'Mật khẩu không chính xác! Không thể xóa dự án.', 'error');
             return;
@@ -760,6 +806,10 @@
     // Set up drag and drop zones
     setupDropzone('images_dropzone', 'root_path_input', 'images_file_input', 'images_upload_status', true, 'create_name');
     setupDropzone('edit_images_dropzone', 'edit_root_path_input', 'edit_images_file_input', 'edit_images_upload_status', true, 'edit_name');
+    document.getElementById('deletePasswordForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        resolveDeletePassword(document.getElementById('deletePasswordInput').value);
+    });
     document.getElementById('deleteProjectKeepFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('keep_folder'));
     document.getElementById('deleteProjectRemoveFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('delete_folder'));
 

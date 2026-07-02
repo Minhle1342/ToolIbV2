@@ -195,6 +195,8 @@ class Editor {
             this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, box.isOverlapping, 'box_' + i);
         });
 
+        this.refreshOverlapHighlights();
+
         // Save initial state for Undo
         this.saveState();
         if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
@@ -240,8 +242,88 @@ class Editor {
         this.sortBoxesByArea();
 
         if (isNew) this.canvas.setActiveObject(rect);
+        if (isNew) this.refreshOverlapHighlights();
         this.canvas.requestRenderAll();
         return rect;
+    }
+
+    getOverlapIoUThreshold() {
+        return 0.7;
+    }
+
+    getRectYoloBox(rect) {
+        const matrix = rect.calcTransformMatrix();
+        const width = Math.abs(rect.width * rect.scaleX);
+        const height = Math.abs(rect.height * rect.scaleY);
+        const center = fabric.util.transformPoint({ x: 0, y: 0 }, matrix);
+
+        return {
+            x: center.x / this.imageWidth,
+            y: center.y / this.imageHeight,
+            w: width / this.imageWidth,
+            h: height / this.imageHeight
+        };
+    }
+
+    calculateRectIoU(rectA, rectB) {
+        const box1 = this.getRectYoloBox(rectA);
+        const box2 = this.getRectYoloBox(rectB);
+
+        const b1x1 = box1.x - box1.w / 2;
+        const b1y1 = box1.y - box1.h / 2;
+        const b1x2 = box1.x + box1.w / 2;
+        const b1y2 = box1.y + box1.h / 2;
+
+        const b2x1 = box2.x - box2.w / 2;
+        const b2y1 = box2.y - box2.h / 2;
+        const b2x2 = box2.x + box2.w / 2;
+        const b2y2 = box2.y + box2.h / 2;
+
+        const interX1 = Math.max(b1x1, b2x1);
+        const interY1 = Math.max(b1y1, b2y1);
+        const interX2 = Math.min(b1x2, b2x2);
+        const interY2 = Math.min(b1y2, b2y2);
+
+        const interW = Math.max(0, interX2 - interX1);
+        const interH = Math.max(0, interY2 - interY1);
+        const interArea = interW * interH;
+        const unionArea = box1.w * box1.h + box2.w * box2.h - interArea;
+
+        return unionArea > 0 ? interArea / unionArea : 0;
+    }
+
+    applyBoxOverlapStyle(rect, overlapCount = 0) {
+        const isOverlapping = overlapCount > 0;
+        const cls = this.classes.find(c => c.id === rect.classId) || { color: 'white' };
+        rect.set({
+            stroke: isOverlapping ? 'red' : cls.color,
+            fill: isOverlapping ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0,0,0,0)',
+            strokeWidth: (isOverlapping ? Math.min(3 + overlapCount - 1, 6) : 1) / this.getZoom(),
+            cornerColor: isOverlapping ? 'red' : 'white',
+            borderColor: isOverlapping ? 'red' : cls.color
+        });
+        rect.isOverlapping = isOverlapping;
+        rect.overlapCount = overlapCount;
+    }
+
+    refreshOverlapHighlights() {
+        const rects = this.canvas.getObjects('rect');
+        const threshold = this.getOverlapIoUThreshold();
+
+        rects.forEach(rect => this.applyBoxOverlapStyle(rect, 0));
+
+        for (let i = 0; i < rects.length; i++) {
+            for (let j = i + 1; j < rects.length; j++) {
+                if (this.calculateRectIoU(rects[i], rects[j]) >= threshold) {
+                    rects[i].overlapCount = (rects[i].overlapCount || 0) + 1;
+                    rects[j].overlapCount = (rects[j].overlapCount || 0) + 1;
+                }
+            }
+        }
+
+        rects.forEach(rect => this.applyBoxOverlapStyle(rect, rect.overlapCount || 0));
+
+        this.canvas.requestRenderAll();
     }
 
 
@@ -873,6 +955,7 @@ class Editor {
 
                 obj.set({ top, left });
 
+                this.refreshOverlapHighlights();
                 this.renderMagnifier(obj);
                 this.updateSelectionInfo(obj);
 
@@ -917,6 +1000,7 @@ class Editor {
 
                 obj.set({ top, left });
 
+                this.refreshOverlapHighlights();
                 this.renderMagnifier(obj);
                 this.sortBoxesByArea();
                 this.updateSelectionInfo(obj);
@@ -946,20 +1030,60 @@ class Editor {
 
         // History Hooks and Visibility Updates
         this.canvas.on('object:added', (e) => {
+            if (e.target && e.target.type === 'rect') this.refreshOverlapHighlights();
             if (e.target && e.target.type === 'rect' && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
         this.canvas.on('object:modified', (e) => {
+            if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection')) this.refreshOverlapHighlights();
             if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection') && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
         this.canvas.on('object:removed', (e) => {
+            if (e.target && e.target.type === 'rect') this.refreshOverlapHighlights();
             if (e.target && e.target.type === 'rect' && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
 
         // Focus Mode Dimming Overlay & Center Dots
         this.canvas.on('after:render', (opt) => {
+            if (this.showBoxes) {
+                const ctx = opt.ctx || this.canvas.contextContainer;
+                if (ctx) {
+                    ctx.save();
+                    const overlapRects = this.canvas.getObjects('rect').filter(rect => rect.isOverlapping);
+                    const time = performance.now();
+                    const pulse = (Math.sin(time / 140) + 1) / 2;
+
+                    overlapRects.forEach(rect => {
+                        const bound = this.getViewportRect(rect);
+                        const cx = bound.left + bound.width / 2;
+                        const cy = bound.top + bound.height / 2;
+                        const radius = 10 + pulse * 8;
+
+                        ctx.save();
+                        ctx.globalAlpha = 0.25 + pulse * 0.35;
+                        ctx.fillStyle = '#ff3b30';
+                        ctx.shadowColor = '#ff3b30';
+                        ctx.shadowBlur = 16;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
+
+                        ctx.save();
+                        ctx.strokeStyle = '#ff3b30';
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.8;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, radius + 4, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.restore();
+                    });
+                    ctx.restore();
+                }
+            }
+
             if (!this.showBoxes) {
                 const ctx = opt.ctx || this.canvas.contextContainer;
                 if (ctx) {
@@ -975,22 +1099,48 @@ class Editor {
                         const bound = this.getViewportRect(rect);
                         const cx = bound.left + bound.width / 2;
                         const cy = bound.top + bound.height / 2;
+                        const isOverlapping = !!rect.isOverlapping;
+                        const overlapCount = rect.overlapCount || 0;
+                        const baseColor = isOverlapping ? '#ff3b30' : cls.color;
+                        const overlapBoost = Math.min(overlapCount, 4);
                         
                         // Draw glowing outer ring
                         ctx.save();
-                        ctx.globalAlpha = pulseAlpha;
-                        ctx.fillStyle = cls.color;
-                        ctx.shadowColor = cls.color;
-                        ctx.shadowBlur = 10;
+                        ctx.globalAlpha = isOverlapping ? Math.min(0.35 + pulse * 0.45 + overlapBoost * 0.08, 0.95) : pulseAlpha;
+                        ctx.fillStyle = baseColor;
+                        ctx.shadowColor = baseColor;
+                        ctx.shadowBlur = isOverlapping ? 18 + overlapBoost * 4 : 10;
                         ctx.beginPath();
-                        ctx.arc(cx, cy, pulseRadius, 0, Math.PI * 2);
+                        ctx.arc(cx, cy, isOverlapping ? pulseRadius + 4 + overlapBoost * 2 : pulseRadius, 0, Math.PI * 2);
                         ctx.fill();
                         ctx.restore();
 
+                        if (isOverlapping) {
+                            ctx.save();
+                            ctx.strokeStyle = '#ff3b30';
+                            ctx.lineWidth = 2 + Math.min(overlapBoost, 2);
+                            ctx.globalAlpha = 0.9;
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, pulseRadius + 10 + overlapBoost * 2, 0, Math.PI * 2);
+                            ctx.stroke();
+                            ctx.restore();
+
+                            for (let ringIndex = 1; ringIndex < overlapCount; ringIndex++) {
+                                ctx.save();
+                                ctx.strokeStyle = '#ff3b30';
+                                ctx.lineWidth = 1.2;
+                                ctx.globalAlpha = Math.max(0.55 - ringIndex * 0.12, 0.18);
+                                ctx.beginPath();
+                                ctx.arc(cx, cy, pulseRadius + 10 + overlapBoost * 2 + ringIndex * 5, 0, Math.PI * 2);
+                                ctx.stroke();
+                                ctx.restore();
+                            }
+                        }
+
                         // Draw solid center dot
-                        ctx.fillStyle = cls.color;
+                        ctx.fillStyle = baseColor;
                         ctx.beginPath();
-                        ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+                        ctx.arc(cx, cy, isOverlapping ? 5.5 + Math.min(overlapBoost, 2) : 4.5, 0, Math.PI * 2);
                         ctx.fill();
                     });
                     ctx.restore();
@@ -1836,6 +1986,7 @@ class Editor {
         });
 
         if (changedCount > 0) {
+            this.refreshOverlapHighlights();
             this.canvas.requestRenderAll();
             this.updateSelectionInfo(this.canvas.getActiveObject());
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
@@ -2023,6 +2174,7 @@ class Editor {
                 cancelAnimationFrame(this._dotAnimFrame);
                 this._dotAnimFrame = null;
             }
+            this.refreshOverlapHighlights();
         }
         this.canvas.requestRenderAll();
         return this.showBoxes;
@@ -2059,6 +2211,7 @@ class Editor {
                 }
             });
 
+            this.refreshOverlapHighlights();
             this.canvas.requestRenderAll();
             if (activeObjects.length === 1) {
                 this.onSelect({ selected: [activeObjects[0]] });
