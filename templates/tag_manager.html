@@ -480,6 +480,51 @@ const tagManager = {
         }
     },
 
+    async getAllProjectImages() {
+        const allImages = [];
+        let page = 1;
+        const limit = 200;
+        let total = 0;
+
+        do {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/images_paginated?page=${page}&limit=${limit}`);
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.error || 'Failed to load project images');
+            }
+
+            total = data.total || 0;
+            allImages.push(...(data.images || []));
+            page += 1;
+        } while (allImages.length < total);
+
+        return allImages;
+    },
+
+    buildTaggedSplitAssignments(images, splits) {
+        const taggedImages = images
+            .filter(img => Array.isArray(img.tags) && img.tags.length > 0)
+            .sort((a, b) => a.id - b.id);
+
+        const total = taggedImages.length;
+        if (total === 0) {
+            return { train: [], val: [], test: [] };
+        }
+
+        const trainCount = Math.round(total * ((splits.train || 0) / 100));
+        const valCount = Math.round(total * ((splits.val || 0) / 100));
+        const testCount = Math.max(0, total - trainCount - valCount);
+
+        const assignments = {
+            train: taggedImages.slice(0, trainCount).map(img => img.id),
+            val: taggedImages.slice(trainCount, trainCount + valCount).map(img => img.id),
+            test: taggedImages.slice(trainCount + valCount, trainCount + valCount + testCount).map(img => img.id)
+        };
+
+        return assignments;
+    },
+
     async confirmExport() {
         const train = parseInt(document.getElementById('exportTrainSplit').value) || 0;
         const val = parseInt(document.getElementById('exportValSplit').value) || 0;
@@ -508,6 +553,11 @@ const tagManager = {
         btn.disabled = true;
 
         try {
+            if (exportMode === 'tagged_only') {
+                const allImages = await this.getAllProjectImages();
+                payload.tagged_split_assignments = this.buildTaggedSplitAssignments(allImages, { train, val, test });
+            }
+
             const res = await fetch('/api/export', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

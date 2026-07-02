@@ -551,6 +551,9 @@ def export_dataset():
         
     if 'has_any_tag' in data:
         criteria['has_any_tag'] = data['has_any_tag']
+
+    if 'tagged_split_assignments' in data:
+        criteria['tagged_split_assignments'] = data['tagged_split_assignments']
         
     # Default to 'yolo' if not specified
     export_fmt = data.get('format', 'yolo')

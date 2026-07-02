@@ -359,64 +359,103 @@ def export_dataset(criteria, splits=None, format='yolo'):
     if not all_images:
         return {'status': 'error', 'message': 'No valid labeled images found.'}
 
-    # Calculate exact target split sizes
-    total_images = len(all_images)
-    train_pct = splits.get('train', 0) / 100.0
-    val_pct = splits.get('val', 0) / 100.0
-    
-    train_count = round(total_images * train_pct)
-    val_count = round(total_images * val_pct)
-    test_count = total_images - train_count - val_count
+    forced_assignments = criteria.get('tagged_split_assignments') or {}
+    forced_ids_by_split = {
+        'train': {int(image_id) for image_id in forced_assignments.get('train', [])},
+        'val': {int(image_id) for image_id in forced_assignments.get('val', [])},
+        'test': {int(image_id) for image_id in forced_assignments.get('test', [])}
+    }
 
-    # Stratified Split logic
-    class_counts = {}
-    for img_data in all_images:
-        for c in img_data['classes']:
-            class_counts[c] = class_counts.get(c, 0) + 1
+    if any(forced_ids_by_split.values()):
+        train_set, val_set, test_set = [], [], []
+        assigned_ids = set()
+
+        for item in all_images:
+            image_id = item['image_obj'].id
+            if image_id in forced_ids_by_split['train']:
+                train_set.append(item)
+                assigned_ids.add(image_id)
+            elif image_id in forced_ids_by_split['val']:
+                val_set.append(item)
+                assigned_ids.add(image_id)
+            elif image_id in forced_ids_by_split['test']:
+                test_set.append(item)
+                assigned_ids.add(image_id)
+
+        for item in all_images:
+            if item['image_obj'].id in assigned_ids:
+                continue
+
+            split_name = item['image_obj'].split_type or 'train'
+            if split_name == 'val':
+                val_set.append(item)
+            elif split_name == 'test':
+                test_set.append(item)
+            else:
+                train_set.append(item)
+
+        random.shuffle(train_set)
+        random.shuffle(val_set)
+        random.shuffle(test_set)
+    else:
+        # Calculate exact target split sizes
+        total_images = len(all_images)
+        train_pct = splits.get('train', 0) / 100.0
+        val_pct = splits.get('val', 0) / 100.0
+        
+        train_count = round(total_images * train_pct)
+        val_count = round(total_images * val_pct)
+        test_count = total_images - train_count - val_count
+
+        # Stratified Split logic
+        class_counts = {}
+        for img_data in all_images:
+            for c in img_data['classes']:
+                class_counts[c] = class_counts.get(c, 0) + 1
+                
+        for img_data in all_images:
+            rarest_class = None
+            min_count = float('inf')
+            for c in img_data['classes']:
+                if class_counts[c] < min_count:
+                    min_count = class_counts[c]
+                    rarest_class = c
+            img_data['rarest_class'] = rarest_class
             
-    for img_data in all_images:
-        rarest_class = None
-        min_count = float('inf')
-        for c in img_data['classes']:
-            if class_counts[c] < min_count:
-                min_count = class_counts[c]
-                rarest_class = c
-        img_data['rarest_class'] = rarest_class
+        class_groups = {}
+        for img_data in all_images:
+            rc = img_data['rarest_class']
+            if rc not in class_groups:
+                class_groups[rc] = []
+            class_groups[rc].append(img_data)
+            
+        train_set, val_set, test_set = [], [], []
         
-    class_groups = {}
-    for img_data in all_images:
-        rc = img_data['rarest_class']
-        if rc not in class_groups:
-            class_groups[rc] = []
-        class_groups[rc].append(img_data)
+        for c, group in class_groups.items():
+            random.shuffle(group)
+            group_size = len(group)
+            g_train = round(group_size * train_pct)
+            g_val = round(group_size * val_pct)
+            g_val = min(g_val, group_size - g_train)
+            
+            train_set.extend(group[:g_train])
+            val_set.extend(group[g_train:g_train + g_val])
+            test_set.extend(group[g_train + g_val:])
+            
+        # Rebalance to meet exact targets
+        sets = [train_set, val_set, test_set]
+        targets = [train_count, val_count, test_count]
         
-    train_set, val_set, test_set = [], [], []
-    
-    for c, group in class_groups.items():
-        random.shuffle(group)
-        group_size = len(group)
-        g_train = round(group_size * train_pct)
-        g_val = round(group_size * val_pct)
-        g_val = min(g_val, group_size - g_train)
-        
-        train_set.extend(group[:g_train])
-        val_set.extend(group[g_train:g_train + g_val])
-        test_set.extend(group[g_train + g_val:])
-        
-    # Rebalance to meet exact targets
-    sets = [train_set, val_set, test_set]
-    targets = [train_count, val_count, test_count]
-    
-    for i in range(3):
-        while len(sets[i]) > targets[i]:
-            for j in range(3):
-                if len(sets[j]) < targets[j]:
-                    sets[j].append(sets[i].pop())
-                    break
-                    
-    random.shuffle(train_set)
-    random.shuffle(val_set)
-    random.shuffle(test_set)
+        for i in range(3):
+            while len(sets[i]) > targets[i]:
+                for j in range(3):
+                    if len(sets[j]) < targets[j]:
+                        sets[j].append(sets[i].pop())
+                        break
+                        
+        random.shuffle(train_set)
+        random.shuffle(val_set)
+        random.shuffle(test_set)
 
     def copy_files(dataset, split_name):
         if not dataset:

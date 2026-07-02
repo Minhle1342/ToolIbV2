@@ -515,7 +515,7 @@ class Workspace {
                     await this.selectImage(this.allImages[nextIndex]);
                 } else {
                     currentImage = null;
-                    if (editor) editor.clearCanvas();
+                    if (editor) editor.clearAllBoxes();
                     document.getElementById('selectionInfo').innerHTML = 'No images left';
                 }
             } else {
@@ -658,7 +658,7 @@ class Workspace {
                         await this.selectImage(this.imageList[0]);
                     } else {
                         currentImage = null;
-                        if (editor) editor.clearCanvas();
+                        if (editor) editor.clearAllBoxes();
                         document.getElementById('selectionInfo').innerHTML = 'No images left';
                     }
                 }
@@ -707,7 +707,7 @@ class Workspace {
                         await this.selectImage(this.imageList[0]);
                     } else {
                         currentImage = null;
-                        if (editor) editor.clearCanvas();
+                        if (editor) editor.clearAllBoxes();
                         document.getElementById('selectionInfo').innerHTML = 'No images left';
                     }
                 }
