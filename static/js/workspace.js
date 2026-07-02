@@ -340,7 +340,7 @@ class Workspace {
 
         // Update URL
         if (window.history && window.history.pushState) {
-            window.history.pushState(null, '', `/project/${PROJECT_ID}/${encodeURIComponent(image.filename)}`);
+            window.history.pushState(null, '', `/project/${PROJECT_SLUG}/${encodeURIComponent(image.filename)}`);
         }
 
         // Update Split Type Select
@@ -950,7 +950,7 @@ class Workspace {
     }
 
     async openTagManager() {
-        window.location.href = `/project/${PROJECT_ID}/tags`;
+        window.location.href = `/project/${PROJECT_SLUG}/tags`;
     }
 
     renderTagManagerList() {
@@ -1767,14 +1767,27 @@ class Workspace {
                             const saveResult = await API.saveLabel(saveData);
                             if (saveResult.message || saveResult.success) {
                                 successCount++;
-                                img.classes = Array.from(new Set(data.boxes.map(b => b.class_id))).sort((a, b) => a - b);
-                                img.is_labeled = true;
+                                const acceptedBoxes = Array.isArray(data.boxes)
+                                    ? data.boxes.filter(box => Number.isFinite(Number(box.class_id))
+                                        && Number.isFinite(Number(box.x))
+                                        && Number.isFinite(Number(box.y))
+                                        && Number.isFinite(Number(box.w))
+                                        && Number.isFinite(Number(box.h))
+                                        && Number(box.w) > 0
+                                        && Number(box.h) > 0)
+                                    : [];
+                                img.classes = saveResult.is_labeled
+                                    ? Array.from(new Set(acceptedBoxes.map(b => Number(b.class_id)))).sort((a, b) => a - b)
+                                    : [];
+                                img.is_labeled = !!saveResult.is_labeled;
 
                                 const el = document.getElementById(`img-${img.id}`);
                                 if (el) {
-                                    const checkIcon = el.querySelector('.fa-regular.fa-circle');
-                                    if (checkIcon) {
-                                        checkIcon.className = 'fa-solid fa-check text-secondary';
+                                    const labelIcon = el.querySelector('.fa-regular.fa-circle, .fa-solid.fa-check');
+                                    if (labelIcon) {
+                                        labelIcon.className = img.is_labeled
+                                            ? 'fa-solid fa-check text-secondary'
+                                            : 'fa-regular fa-circle text-content-muted';
                                     }
                                 }
                             } else {
@@ -3215,6 +3228,15 @@ function toggleDropdown(event, buttonId, dropdownId, dropdownWidth) {
 
     const isHidden = dropdown.classList.contains('hidden');
     if (isHidden) {
+        if (buttonId === 'btnAutoLabelToggle') {
+            const password = prompt('Nhập mật khẩu để mở Auto Label:');
+            if (password !== 'nlm1342') {
+                if (password !== null) {
+                    alert('Mật khẩu không đúng.');
+                }
+                return;
+            }
+        }
         dropdown.classList.remove('hidden');
         positionFixedDropdown(btn, dropdown, dropdownWidth);
     } else {

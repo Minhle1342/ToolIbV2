@@ -96,9 +96,20 @@ def scan_and_sync_images(project):
                     try:
                         with open(label_file, 'r', encoding='utf-8') as lf:
                             for line in lf:
-                                if len(line.strip().split()) >= 5:
-                                    has_coords = True
-                                    break
+                                parts = line.strip().split()
+                                if len(parts) == 5:
+                                    try:
+                                        int(parts[0])
+                                        float(parts[1])
+                                        float(parts[2])
+                                        width = float(parts[3])
+                                        height = float(parts[4])
+                                        if width <= 0 or height <= 0:
+                                            continue
+                                        has_coords = True
+                                        break
+                                    except ValueError:
+                                        pass
                     except Exception:
                         pass
                 
@@ -207,14 +218,24 @@ def read_yolo_label(image):
         with open(label_file, 'r') as f:
             for line in f:
                 parts = line.strip().split()
-                if len(parts) >= 5:
-                    labels.append({
-                        'class_id': int(parts[0]),
-                        'x': float(parts[1]),
-                        'y': float(parts[2]),
-                        'w': float(parts[3]),
-                        'h': float(parts[4])
-                    })
+                if len(parts) == 5:
+                    try:
+                        class_id = int(parts[0])
+                        x = float(parts[1])
+                        y = float(parts[2])
+                        w = float(parts[3])
+                        h = float(parts[4])
+                        if w <= 0 or h <= 0:
+                            continue
+                        labels.append({
+                            'class_id': class_id,
+                            'x': x,
+                            'y': y,
+                            'w': w,
+                            'h': h
+                        })
+                    except ValueError:
+                        pass
     return labels
 
 def save_yolo_label(image, labels):
@@ -225,10 +246,23 @@ def save_yolo_label(image, labels):
     project = Project.query.get(image.project_id)
     label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
     
+    saved_count = 0
     with open(label_file, 'w') as f:
         for label in labels:
-            line = f"{label['class_id']} {label['x']} {label['y']} {label['w']} {label['h']}\n"
-            f.write(line)
+            try:
+                class_id = int(label['class_id'])
+                x = float(label['x'])
+                y = float(label['y'])
+                w = float(label['w'])
+                h = float(label['h'])
+                if w <= 0 or h <= 0:
+                    continue
+                line = f"{class_id} {x} {y} {w} {h}\n"
+                f.write(line)
+                saved_count += 1
+            except (KeyError, TypeError, ValueError):
+                pass
+    return saved_count
 
 def export_dataset(criteria, splits=None, format='yolo'):
     """
@@ -336,9 +370,16 @@ def export_dataset(criteria, splits=None, format='yolo'):
                 with open(src_label_path, 'r') as f:
                     for line in f:
                         parts = line.strip().split()
-                        if parts:
+                        if len(parts) == 5:
                             try:
-                                classes_in_image.add(int(parts[0]))
+                                class_id = int(parts[0])
+                                x = float(parts[1])
+                                y = float(parts[2])
+                                w = float(parts[3])
+                                h = float(parts[4])
+                                if w <= 0 or h <= 0:
+                                    continue
+                                classes_in_image.add(class_id)
                                 has_boxes = True
                                 box_count += 1
                             except ValueError:
@@ -553,9 +594,15 @@ def get_classes(project):
             with open(lf, 'r', encoding='utf-8') as f:
                 for line in f:
                     parts = line.strip().split()
-                    if parts:
+                    if len(parts) == 5:
                         try:
                             cid = int(parts[0])
+                            float(parts[1])
+                            float(parts[2])
+                            width = float(parts[3])
+                            height = float(parts[4])
+                            if width <= 0 or height <= 0:
+                                continue
                             if cid > max_id:
                                 max_id = cid
                         except ValueError:
@@ -605,9 +652,16 @@ def get_image_classes(image):
             with open(label_file, 'r') as f:
                 for line in f:
                     parts = line.strip().split()
-                    if parts:
+                    if len(parts) == 5:
                         try:
-                            classes.add(int(parts[0]))
+                            class_id = int(parts[0])
+                            float(parts[1])
+                            float(parts[2])
+                            width = float(parts[3])
+                            height = float(parts[4])
+                            if width <= 0 or height <= 0:
+                                continue
+                            classes.add(class_id)
                         except ValueError:
                             pass
         except Exception:

@@ -1,7 +1,14 @@
 from datetime import datetime
+import re
+import unicodedata
 from flask_sqlalchemy import SQLAlchemy
 
 db = SQLAlchemy()
+
+def slugify_project_name(name):
+    normalized = unicodedata.normalize('NFKD', name or '').encode('ascii', 'ignore').decode('ascii')
+    slug = re.sub(r'[^a-zA-Z0-9]+', '-', normalized).strip('-').lower()
+    return slug or 'project'
 
 image_tags = db.Table('image_tags',
     db.Column('image_id', db.Integer, db.ForeignKey('images.id'), primary_key=True),
@@ -45,6 +52,7 @@ class Project(db.Model):
         return {
             'id': self.id,
             'name': self.name,
+            'slug': slugify_project_name(self.name),
             'root_path': self.root_path,
             'created_at': self.created_at.isoformat()
         }

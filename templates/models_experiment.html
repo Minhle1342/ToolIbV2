@@ -120,6 +120,35 @@
                 </div>
             </div>
             
+            <div class="mb-6 border border-border rounded p-4 bg-panel">
+                <div class="flex items-center justify-between mb-4 border-b border-border pb-2">
+                    <h3 class="text-sm font-bold text-content flex items-center gap-2">
+                        <i class="fa-solid fa-crosshairs text-primary"></i> 4. Ngưỡng nhận diện
+                    </h3>
+                    <button onclick="resetExperimentThresholds()" class="text-xs text-primary hover:underline font-semibold flex items-center gap-1">
+                        <i class="fa-solid fa-rotate-left"></i> Đặt lại
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content">Confidence</span>
+                            <span id="val-confidence" class="text-xs font-mono text-primary font-bold">25%</span>
+                        </div>
+                        <input type="range" id="param-confidence" min="0.05" max="1" step="0.01" value="0.25" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateThresholdVal('confidence')">
+                    </div>
+
+                    <div class="flex flex-col gap-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-semibold text-content">IoU</span>
+                            <span id="val-iou" class="text-xs font-mono text-primary font-bold">45%</span>
+                        </div>
+                        <input type="range" id="param-iou" min="0.05" max="1" step="0.01" value="0.45" class="w-full h-1.5 bg-surface border border-border rounded-lg appearance-none cursor-pointer accent-primary" oninput="updateThresholdVal('iou')">
+                    </div>
+                </div>
+            </div>
+
             <button onclick="runExperiment()" class="w-full px-4 py-2 bg-secondary text-content-inv rounded hover:opacity-90 font-medium transition-colors" id="runTestBtn">
                 <i class="fa-solid fa-play mr-2"></i>Chạy Thí nghiệm
             </button>
@@ -448,6 +477,12 @@
             display.textContent = input.value + '%';
         }
     }
+
+    function updateThresholdVal(param) {
+        const input = document.getElementById(`param-${param}`);
+        const display = document.getElementById(`val-${param}`);
+        display.textContent = `${Math.round(parseFloat(input.value) * 100)}%`;
+    }
     
     function resetEnvParams() {
         document.getElementById('param-brightness').value = 100;
@@ -458,6 +493,13 @@
         updateEnvVal('contrast');
         updateEnvVal('blur');
         updateEnvVal('noise');
+    }
+
+    function resetExperimentThresholds() {
+        document.getElementById('param-confidence').value = 0.25;
+        document.getElementById('param-iou').value = 0.45;
+        updateThresholdVal('confidence');
+        updateThresholdVal('iou');
     }
 
     function processImageWithEnv(file, brightness, contrast, blur, noise) {
@@ -560,6 +602,8 @@
         const contrast = parseInt(document.getElementById('param-contrast').value);
         const blur = parseInt(document.getElementById('param-blur').value);
         const noise = parseInt(document.getElementById('param-noise').value);
+        const confidence = parseFloat(document.getElementById('param-confidence').value);
+        const iou = parseFloat(document.getElementById('param-iou').value);
         
         try {
             for(let i=0; i<files.length; i++) {
@@ -575,6 +619,8 @@
                 const formData = new FormData();
                 formData.append('image', activeFile);
                 formData.append('model_ids', modelIds);
+                formData.append('conf_threshold', confidence);
+                formData.append('iou_threshold', iou);
                 
                 const res = await fetch('/api/models/test', {
                     method: 'POST',

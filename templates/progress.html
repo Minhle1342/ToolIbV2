@@ -79,7 +79,7 @@
                     p.views.forEach(v => {
                         const vPercent = v.total_images > 0 ? Math.round((v.labeled_images / v.total_images) * 100) : 0;
                         html += `
-                            <div class="bg-surface border border-border rounded p-4 flex flex-col justify-between cursor-pointer hover:border-primary transition-colors group" onclick="window.location.href='/project/${p.id}?view_id=${v.id}'">
+                            <div class="bg-surface border border-border rounded p-4 flex flex-col justify-between cursor-pointer hover:border-primary transition-colors group" onclick="window.location.href='/project/${p.slug}/?view_id=${v.id}'">
                                 <div class="flex justify-between items-center mb-3">
                                     <div class="font-medium text-content flex items-center gap-2">
                                         <i class="fa-solid fa-user-circle text-content-muted"></i> ${v.name}

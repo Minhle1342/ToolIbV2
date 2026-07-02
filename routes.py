@@ -109,9 +109,17 @@ def update_project(project_id):
 @api_bp.route('/projects/<int:project_id>', methods=['DELETE'])
 def delete_project(project_id):
     project = Project.query.get_or_404(project_id)
+    data = request.get_json(silent=True) or {}
+    delete_folder = data.get('delete_folder', False)
+    project_root = project.root_path
     try:
         db.session.delete(project)
         db.session.commit()
+        if delete_folder and project_root and os.path.isdir(project_root):
+            normalized_root = os.path.abspath(project_root)
+            parent_root = os.path.dirname(normalized_root)
+            if normalized_root and parent_root and normalized_root != parent_root:
+                shutil.rmtree(normalized_root)
         return jsonify({'message': 'Project deleted successfully'})
     except Exception as e:
         db.session.rollback()
@@ -332,16 +340,23 @@ def get_images():
                     with open(label_file, 'r', encoding='utf-8') as f:
                         for line in f:
                             parts = line.strip().split()
-                            if len(parts) >= 5:
-                                has_coords = True
+                            if len(parts) == 5:
                                 try:
-                                    classes.append(int(parts[0]))
+                                    class_id = int(parts[0])
+                                    x_center = float(parts[1])
+                                    y_center = float(parts[2])
+                                    width = float(parts[3])
+                                    height = float(parts[4])
+                                    if width <= 0 or height <= 0:
+                                        continue
+                                    has_coords = True
+                                    classes.append(class_id)
                                     boxes.append({
-                                        'class_id': int(parts[0]),
-                                        'x_center': float(parts[1]),
-                                        'y_center': float(parts[2]),
-                                        'width': float(parts[3]),
-                                        'height': float(parts[4])
+                                        'class_id': class_id,
+                                        'x_center': x_center,
+                                        'y_center': y_center,
+                                        'width': width,
+                                        'height': height
                                     })
                                 except ValueError:
                                     pass
@@ -414,9 +429,9 @@ def save_label():
         open(label_file, 'w').close()
         
     # Gọi đến hàm save() để lưu tọa độ của bounding box mới nhất
-    utils.save_yolo_label(image, data['labels'])
+    saved_count = utils.save_yolo_label(image, data['labels'])
     
-    image.is_labeled = len(data.get('labels', [])) > 0
+    image.is_labeled = saved_count > 0
     if 'flag_status' in data:
         image.flag_status = data['flag_status']
     if 'split_type' in data:
@@ -425,7 +440,11 @@ def save_label():
         image.is_reviewed = data['is_reviewed']
     
     db.session.commit()
-    return jsonify({'message': 'Saved successfully'})
+    return jsonify({
+        'message': 'Saved successfully',
+        'saved_count': saved_count,
+        'is_labeled': image.is_labeled
+    })
 
 @api_bp.route('/image_data/<int:image_id>')
 def serve_image(image_id):
@@ -509,9 +528,18 @@ def delete_project_class(project_id, class_idx):
             new_lines = []
             for line in lines:
                 parts = line.strip().split()
-                if not parts:
+                if len(parts) != 5:
                     continue
-                cid = int(parts[0])
+                try:
+                    cid = int(parts[0])
+                    float(parts[1])
+                    float(parts[2])
+                    width = float(parts[3])
+                    height = float(parts[4])
+                    if width <= 0 or height <= 0:
+                        continue
+                except ValueError:
+                    continue
                 if cid == class_idx:
                     continue # Drop this box
                 elif cid > class_idx:
@@ -1202,6 +1230,24 @@ def delete_model(model_id):
     try:
         was_active = m.is_active
         was_type = m.model_type
+        models_dir = os.path.join(os.getcwd(), 'models')
+        model_path = os.path.join(models_dir, m.filename)
+        remaining_classification_models = 0
+
+        if was_type == 'classification':
+            remaining_classification_models = AIModel.query.filter(
+                AIModel.model_type == 'classification',
+                AIModel.id != m.id
+            ).count()
+
+        if os.path.exists(model_path):
+            os.remove(model_path)
+
+        if was_type == 'classification' and remaining_classification_models == 0:
+            mapping_path = os.path.join(models_dir, 'class_mapping.json')
+            if os.path.exists(mapping_path):
+                os.remove(mapping_path)
+
         db.session.delete(m)
         db.session.commit()
         if was_active:
@@ -1244,8 +1290,13 @@ def test_models():
         
     image_file = request.files['image']
     model_ids = request.form.get('model_ids') # comma separated
+    conf_threshold = request.form.get('conf_threshold', default=0.25, type=float)
+    iou_threshold = request.form.get('iou_threshold', default=0.45, type=float)
     if not model_ids:
         return jsonify({'error': 'No models selected'}), 400
+
+    conf_threshold = min(max(conf_threshold, 0.0), 1.0)
+    iou_threshold = min(max(iou_threshold, 0.0), 1.0)
         
     import tempfile
     import uuid
@@ -1265,7 +1316,11 @@ def test_models():
                         import time
                         engine = YOLOInference(m_path)
                         start_time = time.time()
-                        pred = engine.predict(temp_path)
+                        pred = engine.predict(
+                            temp_path,
+                            conf_threshold=conf_threshold,
+                            iou_threshold=iou_threshold
+                        )
                         duration_ms = (time.time() - start_time) * 1000
                         
                         if pred.get('success') and 'boxes' in pred:

@@ -111,6 +111,42 @@
         </form>
     </div>
 </div>
+<!-- Delete Project Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="deleteProjectModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-lg p-6 border border-border">
+        <div class="flex items-start gap-4 mb-5">
+            <div class="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center flex-shrink-0">
+                <i class="fa-solid fa-triangle-exclamation text-xl"></i>
+            </div>
+            <div>
+                <h2 class="text-xl font-bold text-content mb-1">Xóa dự án</h2>
+                <p class="text-sm text-content-muted leading-relaxed">
+                    Chọn cách xóa cho dự án <span id="deleteProjectName" class="font-semibold text-content"></span>.
+                </p>
+            </div>
+        </div>
+
+        <div class="space-y-3 mb-6">
+            <button type="button" id="deleteProjectKeepFolderBtn"
+                class="w-full text-left rounded-lg border border-border bg-surface hover:border-primary hover:bg-primary/5 transition-colors p-4">
+                <div class="font-semibold text-content mb-1">Chỉ xóa trong hệ thống</div>
+                <div class="text-sm text-content-muted">Giữ nguyên thư mục và file trên ổ đĩa, chỉ xóa metadata của dự án.</div>
+            </button>
+
+            <button type="button" id="deleteProjectRemoveFolderBtn"
+                class="w-full text-left rounded-lg border border-red-500/40 bg-red-500/5 hover:bg-red-500/10 transition-colors p-4">
+                <div class="font-semibold text-red-500 mb-1">Xóa cả thư mục dự án</div>
+                <div class="text-sm text-content-muted">Xóa metadata và xóa luôn thư mục gốc của dự án khỏi ổ đĩa.</div>
+            </button>
+        </div>
+
+        <div class="flex justify-end gap-3">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="resolveDeleteProjectChoice(null)">Hủy</button>
+        </div>
+    </div>
+</div>
 <!-- Full-screen Loading Overlay -->
 <div id="loadingOverlay"
     class="fixed inset-0 bg-black/70 z-[100] hidden flex-col items-center justify-center backdrop-blur-sm">
@@ -118,25 +154,17 @@
         class="bg-panel p-8 rounded-xl shadow-2xl flex flex-col items-center max-w-sm w-full mx-4 border border-border">
         <i class="fa-solid fa-circle-notch fa-spin text-primary text-5xl mb-6"></i>
         <h3 id="loadingOverlayTitle" class="text-xl font-bold text-content mb-2 text-center">Đang xử lý...</h3>
-        <p id="loadingOverlayDesc" class="text-sm text-content-muted text-center mb-6"
+        <p id="loadingOverlayDesc" class="text-sm text-content-muted text-center mb-4"
             data-i18n="dashboard_loadingDesc">Vui lòng không đóng trình duyệt hoặc làm mới trang.</p>
-
-        <!-- Indeterminate Progress Bar -->
+        <div id="loadingOverlayStep" class="text-xs text-primary font-semibold text-center mb-3">Đang khởi tạo...</div>
         <div class="w-full bg-surface rounded-full h-2 overflow-hidden">
-            <div class="bg-primary h-full w-1/2 rounded-full animate-[progress_2s_ease-in-out_infinite]"
-                style="animation: progress 2s ease-in-out infinite alternate;"></div>
+            <div id="loadingOverlayBar" class="bg-primary h-full rounded-full transition-all duration-300"
+                style="width: 0%"></div>
         </div>
-        <style>
-            @keyframes progress {
-                0% {
-                    transform: translateX(-100%);
-                }
-
-                100% {
-                    transform: translateX(200%);
-                }
-            }
-        </style>
+        <div class="w-full flex justify-between items-center mt-2 text-[11px] text-content-muted">
+            <span id="loadingOverlayStatus">Preparing...</span>
+            <span id="loadingOverlayPercent" class="font-semibold text-primary">0%</span>
+        </div>
     </div>
 </div>
 
@@ -166,6 +194,8 @@
 </div>
 
 <script>
+    let pendingDeleteProjectResolver = null;
+
     function openModal(id) {
         document.getElementById(id).classList.remove('hidden');
     }
@@ -174,15 +204,79 @@
         document.getElementById(id).classList.add('hidden');
     }
 
-    function showLoadingOverlay(title) {
+    function openDeleteProjectModal(projectId, projectName) {
+        document.getElementById('deleteProjectName').innerText = projectName || `#${projectId}`;
+        openModal('deleteProjectModal');
+        return new Promise((resolve) => {
+            pendingDeleteProjectResolver = resolve;
+        });
+    }
+
+    function resolveDeleteProjectChoice(choice) {
+        closeModal('deleteProjectModal');
+        if (pendingDeleteProjectResolver) {
+            pendingDeleteProjectResolver(choice);
+        }
+        pendingDeleteProjectResolver = null;
+    }
+
+    function showLoadingOverlay(title, desc, progress = 0, stepText) {
         const overlay = document.getElementById('loadingOverlay');
         const titleEl = document.getElementById('loadingOverlayTitle');
+        const descEl = document.getElementById('loadingOverlayDesc');
+        const stepEl = document.getElementById('loadingOverlayStep');
+        const statusEl = document.getElementById('loadingOverlayStatus');
+        const percentEl = document.getElementById('loadingOverlayPercent');
+        const barEl = document.getElementById('loadingOverlayBar');
         if (titleEl && title) {
             titleEl.innerText = title;
+        }
+        if (descEl) {
+            descEl.innerText = desc || (window.t ? window.t('dashboard_loadingDesc') : 'Vui lòng không đóng trình duyệt hoặc làm mới trang.');
+        }
+        if (stepEl) {
+            stepEl.innerText = stepText || 'Đang khởi tạo...';
+        }
+        if (statusEl) {
+            statusEl.innerText = stepText || 'Preparing...';
+        }
+        if (percentEl) {
+            percentEl.innerText = `${Math.round(progress)}%`;
+        }
+        if (barEl) {
+            barEl.style.width = `${Math.max(0, Math.min(progress, 100))}%`;
         }
         if (overlay) {
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
+        }
+    }
+
+    function updateLoadingOverlay(progress, stepText, title, desc) {
+        const titleEl = document.getElementById('loadingOverlayTitle');
+        const descEl = document.getElementById('loadingOverlayDesc');
+        const stepEl = document.getElementById('loadingOverlayStep');
+        const statusEl = document.getElementById('loadingOverlayStatus');
+        const percentEl = document.getElementById('loadingOverlayPercent');
+        const barEl = document.getElementById('loadingOverlayBar');
+
+        if (titleEl && title) {
+            titleEl.innerText = title;
+        }
+        if (descEl && desc) {
+            descEl.innerText = desc;
+        }
+        if (stepEl && stepText) {
+            stepEl.innerText = stepText;
+        }
+        if (statusEl && stepText) {
+            statusEl.innerText = stepText;
+        }
+        if (percentEl && typeof progress === 'number') {
+            percentEl.innerText = `${Math.round(progress)}%`;
+        }
+        if (barEl && typeof progress === 'number') {
+            barEl.style.width = `${Math.max(0, Math.min(progress, 100))}%`;
         }
     }
 
@@ -218,7 +312,7 @@
                     <i class="fa-regular fa-folder"></i> ${p.root_path}
                 </div>
                 <div class="flex gap-2 mt-4">
-                    <a href="/project/${p.id}" class="flex-1 bg-primary hover:bg-blue-600 text-content-inv text-center py-2 rounded text-sm transition-colors" data-i18n="dashboard_openWorkspace">
+                    <a href="/project/${p.slug}/" class="flex-1 bg-primary hover:bg-blue-600 text-content-inv text-center py-2 rounded text-sm transition-colors" data-i18n="dashboard_openWorkspace">
                         Open Workspace
                     </a>
                     <button onclick="editProject(${p.id})" class="bg-surface hover:bg-border text-content px-3 rounded transition-colors" title="Edit Project" data-i18n-title="dashboard_editProject">
@@ -251,13 +345,19 @@
     }
 
     async function deleteProject(id) {
+        const project = allProjects.find(item => item.id === id);
         const password = prompt(window.t ? window.t('dashboard_delete_password_prompt') : 'Nhập mật khẩu để xóa dự án này:');
         if (password !== 'nlm1342') {
             window.showToast(window.t ? window.t('dashboard_delete_password_incorrect') : 'Mật khẩu không chính xác! Không thể xóa dự án.', 'error');
             return;
         }
         if (confirm(window.t ? window.t('dashboard_confirmDelete') : 'Are you sure you want to delete this project? This will only remove metadata from DB, image files will remain.')) {
-            const res = await API.deleteProject(id);
+            const deleteChoice = await openDeleteProjectModal(id, project ? project.name : '');
+            if (deleteChoice === null) {
+                return;
+            }
+            const deleteFolder = deleteChoice === 'delete_folder';
+            const res = await API.deleteProject(id, { delete_folder: deleteFolder });
             if (res.error) {
                 window.showToast(window.t ? window.t('dashboard_errorMsg', res.error) : 'Error: ' + res.error, 'error');
             } else {
@@ -362,15 +462,52 @@
         e.preventDefault();
         const formData = new FormData(e.target);
         const data = Object.fromEntries(formData.entries());
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalBtnHtml = submitBtn.innerHTML;
+        let progressTimer = null;
 
-        const res = await API.createProject(data);
-        if (res.error) {
-            window.showToast(window.t ? window.t('dashboard_errorMsg', res.error) : 'Error: ' + res.error, 'error');
-        } else {
-            closeModal('createProjectModal');
-            loadProjects();
-            e.target.reset();
-            document.getElementById('images_upload_status').classList.add('hidden');
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Tạo dự án...';
+
+        showLoadingOverlay(
+            'Đang tạo dự án...',
+            'Hệ thống đang tạo project, quét thư mục ảnh và đồng bộ dữ liệu ban đầu.',
+            8,
+            'Khởi tạo yêu cầu...'
+        );
+
+        try {
+            updateLoadingOverlay(18, 'Đang kiểm tra thông tin dự án...');
+
+            progressTimer = setInterval(() => {
+                const percentEl = document.getElementById('loadingOverlayPercent');
+                const currentProgress = percentEl ? parseInt(percentEl.innerText, 10) || 0 : 0;
+                if (currentProgress < 90) {
+                    let nextProgress = currentProgress + (currentProgress < 45 ? 9 : currentProgress < 70 ? 5 : 2);
+                    if (nextProgress > 90) nextProgress = 90;
+                    updateLoadingOverlay(nextProgress, 'Đang tạo project và quét dữ liệu ảnh...');
+                }
+            }, 450);
+
+            const res = await API.createProject(data);
+            if (res.error) {
+                window.showToast(window.t ? window.t('dashboard_errorMsg', res.error) : 'Error: ' + res.error, 'error');
+            } else {
+                updateLoadingOverlay(96, 'Đang hoàn tất và làm mới danh sách dự án...');
+                closeModal('createProjectModal');
+                await loadProjects();
+                e.target.reset();
+                document.getElementById('images_upload_status').classList.add('hidden');
+                updateLoadingOverlay(100, 'Hoàn tất tạo dự án.');
+                await new Promise(resolve => setTimeout(resolve, 250));
+            }
+        } finally {
+            if (progressTimer) clearInterval(progressTimer);
+            hideLoadingOverlay();
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.innerHTML = originalBtnHtml;
         }
     });
 
@@ -623,6 +760,8 @@
     // Set up drag and drop zones
     setupDropzone('images_dropzone', 'root_path_input', 'images_file_input', 'images_upload_status', true, 'create_name');
     setupDropzone('edit_images_dropzone', 'edit_root_path_input', 'edit_images_file_input', 'edit_images_upload_status', true, 'edit_name');
+    document.getElementById('deleteProjectKeepFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('keep_folder'));
+    document.getElementById('deleteProjectRemoveFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('delete_folder'));
 
     // Initial Load
     loadProjects();

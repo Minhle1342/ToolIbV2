@@ -1,11 +1,23 @@
 import os
 # pyrefly: ignore [missing-import]
-from flask import Flask, render_template
+from flask import Flask, abort, render_template
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from models import db
+from models import Project, db, slugify_project_name
 from routes import api_bp
 
 socketio = SocketIO(cors_allowed_origins="*")
+
+def resolve_project(identifier):
+    if identifier.isdigit():
+        project = Project.query.get(int(identifier))
+        if project:
+            return project
+
+    for project in Project.query.all():
+        if slugify_project_name(project.name) == identifier:
+            return project
+
+    abort(404)
 
 def create_app():
     app = Flask(__name__)
@@ -30,14 +42,25 @@ def create_app():
     def index():
         return render_template('dashboard.html')
 
-    @app.route('/project/<int:project_id>')
-    @app.route('/project/<int:project_id>/<path:filename>')
-    def workspace(project_id, filename=None):
-        return render_template('workspace.html', project_id=project_id, active_filename=filename)
-    
-    @app.route('/project/<int:project_id>/tags')
-    def tag_manager(project_id):
-        return render_template('tag_manager.html', project_id=project_id)
+    @app.route('/project/<project_identifier>/tags')
+    def tag_manager(project_identifier):
+        project = resolve_project(project_identifier)
+        return render_template(
+            'tag_manager.html',
+            project_id=project.id,
+            project_slug=slugify_project_name(project.name)
+        )
+
+    @app.route('/project/<project_identifier>/')
+    @app.route('/project/<project_identifier>/<path:filename>')
+    def workspace(project_identifier, filename=None):
+        project = resolve_project(project_identifier)
+        return render_template(
+            'workspace.html',
+            project_id=project.id,
+            project_slug=slugify_project_name(project.name),
+            active_filename=filename
+        )
     
     @app.route('/export')
     def export_page():

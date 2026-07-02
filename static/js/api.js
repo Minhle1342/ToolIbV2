@@ -13,8 +13,12 @@ class startAPI {
         return await res.json();
     }
 
-    async deleteProject(id) {
-        const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    async deleteProject(id, options = {}) {
+        const res = await fetch(`/api/projects/${id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(options)
+        });
         return await res.json();
     }
 
