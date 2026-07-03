@@ -12,8 +12,50 @@ class Workspace {
         this.copiedBoxes = null;
         this.copiedFromImageId = null;
         this.zoomOnFocus = localStorage.getItem('zoomOnFocus') !== 'false';
+        this.imageById = new Map();
+        this.setupImageListDelegation();
         this.init();
         this.imageList = [];
+    }
+
+    setupImageListDelegation() {
+        const container = document.getElementById('imageList');
+        if (!container || container.dataset.delegated === 'true') return;
+
+        container.dataset.delegated = 'true';
+
+        container.addEventListener('click', (event) => {
+            const checkbox = event.target.closest('.image-checkbox');
+            if (checkbox && container.contains(checkbox)) {
+                event.stopPropagation();
+                this.handleCheckboxClick(event, parseInt(checkbox.dataset.id, 10));
+                return;
+            }
+
+            const item = event.target.closest('.image-item');
+            if (!item || !container.contains(item)) return;
+
+            this.selectImageById(parseInt(item.dataset.id, 10));
+        });
+
+        container.addEventListener('contextmenu', (event) => {
+            const item = event.target.closest('.image-item');
+            if (!item || !container.contains(item)) return;
+
+            copyImageName(event, item.dataset.filename || '');
+        });
+    }
+
+    async selectImageById(imageId) {
+        if (currentImage && currentImage.id === imageId) {
+            ensureImageListItemRendered(imageId);
+            return;
+        }
+
+        const image = this.imageById.get(imageId) || (this.allImages || []).find(i => i.id === imageId);
+        if (image) {
+            await this.selectImage(image);
+        }
     }
 
     async init() {
@@ -364,7 +406,7 @@ class Workspace {
             el.classList.remove('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold', 'bg-panel', 'border-l-2', 'border-primary', 'text-primary');
             el.classList.add('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
         });
-        const el = document.getElementById(`img-${image.id}`);
+        const el = document.getElementById(`img-${image.id}`) || ensureImageListItemRendered(image.id);
         if (el) {
             el.classList.remove('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
             el.classList.add('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold');
@@ -419,7 +461,11 @@ class Workspace {
                 return;
             }
 
-            if (image.overlapThreshold !== undefined && image.overlapThreshold !== null) {
+            if (
+                image.overlapThreshold !== undefined &&
+                image.overlapThreshold !== null &&
+                labels.length <= editor.maxAutoOverlapBoxes
+            ) {
                 for (let i = 0; i < labels.length; i++) {
                     labels[i].isOverlapping = false;
                 }
@@ -457,7 +503,7 @@ class Workspace {
 
     scrollToActiveImage() {
         if (!currentImage) return;
-        const el = document.getElementById(`img-${currentImage.id}`);
+        const el = document.getElementById(`img-${currentImage.id}`) || ensureImageListItemRendered(currentImage.id);
         if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
@@ -2751,7 +2797,9 @@ function toggleSidebarFilters() {
 
 function copyImageName(event, filename) {
     event.preventDefault();
-    const el = event.currentTarget;
+    const el = event.currentTarget?.classList?.contains('image-item')
+        ? event.currentTarget
+        : event.target.closest('.image-item');
     const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
     navigator.clipboard.writeText(nameWithoutExt).then(() => {
         if (el) {
@@ -2767,6 +2815,144 @@ function copyImageName(event, filename) {
     }).catch(err => {
         console.error('Failed to copy', err);
     });
+}
+
+const IMAGE_LIST_INITIAL_RENDER = 160;
+const IMAGE_LIST_CHUNK_SIZE = 240;
+let imageListRenderState = null;
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function cancelImageListRender() {
+    if (!imageListRenderState) return;
+    imageListRenderState.cancelled = true;
+    if (imageListRenderState.scrollHandler && imageListRenderState.container) {
+        imageListRenderState.container.removeEventListener('scroll', imageListRenderState.scrollHandler);
+    }
+    imageListRenderState = null;
+}
+
+function scheduleIdle(callback) {
+    if ('requestIdleCallback' in window) {
+        return window.requestIdleCallback(callback, { timeout: 120 });
+    }
+    return window.setTimeout(callback, 16);
+}
+
+function imageListItemHtml(img, overlapThreshold) {
+    const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
+    const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
+    const overlapClasses = (!isNaN(overlapThreshold) && img.overlapCount > 0)
+        ? 'border-l-[3px] border-b-[3px] border-l-red-500 border-b-red-500'
+        : '';
+    const checked = currentWorkspace.selectedImageIds.has(img.id) ? 'checked' : '';
+    const filename = escapeHtml(img.filename);
+
+    return `
+        <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses} ${overlapClasses}"
+             id="img-${img.id}"
+             data-id="${img.id}"
+             data-filename="${filename}">
+            <input type="checkbox" class="image-checkbox rounded border-border bg-panel text-primary focus:ring-primary w-4 h-4 flex-shrink-0 mr-2"
+                   data-id="${img.id}"
+                   ${checked}>
+            <span class="truncate pr-2 flex-1" title="${filename}">${filename}</span>
+            <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1 active-users-indicator" id="active-users-${img.id}"></div>
+                ${img.overlapCount > 0 ? `<span class="text-xs font-bold text-red-500 bg-red-500/20 px-1.5 py-0.5 rounded" title="${img.overlapCount} overlapping boxes">${img.overlapCount}</span>` : ''}
+                ${img.is_reviewed ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : ''}
+                ${img.flag_status === 'Flagged' ? '<i class="fa-solid fa-flag text-red-500"></i>' : ''}
+                ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}
+            </div>
+        </div>
+    `;
+}
+
+function appendImageListChunk(state, count) {
+    if (!state || state.cancelled) return;
+
+    const end = Math.min(state.nextIndex + count, state.images.length);
+    if (end <= state.nextIndex) return;
+
+    let html = '';
+    for (let i = state.nextIndex; i < end; i++) {
+        html += imageListItemHtml(state.images[i], state.overlapThreshold);
+    }
+
+    if (state.nextIndex === 0) {
+        state.container.innerHTML = html;
+    } else {
+        state.container.insertAdjacentHTML('beforeend', html);
+    }
+
+    state.nextIndex = end;
+
+    if (typeof window.updateAllUserIndicators === 'function') {
+        window.updateAllUserIndicators();
+    }
+}
+
+function renderMoreImagesSoon(state) {
+    if (!state || state.cancelled || state.nextIndex >= state.images.length || state.pending) return;
+
+    state.pending = true;
+    scheduleIdle(() => {
+        state.pending = false;
+        appendImageListChunk(state, IMAGE_LIST_CHUNK_SIZE);
+    });
+}
+
+function renderImageList(container, images, overlapThreshold) {
+    cancelImageListRender();
+
+    if (images.length === 0) {
+        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">KhÃ´ng cÃ³ áº£nh nÃ o khá»›p vá»›i bá»™ lá»c</div>';
+        return;
+    }
+
+    const state = {
+        container,
+        images,
+        overlapThreshold,
+        nextIndex: 0,
+        pending: false,
+        cancelled: false,
+        scrollHandler: null
+    };
+
+    imageListRenderState = state;
+    appendImageListChunk(state, IMAGE_LIST_INITIAL_RENDER);
+
+    state.scrollHandler = () => {
+        const remaining = state.container.scrollHeight - state.container.scrollTop - state.container.clientHeight;
+        if (remaining < 900) {
+            renderMoreImagesSoon(state);
+        }
+    };
+
+    container.addEventListener('scroll', state.scrollHandler, { passive: true });
+    renderMoreImagesSoon(state);
+}
+
+function ensureImageListItemRendered(imageId) {
+    const state = imageListRenderState;
+    if (!state || state.cancelled) return document.getElementById(`img-${imageId}`);
+
+    const targetIndex = state.images.findIndex(img => img.id === imageId);
+    if (targetIndex === -1) return null;
+
+    while (state.nextIndex <= targetIndex) {
+        appendImageListChunk(state, IMAGE_LIST_CHUNK_SIZE);
+    }
+
+    return document.getElementById(`img-${imageId}`);
 }
 
 const currentWorkspace = new Workspace();
@@ -2891,6 +3077,7 @@ async function loadImages(fetchFromServer = true) {
         const images = await API.getImages(filters);
         currentWorkspace.allImages = images;
     }
+    currentWorkspace.imageById = new Map((currentWorkspace.allImages || []).map(img => [img.id, img]));
 
     const totalImageCountEl = document.getElementById('totalImageCount');
     if (totalImageCountEl) {
@@ -2930,61 +3117,36 @@ async function loadImages(fetchFromServer = true) {
     const overlapInput = document.getElementById('overlapThresholdInput');
     const overlapThreshold = overlapInput ? parseFloat(overlapInput.value) : NaN;
 
-    // Add overlap info to images if threshold is set
-    filteredImages.forEach(img => {
-        img.overlapThreshold = isNaN(overlapThreshold) ? null : overlapThreshold;
-        img.overlapCount = 0;
-        img.overlappingBoxes = new Set();
-        if (!isNaN(overlapThreshold) && img.boxes && img.boxes.length > 1) {
-            for (let i = 0; i < img.boxes.length; i++) {
-                for (let j = i + 1; j < img.boxes.length; j++) {
-                    const iou = calculateIoU(img.boxes[i], img.boxes[j]);
-                    if (iou >= overlapThreshold) {
-                        img.overlappingBoxes.add(i);
-                        img.overlappingBoxes.add(j);
+    // Add overlap info only when the filter is active; this is expensive on large lists.
+    if (!isNaN(overlapThreshold)) {
+        filteredImages.forEach(img => {
+            img.overlapThreshold = overlapThreshold;
+            img.overlapCount = 0;
+            img.overlappingBoxes = new Set();
+            if (img.boxes && img.boxes.length > 1) {
+                for (let i = 0; i < img.boxes.length; i++) {
+                    for (let j = i + 1; j < img.boxes.length; j++) {
+                        const iou = calculateIoU(img.boxes[i], img.boxes[j]);
+                        if (iou >= overlapThreshold) {
+                            img.overlappingBoxes.add(i);
+                            img.overlappingBoxes.add(j);
+                        }
                     }
                 }
+                img.overlapCount = img.overlappingBoxes.size;
             }
-            img.overlapCount = img.overlappingBoxes.size;
-        }
-    });
+        });
 
-    if (!isNaN(overlapThreshold)) {
         filteredImages = filteredImages.filter(img => img.overlapCount > 0);
+    } else {
+        filteredImages.forEach(img => {
+            img.overlapThreshold = null;
+            img.overlapCount = 0;
+        });
     }
 
-    if (filteredImages.length === 0) {
-        if (container) container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc</div>';
-    } else if (container) {
-        container.innerHTML = filteredImages.map(img => {
-            const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
-            const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
-
-            // Overlap UI classes
-            const overlapClasses = (!isNaN(overlapThreshold) && img.overlapCount > 0)
-                ? 'border-l-[3px] border-b-[3px] border-l-red-500 border-b-red-500'
-                : '';
-
-            return `
-            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses} ${overlapClasses}" 
-                 id="img-${img.id}" 
-                 onclick="currentWorkspace.selectImage(currentWorkspace.allImages.find(i => i.id === ${img.id}))"
-                 oncontextmenu="copyImageName(event, '${img.filename}')">
-                <input type="checkbox" class="image-checkbox rounded border-border bg-panel text-primary focus:ring-primary w-4 h-4 flex-shrink-0 mr-2" 
-                       data-id="${img.id}" 
-                       onclick="event.stopPropagation(); currentWorkspace.handleCheckboxClick(event, ${img.id})" 
-                       ${currentWorkspace.selectedImageIds.has(img.id) ? 'checked' : ''}>
-                <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
-                <div class="flex items-center gap-2">
-                    <div class="flex items-center gap-1 active-users-indicator" id="active-users-${img.id}"></div>
-                    ${img.overlapCount > 0 ? `<span class="text-xs font-bold text-red-500 bg-red-500/20 px-1.5 py-0.5 rounded" title="${img.overlapCount} overlapping boxes">${img.overlapCount}</span>` : ''}
-                    ${img.is_reviewed ? '<i class="fa-solid fa-circle-check text-green-500"></i>' : ''}
-                    ${img.flag_status === 'Flagged' ? '<i class="fa-solid fa-flag text-red-500"></i>' : ''}
-                    ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}
-                </div>
-            </div>
-            `;
-        }).join('');
+    if (container) {
+        renderImageList(container, filteredImages, overlapThreshold);
     }
 
     currentWorkspace.imageList = filteredImages;

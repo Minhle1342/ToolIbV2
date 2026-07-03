@@ -111,7 +111,24 @@ const translations = {
         "dashboard_errorMsg": "Error: {0}",
         "dashboard_delete_password_prompt": "Enter password to delete this project:",
         "dashboard_delete_password_incorrect": "Incorrect password! Project was not deleted.",
-        "unsaved_changes_warning": "You have unsaved changes! Click OK to switch image anyway without saving, or Cancel to stay."
+        "unsaved_changes_warning": "You have unsaved changes! Click OK to switch image anyway without saving, or Cancel to stay.",
+        "dashboard_mergeProjects": "Merge Projects",
+        "dashboard_mergeProjectsTitle": "Merge Projects",
+        "dashboard_selectSourceProjects": "Select Source Projects (Min 2)",
+        "dashboard_mergedProjectName": "Merged Project Name",
+        "dashboard_destinationFolderPath": "Destination Folder Path (Absolute)",
+        "dashboard_collisionPolicy": "File Collision Handling Policy",
+        "dashboard_policyRename": "Rename duplicate files (Rename)",
+        "dashboard_policySkip": "Skip duplicate files (Skip)",
+        "dashboard_policyOverwrite": "Overwrite duplicate files (Overwrite)",
+        "dashboard_preflightSummary": "Projected Merge Summary",
+        "dashboard_summarySourceCount": "Source Projects",
+        "dashboard_summaryTotalImages": "Total Source Images",
+        "dashboard_summaryLabelFiles": "Images with Labels",
+        "dashboard_summaryFinalImages": "Projected Output Images",
+        "dashboard_summaryMergedClasses": "Consolidated Classes",
+        "dashboard_preflightWarnings": "Warnings & Conflicts",
+        "dashboard_btnMerge": "Proceed to Merge"
     },
     vi: {
         // Base
@@ -225,7 +242,24 @@ const translations = {
         "dashboard_errorMsg": "Lỗi: {0}",
         "dashboard_delete_password_prompt": "Nhập mật khẩu để xóa dự án này:",
         "dashboard_delete_password_incorrect": "Mật khẩu không chính xác! Không thể xóa dự án.",
-        "unsaved_changes_warning": "Bạn có thay đổi chưa lưu! Bấm OK để tiếp tục chuyển ảnh mà không lưu, hoặc Cancel để ở lại."
+        "unsaved_changes_warning": "Bạn có thay đổi chưa lưu! Bấm OK để tiếp tục chuyển ảnh mà không lưu, hoặc Cancel để ở lại.",
+        "dashboard_mergeProjects": "Gộp Dự án",
+        "dashboard_mergeProjectsTitle": "Gộp các Dự án",
+        "dashboard_selectSourceProjects": "Chọn các dự án nguồn (Chọn tối thiểu 2)",
+        "dashboard_mergedProjectName": "Tên dự án sau gộp",
+        "dashboard_destinationFolderPath": "Đường dẫn thư mục đích (Tuyệt đối)",
+        "dashboard_collisionPolicy": "Quy tắc xử lý trùng tên file",
+        "dashboard_policyRename": "Tự đổi tên file trùng (Rename)",
+        "dashboard_policySkip": "Bỏ qua file trùng (Skip)",
+        "dashboard_policyOverwrite": "Ghi đè file trùng (Overwrite)",
+        "dashboard_preflightSummary": "Kết quả dự kiến trước khi gộp",
+        "dashboard_summarySourceCount": "Dự án nguồn",
+        "dashboard_summaryTotalImages": "Tổng ảnh nguồn",
+        "dashboard_summaryLabelFiles": "Tổng ảnh có nhãn",
+        "dashboard_summaryFinalImages": "Tổng ảnh đầu ra",
+        "dashboard_summaryMergedClasses": "Nhãn gộp chung (Classes)",
+        "dashboard_preflightWarnings": "Cảnh báo / Phát hiện xung đột",
+        "dashboard_btnMerge": "Tiến hành Gộp"
     }
 };
 

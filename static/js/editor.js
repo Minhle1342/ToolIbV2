@@ -28,6 +28,10 @@ class Editor {
         this.maxHistory = 50;
         this.onStateChange = null;
         this.loading = false;
+        this.maxAutoOverlapBoxes = 600;
+        this.maxAnimatedCenterDots = 800;
+        this.maxHistorySnapshotBoxes = 1500;
+        this.bulkLoadingBoxes = false;
 
         // Colors mapping
         this.colors = [
@@ -43,17 +47,8 @@ class Editor {
         this.overlayCtx = this.overlayCanvas.getContext('2d');
         this.sequenceMode = 'none';
         this.showBoxes = false;
-        
-        // Start dot animation loop since boxes are hidden by default
-        const animateDots = () => {
-            if (this.showBoxes) {
-                this._dotAnimFrame = null;
-                return;
-            }
-            this.canvas.requestRenderAll();
-            this._dotAnimFrame = requestAnimationFrame(animateDots);
-        };
-        this._dotAnimFrame = requestAnimationFrame(animateDots);
+        this._dotAnimFrame = null;
+        this.startCenterDotAnimation();
         this.isDirty = false;
 
         this.initEvents();
@@ -62,6 +57,23 @@ class Editor {
 
         // Initialize Mode defaults
         this.setMode('select');
+    }
+
+    startCenterDotAnimation() {
+        if (this._dotAnimFrame) return;
+
+        const animateDots = () => {
+            const rectCount = this.canvas.getObjects('rect').length;
+            if (this.showBoxes || rectCount > this.maxAnimatedCenterDots) {
+                this._dotAnimFrame = null;
+                return;
+            }
+
+            this.canvas.requestRenderAll();
+            this._dotAnimFrame = requestAnimationFrame(animateDots);
+        };
+
+        this._dotAnimFrame = requestAnimationFrame(animateDots);
     }
 
     setFocusClass(id) {
@@ -181,30 +193,50 @@ class Editor {
         });
     }
 
-    clearAllBoxes() {
+    clearAllBoxes(render = true) {
         this.canvas.getObjects().forEach(o => {
             if (o.type === 'rect' || o.type === 'text' || o.type === 'group') this.canvas.remove(o);
         });
-        this.canvas.requestRenderAll();
+        if (render) {
+            this.canvas.requestRenderAll();
+        }
     }
 
     loadBoxes(boxes) {
-        this.clearAllBoxes();
+        const previousRenderOnAddRemove = this.canvas.renderOnAddRemove;
+        this.canvas.renderOnAddRemove = false;
+        this.bulkLoadingBoxes = true;
 
-        boxes.forEach((box, i) => {
-            this.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, false, box.isOverlapping, 'box_' + i);
-        });
+        try {
+            this.clearAllBoxes(false);
 
-        this.refreshOverlapHighlights();
+            boxes.forEach((box, i) => {
+                const rect = this.createBoxRect(box.class_id, box.x, box.y, box.w, box.h, box.isOverlapping, 'box_' + i);
+                this.canvas.add(rect);
+            });
+
+            this.sortBoxesByArea(false);
+
+            if (boxes.length <= this.maxAutoOverlapBoxes) {
+                this.refreshOverlapHighlights(false);
+            }
+        } finally {
+            this.bulkLoadingBoxes = false;
+            this.canvas.renderOnAddRemove = previousRenderOnAddRemove;
+        }
 
         // Save initial state for Undo
         this.saveState();
         if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         this.focusClassId = null; // Reset focus on new image
         this.isDirty = false; // Reset dirty flag after initial load
+        this.canvas.requestRenderAll();
+        if (!this.showBoxes && boxes.length <= this.maxAnimatedCenterDots) {
+            this.startCenterDotAnimation();
+        }
     }
 
-    addBoxToCanvas(classId, cx, cy, w, h, isNew = true, isOverlapping = false, collabId = null) {
+    createBoxRect(classId, cx, cy, w, h, isOverlapping = false, collabId = null) {
         // Convert YOLO (normalized center xywh) to Canvas (top-left xywh)
         const left = (cx - w / 2) * this.imageWidth;
         const top = (cy - h / 2) * this.imageHeight;
@@ -217,7 +249,7 @@ class Editor {
         const fillColor = isOverlapping ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0,0,0,0)';
         const strokeWidth = isOverlapping ? 3 / this.getZoom() : 1 / this.getZoom();
 
-        const rect = new fabric.Rect({
+        return new fabric.Rect({
             left: left,
             top: top,
             width: width,
@@ -236,6 +268,10 @@ class Editor {
             evented: this.showBoxes,
             selectable: this.showBoxes && (this.currentMode === 'select')
         });
+    }
+
+    addBoxToCanvas(classId, cx, cy, w, h, isNew = true, isOverlapping = false, collabId = null) {
+        const rect = this.createBoxRect(classId, cx, cy, w, h, isOverlapping, collabId);
 
         // Z-Index Logic: Small boxes on top
         this.canvas.add(rect);
@@ -306,8 +342,14 @@ class Editor {
         rect.overlapCount = overlapCount;
     }
 
-    refreshOverlapHighlights() {
+    refreshOverlapHighlights(render = true) {
         const rects = this.canvas.getObjects('rect');
+        if (rects.length > this.maxAutoOverlapBoxes) {
+            if (render) {
+                this.canvas.requestRenderAll();
+            }
+            return;
+        }
         const threshold = this.getOverlapIoUThreshold();
 
         rects.forEach(rect => this.applyBoxOverlapStyle(rect, 0));
@@ -323,7 +365,9 @@ class Editor {
 
         rects.forEach(rect => this.applyBoxOverlapStyle(rect, rect.overlapCount || 0));
 
-        this.canvas.requestRenderAll();
+        if (render) {
+            this.canvas.requestRenderAll();
+        }
     }
 
 
@@ -435,7 +479,7 @@ class Editor {
         ctx.restore();
     }
 
-    sortBoxesByArea() {
+    sortBoxesByArea(render = true) {
         const boxes = this.canvas.getObjects('rect');
         if (boxes.length <= 1) return;
 
@@ -452,7 +496,9 @@ class Editor {
             box.bringToFront();
         });
 
-        this.canvas.requestRenderAll();
+        if (render) {
+            this.canvas.requestRenderAll();
+        }
     }
 
     initEvents() {
@@ -1030,16 +1076,19 @@ class Editor {
 
         // History Hooks and Visibility Updates
         this.canvas.on('object:added', (e) => {
+            if (this.bulkLoadingBoxes) return;
             if (e.target && e.target.type === 'rect') this.refreshOverlapHighlights();
             if (e.target && e.target.type === 'rect' && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
         this.canvas.on('object:modified', (e) => {
+            if (this.bulkLoadingBoxes) return;
             if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection')) this.refreshOverlapHighlights();
             if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection') && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
         });
         this.canvas.on('object:removed', (e) => {
+            if (this.bulkLoadingBoxes) return;
             if (e.target && e.target.type === 'rect') this.refreshOverlapHighlights();
             if (e.target && e.target.type === 'rect' && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
@@ -1089,10 +1138,11 @@ class Editor {
                 if (ctx) {
                     ctx.save();
                     const rects = this.canvas.getObjects('rect');
+                    const animateDots = rects.length <= this.maxAnimatedCenterDots;
                     const time = performance.now();
-                    const pulse = (Math.sin(time / 200) + 1) / 2; // oscillates between 0 and 1
-                    const pulseRadius = 4.5 + pulse * 6; // oscillates between 4.5 and 10.5
-                    const pulseAlpha = (1 - pulse) * 0.8; // fades out as it expands
+                    const pulse = animateDots ? (Math.sin(time / 200) + 1) / 2 : 0; // oscillates between 0 and 1
+                    const pulseRadius = animateDots ? 4.5 + pulse * 6 : 4.5; // oscillates between 4.5 and 10.5
+                    const pulseAlpha = animateDots ? (1 - pulse) * 0.8 : 0; // fades out as it expands
                     
                     rects.forEach(rect => {
                         const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
@@ -1105,17 +1155,19 @@ class Editor {
                         const overlapBoost = Math.min(overlapCount, 4);
                         
                         // Draw glowing outer ring
-                        ctx.save();
-                        ctx.globalAlpha = isOverlapping ? Math.min(0.35 + pulse * 0.45 + overlapBoost * 0.08, 0.95) : pulseAlpha;
-                        ctx.fillStyle = baseColor;
-                        ctx.shadowColor = baseColor;
-                        ctx.shadowBlur = isOverlapping ? 18 + overlapBoost * 4 : 10;
-                        ctx.beginPath();
-                        ctx.arc(cx, cy, isOverlapping ? pulseRadius + 4 + overlapBoost * 2 : pulseRadius, 0, Math.PI * 2);
-                        ctx.fill();
-                        ctx.restore();
+                        if (animateDots) {
+                            ctx.save();
+                            ctx.globalAlpha = isOverlapping ? Math.min(0.35 + pulse * 0.45 + overlapBoost * 0.08, 0.95) : pulseAlpha;
+                            ctx.fillStyle = baseColor;
+                            ctx.shadowColor = baseColor;
+                            ctx.shadowBlur = isOverlapping ? 18 + overlapBoost * 4 : 10;
+                            ctx.beginPath();
+                            ctx.arc(cx, cy, isOverlapping ? pulseRadius + 4 + overlapBoost * 2 : pulseRadius, 0, Math.PI * 2);
+                            ctx.fill();
+                            ctx.restore();
+                        }
 
-                        if (isOverlapping) {
+                        if (isOverlapping && animateDots) {
                             ctx.save();
                             ctx.strokeStyle = '#ff3b30';
                             ctx.lineWidth = 2 + Math.min(overlapBoost, 2);
@@ -2158,17 +2210,7 @@ class Editor {
         });
         if (!this.showBoxes) {
             this.canvas.discardActiveObject();
-            if (!this._dotAnimFrame) {
-                const animateDots = () => {
-                    if (this.showBoxes) {
-                        this._dotAnimFrame = null;
-                        return;
-                    }
-                    this.canvas.requestRenderAll();
-                    this._dotAnimFrame = requestAnimationFrame(animateDots);
-                };
-                this._dotAnimFrame = requestAnimationFrame(animateDots);
-            }
+            this.startCenterDotAnimation();
         } else {
             if (this._dotAnimFrame) {
                 cancelAnimationFrame(this._dotAnimFrame);
@@ -2306,6 +2348,16 @@ class Editor {
         if (this.historyProcessing) return;
 
         this.isDirty = true;
+
+        const rectCount = this.canvas.getObjects('rect').length;
+        if (rectCount > this.maxHistorySnapshotBoxes) {
+            this.history = [];
+            this.redoStack = [];
+            if (!this.loading && typeof this.onStateChange === 'function') {
+                this.onStateChange();
+            }
+            return;
+        }
 
         // Save current state
         const state = JSON.stringify(this.canvas.toDatalessJSON([

@@ -4,11 +4,18 @@
 <div class="w-full p-8">
     <div class="flex justify-between items-center mb-8 w-full">
         <h1 class="text-3xl font-bold text-content" data-i18n="dashboard_title">Projects</h1>
-        <button
-            class="bg-primary hover:bg-blue-600 text-content-inv px-4 py-2 rounded flex items-center gap-2 transition-colors"
-            onclick="openModal('createProjectModal')">
-            <i class="fa-solid fa-plus"></i> <span data-i18n="dashboard_newProject">New Project</span>
-        </button>
+        <div class="flex gap-3">
+            <button
+                class="bg-surface hover:bg-border text-content px-4 py-2 rounded flex items-center gap-2 border border-border transition-colors font-medium"
+                onclick="openMergeModal()">
+                <i class="fa-solid fa-code-merge text-primary"></i> <span data-i18n="dashboard_mergeProjects">Merge Projects</span>
+            </button>
+            <button
+                class="bg-primary hover:bg-blue-600 text-content-inv px-4 py-2 rounded flex items-center gap-2 transition-colors font-medium"
+                onclick="openModal('createProjectModal')">
+                <i class="fa-solid fa-plus"></i> <span data-i18n="dashboard_newProject">New Project</span>
+            </button>
+        </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 w-full" id="projectList">
@@ -60,6 +67,124 @@
                     data-i18n="dashboard_btnCreate">Create</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- Merge Projects Modal -->
+<div class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" id="mergeProjectsModal">
+    <div class="bg-panel rounded-xl shadow-2xl w-full max-w-2xl p-6 border border-border flex flex-col max-h-[90vh]">
+        <div class="flex justify-between items-center mb-6 pb-3 border-b border-border">
+            <h2 class="text-xl font-bold text-content flex items-center gap-2">
+                <i class="fa-solid fa-code-merge text-primary"></i>
+                <span data-i18n="dashboard_mergeProjectsTitle">Gộp Dự án (Merge Projects)</span>
+            </h2>
+            <button type="button" onclick="closeModal('mergeProjectsModal')" class="text-content-muted hover:text-content transition-colors text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        
+        <form id="mergeProjectsForm" class="space-y-4 overflow-y-auto pr-1 flex-1">
+            <!-- Source Projects Selection -->
+            <div class="space-y-2">
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_selectSourceProjects">Chọn các dự án nguồn (Chọn tối thiểu 2)</label>
+                <div class="bg-surface/50 border border-border rounded-lg p-4 max-h-[160px] overflow-y-auto space-y-2" id="mergeSourceList">
+                    <!-- Checkboxes of projects will be dynamically populated here -->
+                </div>
+            </div>
+
+            <!-- Merged Project Name -->
+            <div class="space-y-1">
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_mergedProjectName">Tên dự án sau gộp</label>
+                <input type="text" name="name" id="merge_name" oninput="debouncePreflight()"
+                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
+                    required placeholder="e.g. Colgate_Merged">
+            </div>
+
+            <!-- Destination Folder Path -->
+            <div class="space-y-1">
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_destinationFolderPath">Đường dẫn thư mục đích (Tuyệt đối)</label>
+                <input type="text" name="root_path" id="merge_root_path" oninput="debouncePreflight()"
+                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
+                    required placeholder="e.g. D:\Dataset\Colgate_Merged">
+            </div>
+
+            <!-- Collision Policy Selection -->
+            <div class="space-y-1">
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_collisionPolicy">Quy tắc xử lý trùng tên file</label>
+                <select name="collision_policy" id="merge_collision_policy" onchange="runMergePreflight()"
+                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors">
+                    <option value="rename" selected data-i18n="dashboard_policyRename">Tự đổi tên file trùng (Rename)</option>
+                    <option value="skip" data-i18n="dashboard_policySkip">Bỏ qua file trùng (Skip)</option>
+                    <option value="overwrite" data-i18n="dashboard_policyOverwrite">Ghi đè file trùng (Overwrite)</option>
+                </select>
+            </div>
+
+            <!-- Preflight Error -->
+            <div id="preflightError" class="hidden text-xs text-red-500 bg-red-500/10 border border-red-500/20 rounded p-2.5 flex items-center gap-1.5">
+                <i class="fa-solid fa-circle-exclamation"></i>
+                <span id="preflightErrorMsg">Error message</span>
+            </div>
+
+            <!-- Preflight Summary Section -->
+            <div id="mergePreflightSection" class="hidden mt-4 space-y-3 bg-surface/30 border border-border rounded-lg p-4">
+                <h3 class="text-sm font-semibold text-content flex items-center gap-1.5">
+                    <i class="fa-solid fa-list-check text-primary"></i>
+                    <span data-i18n="dashboard_preflightSummary">Kết quả dự kiến trước khi gộp</span>
+                </h3>
+                
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                    <div class="bg-surface/50 border border-border rounded p-2.5">
+                        <div class="text-content-muted mb-0.5" data-i18n="dashboard_summarySourceCount">Dự án nguồn</div>
+                        <div class="text-base font-bold text-content" id="preflightSourceCount">0</div>
+                    </div>
+                    <div class="bg-surface/50 border border-border rounded p-2.5">
+                        <div class="text-content-muted mb-0.5" data-i18n="dashboard_summaryTotalImages">Tổng ảnh nguồn</div>
+                        <div class="text-base font-bold text-content" id="preflightTotalImages">0</div>
+                    </div>
+                    <div class="bg-surface/50 border border-border rounded p-2.5">
+                        <div class="text-content-muted mb-0.5" data-i18n="dashboard_summaryLabelFiles">Tổng ảnh có nhãn</div>
+                        <div class="text-base font-bold text-content" id="preflightLabelFiles">0</div>
+                    </div>
+                    <div class="bg-surface/50 border border-border rounded p-2.5">
+                        <div class="text-content-muted mb-0.5" data-i18n="dashboard_summaryFinalImages">Tổng ảnh đầu ra</div>
+                        <div class="text-base font-bold text-content text-primary" id="preflightFinalImages">0</div>
+                    </div>
+                </div>
+
+                <!-- Classes detail -->
+                <div class="text-xs space-y-1 bg-surface/50 border border-border rounded p-2.5">
+                    <div class="font-medium text-content-muted flex justify-between">
+                        <span data-i18n="dashboard_summaryMergedClasses">Nhãn gộp chung (Classes)</span>
+                        <span class="text-primary font-bold" id="preflightClassCount">0 classes</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1 mt-1.5 max-h-[80px] overflow-y-auto" id="preflightClassBadges">
+                        <!-- class badges here -->
+                    </div>
+                </div>
+
+                <!-- Warnings and Errors List -->
+                <div id="preflightWarningsContainer" class="hidden text-xs space-y-1.5">
+                    <div class="font-semibold text-amber-500 flex items-center gap-1">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span data-i18n="dashboard_preflightWarnings">Cảnh báo / Phát hiện xung đột</span>
+                    </div>
+                    <ul id="preflightWarningsList" class="list-disc pl-4 space-y-1 text-content-muted max-h-[100px] overflow-y-auto">
+                        <!-- warning items here -->
+                    </ul>
+                </div>
+            </div>
+        </form>
+
+        <div class="flex justify-end gap-3 mt-6 pt-3 border-t border-border">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="closeModal('mergeProjectsModal')" data-i18n="dashboard_btnCancel">Hủy</button>
+            <button type="button" id="mergeSubmitBtn" onclick="executeMerge()" disabled
+                class="px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5">
+                <i class="fa-solid fa-shuffle"></i>
+                <span data-i18n="dashboard_btnMerge">Tiến hành Gộp</span>
+            </button>
+        </div>
     </div>
 </div>
 
@@ -918,6 +1043,205 @@
     });
     document.getElementById('deleteProjectKeepFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('keep_folder'));
     document.getElementById('deleteProjectRemoveFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('delete_folder'));
+
+    let preflightTimeout = null;
+
+    function debouncePreflight() {
+        if (preflightTimeout) clearTimeout(preflightTimeout);
+        preflightTimeout = setTimeout(runMergePreflight, 500);
+    }
+
+    function openMergeModal() {
+        const container = document.getElementById('mergeSourceList');
+        if (!container) return;
+
+        if (allProjects.length === 0) {
+            container.innerHTML = `<div class="text-xs text-content-muted italic">Không có dự án nào khả dụng. Hãy tạo dự án trước.</div>`;
+        } else {
+            container.innerHTML = allProjects.map(p => `
+                <label class="flex items-center gap-3 text-sm text-content cursor-pointer hover:bg-surface/80 p-2 rounded-md transition-colors border border-transparent hover:border-border">
+                    <input type="checkbox" name="source_projects" value="${p.id}" onchange="runMergePreflight()" class="rounded border-border text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
+                    <div class="flex-1 min-w-0">
+                        <div class="font-semibold truncate text-content">${p.name}</div>
+                        <div class="text-[11px] text-content-muted truncate flex items-center gap-1">
+                            <i class="fa-regular fa-folder text-[10px]"></i> ${p.root_path}
+                        </div>
+                    </div>
+                </label>
+            `).join('');
+        }
+
+        document.getElementById('merge_name').value = '';
+        document.getElementById('merge_root_path').value = '';
+        document.getElementById('merge_collision_policy').value = 'rename';
+
+        document.getElementById('mergePreflightSection').classList.add('hidden');
+        document.getElementById('preflightError').classList.add('hidden');
+
+        const submitBtn = document.getElementById('mergeSubmitBtn');
+        submitBtn.disabled = true;
+        submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+
+        openModal('mergeProjectsModal');
+    }
+
+    async function runMergePreflight() {
+        const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
+        const projectIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+        const name = document.getElementById('merge_name').value.trim();
+        const rootPath = document.getElementById('merge_root_path').value.trim();
+        const collisionPolicy = document.getElementById('merge_collision_policy').value;
+
+        const errorDiv = document.getElementById('preflightError');
+        const errorMsg = document.getElementById('preflightErrorMsg');
+        const preflightSection = document.getElementById('mergePreflightSection');
+        const submitBtn = document.getElementById('mergeSubmitBtn');
+
+        // Hide old states
+        errorDiv.classList.add('hidden');
+
+        if (projectIds.length < 2 || !name || !rootPath) {
+            preflightSection.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/projects/merge/preflight', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    project_ids: projectIds,
+                    name: name,
+                    root_path: rootPath,
+                    collision_policy: collisionPolicy
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                errorMsg.innerText = data.error || 'Lỗi lập lịch merge';
+                errorDiv.classList.remove('hidden');
+                preflightSection.classList.add('hidden');
+                submitBtn.disabled = true;
+                submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+                return;
+            }
+
+            // Fill Preflight Summary
+            document.getElementById('preflightSourceCount').innerText = data.source_project_count;
+            document.getElementById('preflightTotalImages').innerText = data.total_images;
+            document.getElementById('preflightLabelFiles').innerText = data.label_file_count;
+            document.getElementById('preflightFinalImages').innerText = data.final_image_count;
+            document.getElementById('preflightClassCount').innerText = `${data.merged_classes.length} classes`;
+
+            const badgesContainer = document.getElementById('preflightClassBadges');
+            if (data.merged_classes.length === 0) {
+                badgesContainer.innerHTML = `<span class="text-content-muted italic text-[11px]">Không tìm thấy class nào</span>`;
+            } else {
+                badgesContainer.innerHTML = data.merged_classes.map(cls => `
+                    <span class="bg-primary/10 border border-primary/20 text-primary px-2.5 py-0.5 rounded-full text-[10px] font-semibold">${cls}</span>
+                `).join('');
+            }
+
+            // Warnings
+            const warningsContainer = document.getElementById('preflightWarningsContainer');
+            const warningsList = document.getElementById('preflightWarningsList');
+            if (data.warnings && data.warnings.length > 0) {
+                warningsList.innerHTML = data.warnings.map(w => `<li>${w}</li>`).join('');
+                warningsContainer.classList.remove('hidden');
+            } else {
+                warningsContainer.classList.add('hidden');
+            }
+
+            preflightSection.classList.remove('hidden');
+
+            if (data.can_merge) {
+                submitBtn.disabled = false;
+                submitBtn.className = "px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-all font-semibold flex items-center gap-1.5 cursor-pointer";
+            } else {
+                submitBtn.disabled = true;
+                submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+            }
+
+        } catch (err) {
+            errorMsg.innerText = 'Lỗi kết nối mạng: ' + err.message;
+            errorDiv.classList.remove('hidden');
+            preflightSection.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+        }
+    }
+
+    async function executeMerge() {
+        const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
+        const projectIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+        const name = document.getElementById('merge_name').value.trim();
+        const rootPath = document.getElementById('merge_root_path').value.trim();
+        const collisionPolicy = document.getElementById('merge_collision_policy').value;
+
+        if (projectIds.length < 2 || !name || !rootPath) return;
+
+        if (collisionPolicy === 'overwrite') {
+            const confirmed = confirm("Bạn đã chọn chế độ ghi đè dữ liệu trùng tên (Overwrite). Việc này có thể ghi đè các tệp ảnh và nhãn có cùng tên từ dự án trước đó trong thư mục gộp. Bạn có chắc chắn muốn tiếp tục?");
+            if (!confirmed) return;
+        }
+
+        closeModal('mergeProjectsModal');
+
+        showLoadingOverlay(
+            'Đang thực hiện gộp...',
+            'Hệ thống đang sao chép tệp ảnh, xử lý tệp nhãn YOLO, bản đồ lớp và tạo dự án gộp mới.',
+            0,
+            'Đang khởi tạo tiến trình...'
+        );
+
+        let progressInterval = null;
+        try {
+            updateLoadingOverlay(15, 'Đang phân tích cấu trúc dự án và thiết lập cơ sở dữ liệu...');
+
+            // Simulate step-by-step progress updating
+            progressInterval = setInterval(() => {
+                const percentEl = document.getElementById('loadingOverlayPercent');
+                const cur = percentEl ? parseInt(percentEl.innerText, 10) || 0 : 0;
+                if (cur < 92) {
+                    let step = cur + (cur < 50 ? 10 : cur < 80 ? 4 : 1);
+                    updateLoadingOverlay(step, 'Đang gộp hình ảnh, cập nhật nhãn YOLO và tạo bản ghi...');
+                }
+            }, 500);
+
+            const response = await fetch('/api/projects/merge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    project_ids: projectIds,
+                    name: name,
+                    root_path: rootPath,
+                    collision_policy: collisionPolicy
+                })
+            });
+
+            const result = await response.json();
+
+            if (progressInterval) clearInterval(progressInterval);
+
+            if (!response.ok) {
+                window.showToast(result.error || 'Gộp dự án thất bại!', 'error');
+            } else {
+                updateLoadingOverlay(100, 'Gộp dự án thành công!', 'Hoàn tất');
+                window.showToast(`Gộp dự án thành công! Tạo dự án mới với ${result.copied_images} ảnh.`, 'success');
+                await loadProjects();
+            }
+
+        } catch (err) {
+            if (progressInterval) clearInterval(progressInterval);
+            window.showToast('Lỗi: ' + err.message, 'error');
+        } finally {
+            hideLoadingOverlay();
+        }
+    }
 
     // Initial Load
     loadProjects();

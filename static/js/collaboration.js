@@ -4,6 +4,27 @@
  */
 
 (function () {
+    const LOCAL_HTTP_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+    function isLocalHttpHost(hostname) {
+        return LOCAL_HTTP_HOSTS.has(String(hostname || '').toLowerCase());
+    }
+
+    function secureCollaborationUrl(url) {
+        const secureUrl = new URL(url || window.location.href, window.location.href);
+        if (secureUrl.protocol === 'http:' && !isLocalHttpHost(secureUrl.hostname)) {
+            secureUrl.protocol = 'https:';
+        }
+        return secureUrl.toString();
+    }
+
+    if (window.location.protocol === 'http:' && !isLocalHttpHost(window.location.hostname)) {
+        window.location.replace(secureCollaborationUrl(window.location.href));
+        return;
+    }
+
+    window.getSecureCollaborationUrl = () => secureCollaborationUrl(window.location.href);
+
     // 1. Setup User Profile (Name & Color)
     const colors = [
         '#ef4444', '#f97316', '#f59e0b', '#10b981', '#06b6d4',
@@ -778,6 +799,24 @@
         }, 3000);
     }
 
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+
+        const input = document.createElement('textarea');
+        input.value = text;
+        input.setAttribute('readonly', '');
+        input.style.position = 'fixed';
+        input.style.left = '-9999px';
+        input.style.top = '0';
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+    }
+
     function showNotificationToast(senderSid, senderName, message) {
         ensureChatUI();
         playNotificationSound();
@@ -880,6 +919,27 @@
             collabUsersModalWrapper.addEventListener('click', (e) => {
                 if (e.target === collabUsersModalWrapper) {
                     collabUsersModalWrapper.classList.add('hidden');
+                }
+            });
+        }
+
+        const btnCopyCollabLink = document.getElementById('btnCopyCollabLink');
+        if (btnCopyCollabLink) {
+            btnCopyCollabLink.addEventListener('click', async () => {
+                const originalHtml = btnCopyCollabLink.innerHTML;
+                const secureUrl = secureCollaborationUrl(window.location.href);
+
+                try {
+                    await copyTextToClipboard(secureUrl);
+                    btnCopyCollabLink.innerHTML = '<i class="fa-solid fa-check text-lg text-green-500"></i>';
+                    showToastInfo('Secure collaboration link copied.');
+                } catch (err) {
+                    console.error('[Collab] Failed to copy collaboration link:', err);
+                    showToastError('Could not copy the collaboration link.');
+                } finally {
+                    setTimeout(() => {
+                        btnCopyCollabLink.innerHTML = originalHtml;
+                    }, 1800);
                 }
             });
         }

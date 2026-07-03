@@ -157,6 +157,7 @@ def delete_project(project_id):
         return jsonify({'error': str(e)}), 400
 
 
+
 @api_bp.route('/projects/<int:project_id>/guide', methods=['GET', 'POST'])
 def project_guide(project_id):
     Project.query.get_or_404(project_id)
@@ -251,7 +252,7 @@ def serve_project_guide_file(project_id):
         download_name='guide.pdf'
     )
 
-
+# --- Merge helper and endpoints at end of file (plan_project_merge_impl) ---
 
 @api_bp.route('/images/<int:image_id>', methods=['DELETE'])
 def delete_image(image_id):
@@ -1689,3 +1690,404 @@ def restore_project(project_id):
         return jsonify({'message': 'Restore successful'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
+    # Validations
+    if not project_ids or len(project_ids) < 2:
+        raise ValueError("At least two source projects are required.")
+    if not name or not name.strip():
+        raise ValueError("Merged project name is required.")
+    if not root_path or not root_path.strip():
+        raise ValueError("Destination folder path is required.")
+    
+    allowed_policies = {'rename', 'skip', 'overwrite'}
+    if collision_policy not in allowed_policies:
+        raise ValueError(f"Invalid collision policy: {collision_policy}")
+
+    # Load projects
+    projects = []
+    for pid in project_ids:
+        p = Project.query.get(pid)
+        if not p:
+            raise ValueError(f"Project with ID {pid} does not exist.")
+        projects.append(p)
+
+    # Build merged class list and class mappings
+    merged_classes = []
+    class_map = {} # project_id -> { old_class_id: new_class_id }
+    for p in projects:
+        class_map[p.id] = {}
+        p_classes = utils.get_classes(p)
+        for old_idx, cls_name in enumerate(p_classes):
+            if cls_name not in merged_classes:
+                merged_classes.append(cls_name)
+            new_idx = merged_classes.index(cls_name)
+            class_map[p.id][old_idx] = new_idx
+
+    # Get all source images in deterministic order
+    # Order: by the order in project_ids list, then by image.id
+    project_order = {pid: idx for idx, pid in enumerate(project_ids)}
+    all_source_images = Image.query.filter(Image.project_id.in_(project_ids)).all()
+    all_source_images.sort(key=lambda img: (project_order.get(img.project_id, 999), img.id))
+
+    # Group images by lowercase filename to identify collisions
+    by_name = {}
+    for img in all_source_images:
+        norm_name = img.filename.lower()
+        if norm_name not in by_name:
+            by_name[norm_name] = []
+        by_name[norm_name].append(img)
+
+    plans = []
+    renamed_file_count = 0
+    skipped_file_count = 0
+    overwritten_file_count = 0
+    duplicate_groups = []
+    missing_files = []
+    warnings = []
+    
+    planned_dest_names = set()
+
+    def get_unique_dest_name(filename, project_id, planned_set):
+        base, ext = os.path.splitext(filename)
+        candidate = f"{base}_proj{project_id}{ext}"
+        if candidate.lower() not in planned_set:
+            return candidate
+        counter = 1
+        while f"{base}_proj{project_id}_{counter}{ext}".lower() in planned_set:
+            counter += 1
+        return f"{base}_proj{project_id}_{counter}{ext}"
+
+    for norm_name, img_list in by_name.items():
+        # First check duplicate groups
+        if len(img_list) > 1:
+            duplicate_groups.append({
+                'filename': img_list[0].filename,
+                'occurrences': [
+                    {
+                        'project_id': img.project_id,
+                        'project_name': Project.query.get(img.project_id).name,
+                        'image_id': img.id
+                    }
+                    for img in img_list
+                ]
+            })
+
+        # Process each image / collision
+        if len(img_list) == 1:
+            img = img_list[0]
+            src_project = Project.query.get(img.project_id)
+            src_path = os.path.join(src_project.root_path, img.filename)
+            if not os.path.exists(src_path):
+                missing_files.append({
+                    'project_id': img.project_id,
+                    'project_name': src_project.name,
+                    'filename': img.filename
+                })
+            plans.append({
+                'action': 'copy',
+                'image': img,
+                'dest_filename': img.filename,
+                'source_path': src_path,
+                'project_id': img.project_id
+            })
+            planned_dest_names.add(img.filename.lower())
+        else:
+            first_img = img_list[0]
+            # Collect missing files for all duplicates
+            for img in img_list:
+                src_proj = Project.query.get(img.project_id)
+                src_p = os.path.join(src_proj.root_path, img.filename)
+                if not os.path.exists(src_p):
+                    missing_files.append({
+                        'project_id': img.project_id,
+                        'project_name': src_proj.name,
+                        'filename': img.filename
+                    })
+
+            if collision_policy == 'rename':
+                # First one copied with original name
+                src_proj = Project.query.get(first_img.project_id)
+                plans.append({
+                    'action': 'copy',
+                    'image': first_img,
+                    'dest_filename': first_img.filename,
+                    'source_path': os.path.join(src_proj.root_path, first_img.filename),
+                    'project_id': first_img.project_id
+                })
+                planned_dest_names.add(first_img.filename.lower())
+
+                # Subsequent ones renamed
+                for img in img_list[1:]:
+                    src_proj = Project.query.get(img.project_id)
+                    dest_fn = get_unique_dest_name(img.filename, img.project_id, planned_dest_names)
+                    renamed_file_count += 1
+                    plans.append({
+                        'action': 'copy',
+                        'image': img,
+                        'dest_filename': dest_fn,
+                        'source_path': os.path.join(src_proj.root_path, img.filename),
+                        'project_id': img.project_id
+                    })
+                    planned_dest_names.add(dest_fn.lower())
+
+            elif collision_policy == 'skip':
+                # First one copied
+                src_proj = Project.query.get(first_img.project_id)
+                plans.append({
+                    'action': 'copy',
+                    'image': first_img,
+                    'dest_filename': first_img.filename,
+                    'source_path': os.path.join(src_proj.root_path, first_img.filename),
+                    'project_id': first_img.project_id
+                })
+                planned_dest_names.add(first_img.filename.lower())
+
+                # Others skipped
+                for img in img_list[1:]:
+                    skipped_file_count += 1
+                    plans.append({
+                        'action': 'skip',
+                        'image': img,
+                        'project_id': img.project_id
+                    })
+
+            elif collision_policy == 'overwrite':
+                # First ones ignored (overwritten)
+                for img in img_list[:-1]:
+                    overwritten_file_count += 1
+                    plans.append({
+                        'action': 'overwrite_ignored',
+                        'image': img,
+                        'project_id': img.project_id
+                    })
+                # Last one copied
+                last_img = img_list[-1]
+                src_proj = Project.query.get(last_img.project_id)
+                plans.append({
+                    'action': 'copy',
+                    'image': last_img,
+                    'dest_filename': last_img.filename,
+                    'source_path': os.path.join(src_proj.root_path, last_img.filename),
+                    'project_id': last_img.project_id
+                })
+                planned_dest_names.add(last_img.filename.lower())
+
+    # Warnings
+    if os.path.exists(root_path):
+        try:
+            if os.listdir(root_path):
+                warnings.append("Thư mục đích đã tồn tại và không trống. Các file trùng có thể bị ghi đè.")
+        except Exception:
+            pass
+            
+    # Calculate final image count
+    final_image_count = sum(1 for p in plans if p['action'] == 'copy')
+    total_images = len(all_source_images)
+    label_file_count = sum(1 for p in plans if p['action'] == 'copy' and p['image'].is_labeled)
+
+    return {
+        'source_project_count': len(projects),
+        'total_images': total_images,
+        'missing_files': missing_files,
+        'merged_classes': merged_classes,
+        'class_map': class_map,
+        'label_file_count': label_file_count,
+        'renamed_file_count': renamed_file_count,
+        'skipped_file_count': skipped_file_count,
+        'overwritten_file_count': overwritten_file_count,
+        'final_image_count': final_image_count,
+        'duplicate_groups': duplicate_groups,
+        'warnings': warnings,
+        'plans': plans,
+        'can_merge': len(projects) >= 2 and final_image_count > 0
+    }
+
+
+@api_bp.route('/projects/merge/preflight', methods=['POST'])
+def merge_projects_preflight():
+    data = request.json or {}
+    project_ids = data.get('project_ids', [])
+    name = data.get('name', '')
+    root_path = data.get('root_path', '')
+    collision_policy = data.get('collision_policy', 'rename')
+
+    try:
+        plan = plan_project_merge_impl(project_ids, name, root_path, collision_policy)
+        res = {
+            'source_project_count': plan['source_project_count'],
+            'total_images': plan['total_images'],
+            'missing_files': plan['missing_files'],
+            'merged_classes': plan['merged_classes'],
+            'label_file_count': plan['label_file_count'],
+            'renamed_file_count': plan['renamed_file_count'],
+            'skipped_file_count': plan['skipped_file_count'],
+            'overwritten_file_count': plan['overwritten_file_count'],
+            'final_image_count': plan['final_image_count'],
+            'duplicate_groups': plan['duplicate_groups'],
+            'warnings': plan['warnings'],
+            'can_merge': plan['can_merge'],
+            'collision_policy': collision_policy
+        }
+        return jsonify(res)
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/projects/merge', methods=['POST'])
+def merge_projects():
+    data = request.json or {}
+    project_ids = data.get('project_ids', [])
+    name = data.get('name', '')
+    root_path = data.get('root_path', '')
+    collision_policy = data.get('collision_policy', 'rename')
+
+    try:
+        plan = plan_project_merge_impl(project_ids, name, root_path, collision_policy)
+        if not plan['can_merge']:
+            return jsonify({'error': 'Cannot execute merge with the given input.'}), 400
+    except ValueError as ve:
+        return jsonify({'error': str(ve)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    dest_path = os.path.abspath(root_path)
+
+    created_dir = False
+    copied_files = []
+
+    if not os.path.exists(dest_path):
+        try:
+            os.makedirs(dest_path, exist_ok=True)
+            created_dir = True
+        except Exception as e:
+            return jsonify({'error': f"Failed to create destination folder: {str(e)}"}), 500
+
+    try:
+        # Create DB project
+        new_project = Project(
+            name=name,
+            root_path=dest_path
+        )
+        db.session.add(new_project)
+        db.session.flush()
+
+        # Copy tags
+        new_tags_by_name = {}
+        for p_item in plan['plans']:
+            if p_item['action'] != 'copy':
+                continue
+            img = p_item['image']
+            for tag in img.tags:
+                if tag.name not in new_tags_by_name:
+                    new_tag = Tag(name=tag.name, color=tag.color, project_id=new_project.id)
+                    db.session.add(new_tag)
+                    new_tags_by_name[tag.name] = new_tag
+        db.session.flush()
+
+        # Copy files and labels
+        for p_item in plan['plans']:
+            if p_item['action'] != 'copy':
+                continue
+            
+            img = p_item['image']
+            dest_fn = p_item['dest_filename']
+            source_img_path = p_item['source_path']
+            dest_img_path = os.path.join(dest_path, dest_fn)
+
+            # Copy Image File
+            if os.path.exists(source_img_path):
+                shutil.copy(source_img_path, dest_img_path)
+                copied_files.append(dest_img_path)
+            
+            # Copy and remap label file
+            source_lbl_path = os.path.splitext(source_img_path)[0] + '.txt'
+            dest_lbl_path = os.path.splitext(dest_img_path)[0] + '.txt'
+            is_labeled = False
+
+            if os.path.exists(source_lbl_path):
+                labels = []
+                with open(source_lbl_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) == 5:
+                            try:
+                                class_id = int(parts[0])
+                                x = float(parts[1])
+                                y = float(parts[2])
+                                w = float(parts[3])
+                                h = float(parts[4])
+                                if w <= 0 or h <= 0:
+                                    continue
+                                
+                                new_class_id = plan['class_map'][img.project_id].get(class_id)
+                                if new_class_id is not None:
+                                    labels.append({
+                                        'class_id': new_class_id,
+                                        'x': x,
+                                        'y': y,
+                                        'w': w,
+                                        'h': h
+                                    })
+                            except ValueError:
+                                pass
+                if labels:
+                    with open(dest_lbl_path, 'w', encoding='utf-8') as f:
+                        for lbl in labels:
+                            f.write(f"{lbl['class_id']} {lbl['x']} {lbl['y']} {lbl['w']} {lbl['h']}\n")
+                    copied_files.append(dest_lbl_path)
+                    is_labeled = True
+
+            # Insert Image row
+            new_img = Image(
+                filename=dest_fn,
+                project_id=new_project.id,
+                is_labeled=is_labeled,
+                is_reviewed=img.is_reviewed,
+                flag_status=img.flag_status,
+                split_type=img.split_type
+            )
+            db.session.add(new_img)
+            
+            # Associate tags
+            for tag in img.tags:
+                new_img.tags.append(new_tags_by_name[tag.name])
+
+        # Save merged classes and data.yaml
+        utils.save_classes(new_project, plan['merged_classes'])
+        copied_files.append(os.path.join(dest_path, 'classes.txt'))
+        for yaml_name in ['data.yaml', 'data.yml']:
+            yaml_path = os.path.join(dest_path, yaml_name)
+            if os.path.exists(yaml_path):
+                copied_files.append(yaml_path)
+
+        db.session.commit()
+
+        return jsonify({
+            'project': new_project.to_dict(),
+            'copied_images': plan['final_image_count'],
+            'merged_classes': plan['merged_classes'],
+            'warnings': plan['warnings'],
+            'collision_policy': collision_policy,
+            'renamed_file_count': plan['renamed_file_count'],
+            'skipped_file_count': plan['skipped_file_count'],
+            'overwritten_file_count': plan['overwritten_file_count']
+        })
+
+    except Exception as exc:
+        db.session.rollback()
+        for fpath in copied_files:
+            try:
+                if os.path.exists(fpath):
+                    os.remove(fpath)
+            except Exception:
+                pass
+        if created_dir:
+            try:
+                shutil.rmtree(dest_path)
+            except Exception:
+                pass
+        return jsonify({'error': f"Failed to execute project merge: {str(exc)}"}), 500

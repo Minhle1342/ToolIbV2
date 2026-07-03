@@ -184,6 +184,31 @@ class startAPI {
         });
         return await res.json();
     }
+    async mergeProjectsPreflight(data) {
+        const res = await fetch('/api/projects/merge/preflight', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Preflight failed');
+        }
+        return await res.json();
+    }
+
+    async mergeProjects(data) {
+        const res = await fetch('/api/projects/merge', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Merge execution failed');
+        }
+        return await res.json();
+    }
 }
 
 const API = new startAPI();

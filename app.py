@@ -1,11 +1,35 @@
 import os
 # pyrefly: ignore [missing-import]
-from flask import Flask, abort, render_template
+from flask import Flask, abort, current_app, redirect, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from werkzeug.middleware.proxy_fix import ProxyFix
 from models import Project, db, slugify_project_name
 from routes import api_bp
 
 socketio = SocketIO(cors_allowed_origins="*")
+LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def should_redirect_to_https():
+    if not current_app.config.get('FORCE_HTTPS_REDIRECTS', True):
+        return False
+    if request.method not in ('GET', 'HEAD'):
+        return False
+    if request.scheme != 'http':
+        return False
+
+    host = request.host or ''
+    if host.startswith('['):
+        host = host[1:].split(']', 1)[0]
+    elif ':' in host:
+        host = host.rsplit(':', 1)[0]
+    host = host.lower()
+
+    return host not in LOCAL_HTTP_HOSTS
+
+
+def build_https_url():
+    return request.url.replace('http://', 'https://', 1)
 
 def resolve_project(identifier):
     if identifier.isdigit():
@@ -21,11 +45,14 @@ def resolve_project(identifier):
 
 def create_app():
     app = Flask(__name__)
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     
     # Configuration
     basedir = os.path.abspath(os.path.dirname(__file__))
     app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'yolo_labeling.db')
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    app.config['PREFERRED_URL_SCHEME'] = 'https'
+    app.config['FORCE_HTTPS_REDIRECTS'] = True
     
     # Increase maximum upload limit to 10GB for large datasets
     app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024
@@ -36,6 +63,11 @@ def create_app():
     
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
+
+    @app.before_request
+    def redirect_http_to_https():
+        if should_redirect_to_https():
+            return redirect(build_https_url(), code=308)
     
     # Basic Frontend Routes
     @app.route('/')
