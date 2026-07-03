@@ -1337,11 +1337,11 @@ class Workspace {
                     }, 1200);
                 }
             } else {
-                alert(result.error || 'Failed to classify boxes');
+                this.showToast(result.error || 'Failed to classify boxes', 'error');
                 if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
             }
         } catch (e) {
-            alert('Error: ' + e.message);
+            this.showToast('Error: ' + e.message, 'error');
             if (btn) { btn.innerHTML = originalHtml; btn.disabled = false; }
         }
     }
@@ -2846,6 +2846,11 @@ function applyAdvancedClassFilter() {
 }
 
 async function loadImages(fetchFromServer = true) {
+    const container = document.getElementById('imageList');
+    if (container && (fetchFromServer || !currentWorkspace.allImages)) {
+        container.innerHTML = '<div class="p-4 text-sm text-content-muted flex items-center justify-center"><i class="fas fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>';
+    }
+
     if (fetchFromServer || !currentWorkspace.allImages) {
         const viewFilterEl = document.getElementById('viewFilter');
 
@@ -2948,10 +2953,9 @@ async function loadImages(fetchFromServer = true) {
         filteredImages = filteredImages.filter(img => img.overlapCount > 0);
     }
 
-    const container = document.getElementById('imageList');
     if (filteredImages.length === 0) {
-        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc</div>';
-    } else {
+        if (container) container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Không có ảnh nào khớp với bộ lọc</div>';
+    } else if (container) {
         container.innerHTML = filteredImages.map(img => {
             const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
             const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
