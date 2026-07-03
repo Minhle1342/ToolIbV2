@@ -51,6 +51,18 @@ def create_app():
             project_slug=slugify_project_name(project.name)
         )
 
+    @app.route('/project/<project_identifier>/guide')
+    def project_guide(project_identifier):
+        project = resolve_project(project_identifier)
+        project_slug = slugify_project_name(project.name)
+        return render_template(
+            'guide.html',
+            project_id=project.id,
+            project_slug=project_slug,
+            project_name=project.name,
+            workspace_url=f'/project/{project_slug}/'
+        )
+
     @app.route('/project/<project_identifier>/')
     @app.route('/project/<project_identifier>/<path:filename>')
     def workspace(project_identifier, filename=None):

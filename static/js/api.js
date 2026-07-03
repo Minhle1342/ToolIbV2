@@ -36,6 +36,19 @@ class startAPI {
         return await res.json();
     }
 
+    async getProjectGuide(id) {
+        const res = await fetch(`/api/projects/${id}/guide`);
+        return await res.json();
+    }
+
+    async uploadProjectGuide(id, formData) {
+        const res = await fetch(`/api/projects/${id}/guide`, {
+            method: 'POST',
+            body: formData
+        });
+        return await res.json();
+    }
+
     async createView(data) {
         const res = await fetch('/api/views', {
             method: 'POST',

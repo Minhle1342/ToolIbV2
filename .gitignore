@@ -9,3 +9,4 @@ classification_crops/
 cert.pem
 key.pem
 project_backup/
+*.rar

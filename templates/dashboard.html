@@ -215,6 +215,46 @@
     </div>
 </div>
 
+<!-- Guide Modal -->
+<div class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" id="guideModal">
+    <div class="bg-panel rounded-2xl shadow-2xl w-full max-w-2xl border border-border overflow-hidden">
+        <div class="px-6 py-5 border-b border-border bg-gradient-to-r from-slate-950 to-slate-800">
+            <div class="flex items-start justify-between gap-4">
+                <div>
+                    <div class="text-[11px] uppercase tracking-[0.18em] text-primary font-semibold mb-1">Hướng dẫn tân thủ</div>
+                    <h2 class="text-2xl font-bold text-content" id="guideProjectName">Project</h2>
+                    <p class="text-sm text-content-muted mt-1">Tải lên hoặc thay thế một file `.pdf` để workspace hiển thị từng trang như slide hướng dẫn trước khi làm việc.</p>
+                </div>
+                <button type="button" onclick="closeModal('guideModal')" class="text-content-muted hover:text-content transition-colors text-xl">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        </div>
+        <div class="p-6 space-y-4">
+            <input type="hidden" id="guideProjectId">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="md:col-span-2 space-y-2">
+                    <label class="block text-sm font-medium text-content-muted">File .pdf</label>
+                    <input id="guideFileInput" type="file" accept=".pdf,application/pdf" class="w-full bg-surface border border-border rounded px-3 py-2 text-content file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:bg-primary file:text-content-inv file:font-semibold">
+                    <p class="text-xs text-content-muted">Chọn file PDF đã soạn sẵn. Workspace sẽ render từng trang PDF như một slide hướng dẫn.</p>
+                </div>
+                <div class="bg-surface border border-border rounded-xl p-4">
+                    <div class="text-xs text-content-muted uppercase tracking-wider mb-1">Trạng thái hiện tại</div>
+                    <div id="guideCurrentFile" class="font-semibold text-content truncate">Chưa có file hướng dẫn</div>
+                    <div id="guideSlideCount" class="text-xs text-primary mt-1">0 trang</div>
+                </div>
+            </div>
+            <div id="guideUploadStatus" class="text-sm text-content-muted bg-surface border border-border rounded-lg px-4 py-3">
+                Chọn hoặc thay thế file `.pdf` cho project này.
+            </div>
+            <div class="flex justify-end gap-3 pt-2">
+                <button type="button" onclick="closeModal('guideModal')" class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors">Đóng</button>
+                <button type="button" id="guideSaveBtn" onclick="saveProjectGuide()" class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-content-inv rounded transition-colors">Lưu hướng dẫn</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     let pendingDeletePasswordResolver = null;
     let pendingDeleteProjectResolver = null;
@@ -355,14 +395,14 @@
                     <i class="fa-regular fa-folder"></i> ${p.root_path}
                 </div>
                 <div class="flex gap-2 mt-4">
-                    <a href="/project/${p.slug}/" class="flex-1 bg-primary hover:bg-blue-600 text-content-inv text-center py-2 rounded text-sm transition-colors" data-i18n="dashboard_openWorkspace">
+                    <a href="/project/${p.slug}/guide" class="flex-1 bg-primary hover:bg-blue-600 text-content-inv text-center py-2 rounded text-sm transition-colors" data-i18n="dashboard_openWorkspace">
                         Open Workspace
                     </a>
                     <button onclick="editProject(${p.id})" class="bg-surface hover:bg-border text-content px-3 rounded transition-colors" title="Edit Project" data-i18n-title="dashboard_editProject">
                         <i class="fa-solid fa-pen-to-square"></i>
                     </button>
-                    <button onclick="scanProject(${p.id})" class="bg-surface hover:bg-border text-content px-3 rounded transition-colors" title="Scan Folder" data-i18n-title="dashboard_scanFolder">
-                        <i class="fa-solid fa-rotate"></i>
+                    <button onclick="openGuideManager(${p.id})" class="bg-surface hover:bg-border text-content px-3 rounded transition-colors" title="Hướng dẫn" data-i18n-title="dashboard_guideProject">
+                        <i class="fa-solid fa-file-pdf"></i>
                     </button>
                     <button onclick="deleteProject(${p.id})" class="bg-surface hover:bg-red-900/50 text-red-500 hover:text-red-300 px-3 rounded transition-colors" title="Delete Project" data-i18n-title="dashboard_deleteProject">
                         <i class="fa-solid fa-trash"></i>
@@ -412,10 +452,77 @@
         }
     }
 
-    async function scanProject(id) {
-        if (confirm(window.t ? window.t('dashboard_confirmScan') : 'Scan folder for new images?')) {
-            const res = await API.scanProject(id);
-            window.showToast(res.message, res.error ? 'error' : 'success');
+    let currentGuideProjectId = null;
+
+    async function openGuideManager(id) {
+        const project = allProjects.find(item => item.id === id);
+        const name = project ? project.name : '';
+        currentGuideProjectId = id;
+        document.getElementById('guideProjectId').value = id;
+        document.getElementById('guideProjectName').innerText = name || `#${id}`;
+        document.getElementById('guideFileInput').value = '';
+        document.getElementById('guideUploadStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i>Đang tải thông tin hướng dẫn...';
+        openModal('guideModal');
+
+        try {
+            const info = await API.getProjectGuide(id);
+            const statusEl = document.getElementById('guideUploadStatus');
+            const fileEl = document.getElementById('guideCurrentFile');
+            const countEl = document.getElementById('guideSlideCount');
+
+            if (info.exists) {
+                fileEl.innerText = info.filename || 'guide.pdf';
+                countEl.innerText = `${info.page_count || 0} trang`;
+                statusEl.innerHTML = '<i class="fa-solid fa-circle-check mr-1 text-green-500"></i>Đã có file hướng dẫn. Bạn có thể thay thế bằng file .pdf mới.';
+            } else {
+                fileEl.innerText = 'Chưa có file hướng dẫn';
+                countEl.innerText = '0 trang';
+                statusEl.innerHTML = '<i class="fa-regular fa-circle mr-1"></i>Chưa có file .pdf nào. Hãy tải lên để workspace tự động hiển thị hướng dẫn.';
+            }
+        } catch (error) {
+            document.getElementById('guideUploadStatus').innerHTML = `<i class="fa-solid fa-triangle-exclamation mr-1 text-red-500"></i>Lỗi tải thông tin: ${error.message}`;
+        }
+    }
+
+    async function saveProjectGuide() {
+        const projectId = document.getElementById('guideProjectId').value;
+        const fileInput = document.getElementById('guideFileInput');
+        const file = fileInput.files && fileInput.files[0];
+        if (!projectId) return;
+        if (!file) {
+            window.showToast('Vui lòng chọn file .pdf trước khi lưu.', 'error');
+            return;
+        }
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+            window.showToast('Chỉ chấp nhận file .pdf.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const submitBtn = document.getElementById('guideSaveBtn');
+        const originalHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i>Đang lưu...';
+
+        try {
+            const res = await API.uploadProjectGuide(projectId, formData);
+            if (res.error) {
+                window.showToast(res.error, 'error');
+                return;
+            }
+            document.getElementById('guideCurrentFile').innerText = res.filename || file.name;
+            document.getElementById('guideSlideCount').innerText = `${res.page_count || 0} trang`;
+            document.getElementById('guideUploadStatus').innerHTML = '<i class="fa-solid fa-circle-check mr-1 text-green-500"></i>Đã lưu file hướng dẫn thành công.';
+            fileInput.value = '';
+            loadProjects();
+            window.showToast('Đã cập nhật file hướng dẫn.', 'success');
+        } catch (error) {
+            window.showToast('Lỗi: ' + error.message, 'error');
+        } finally {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = originalHtml;
         }
     }
 
@@ -466,7 +573,6 @@
                     <div>
                         <div class="text-content font-medium text-sm mb-1">${b.filename}</div>
                         <div class="text-xs text-content-muted"><i class="fa-regular fa-clock mr-1"></i> ${date}</div>
-                    </div>
                     <button onclick="restoreBackup(${id}, '${b.filename}')" class="bg-primary/10 hover:bg-primary text-primary hover:text-content-inv px-3 py-1.5 rounded text-sm transition-colors flex items-center gap-2" title="Khôi phục" data-i18n-title="dashboard_restoreBackup">
                         <i class="fa-solid fa-rotate-left"></i> <span data-i18n="dashboard_btnRestore">Khôi phục</span>
                     </button>

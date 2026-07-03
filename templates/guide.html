@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% set hide_global_sidebar = True %}
+
+{% block content %}
+<div class="h-full min-h-0 overflow-hidden bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.28),transparent_34%),linear-gradient(135deg,#07111f_0%,#101827_46%,#06130d_100%)] text-white flex flex-col">
+    <header class="shrink-0 border-b border-white/10 bg-black/20 backdrop-blur px-4 sm:px-6 py-3">
+        <div class="max-w-7xl mx-auto flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <div class="text-[10px] sm:text-xs uppercase tracking-[0.26em] text-emerald-300 font-semibold">Hướng dẫn tân thủ</div>
+                <h1 class="text-lg sm:text-2xl font-bold truncate mt-1">{{ project_name }}</h1>
+            </div>
+            <div class="shrink-0 text-right">
+                <div id="guideSlideCounter" class="text-sm sm:text-base font-semibold text-white">Slide 0/0</div>
+                <div id="guideFilename" class="hidden sm:block text-xs text-slate-400 max-w-72 truncate">guide.pdf</div>
+            </div>
+        </div>
+    </header>
+
+    <section id="guideStatusPanel" class="hidden flex-1 min-h-0 items-center justify-center p-6">
+        <div class="max-w-lg rounded-3xl border border-white/10 bg-white/10 p-8 text-center shadow-2xl">
+            <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400/15 text-amber-300">
+                <i class="fa-solid fa-file-pdf text-2xl"></i>
+            </div>
+            <h2 id="guideStatusTitle" class="text-2xl font-bold">Đang tải hướng dẫn...</h2>
+            <p id="guideStatusMessage" class="text-slate-300 mt-3 leading-6">Vui lòng chờ trong giây lát.</p>
+            <button type="button" onclick="startWorkspace()" class="mt-6 px-5 py-3 rounded-xl bg-emerald-500 text-white font-bold hover:bg-emerald-400 transition-colors">
+                Bắt đầu
+            </button>
+        </div>
+    </section>
+
+    <main id="guideViewer" class="flex-1 min-h-0 overflow-hidden p-3 sm:p-5">
+        <div id="guidePdfViewport" class="h-full min-h-0 overflow-auto rounded-3xl border border-white/10 bg-slate-950/70 shadow-[0_28px_100px_rgba(0,0,0,0.45)] p-3 sm:p-5">
+            <div class="min-h-full flex items-center justify-center">
+                <canvas id="guidePdfCanvas" class="max-w-full h-auto rounded-xl bg-white shadow-2xl"></canvas>
+                <iframe id="guidePdfFallbackFrame" class="hidden w-full h-full min-h-[68vh] rounded-xl border-0 bg-white" title="PDF guide"></iframe>
+            </div>
+        </div>
+    </main>
+
+    <footer class="shrink-0 border-t border-white/10 bg-black/25 backdrop-blur px-4 sm:px-6 py-3">
+        <div class="max-w-7xl mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <label class="order-2 sm:order-none flex items-start gap-3 text-xs sm:text-sm text-slate-300 select-none cursor-pointer">
+                <input id="guideSkipAllSessionsCheckbox" type="checkbox" class="mt-0.5 rounded border-white/20 bg-slate-950/70 text-emerald-500 focus:ring-emerald-400">
+                <span>
+                    <span class="font-semibold text-white">Bỏ qua hướng dẫn tân thủ</span>
+                    <span class="hidden sm:inline text-slate-400"> cho tất cả phiên sau</span>
+                </span>
+            </label>
+            <div class="order-1 sm:order-none flex items-center justify-between gap-3 sm:flex-1 sm:justify-end">
+            <button id="guidePrevBtn" type="button" onclick="prevGuideSlide()" class="px-4 sm:px-6 py-3 rounded-xl border border-white/10 bg-white/10 text-white font-semibold hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40 transition-colors">
+                <i class="fa-solid fa-arrow-left mr-2"></i>Return
+            </button>
+            <div class="hidden sm:block text-xs text-slate-400">Dùng phím ← / → để chuyển slide</div>
+            <button id="guideNextBtn" type="button" onclick="nextGuideSlide()" class="px-4 sm:px-6 py-3 rounded-xl border border-white/10 bg-white/10 text-white font-semibold hover:bg-white/15 transition-colors">
+                Next<i class="fa-solid fa-arrow-right ml-2"></i>
+            </button>
+            <button id="guideStartBtn" type="button" onclick="startWorkspace()" class="hidden px-5 sm:px-7 py-3 rounded-xl bg-emerald-500 text-white font-bold shadow-lg shadow-emerald-950/40 hover:bg-emerald-400 transition-colors">
+                Bắt đầu<i class="fa-solid fa-circle-check ml-2"></i>
+            </button>
+            </div>
+        </div>
+    </footer>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+    const PROJECT_ID = "{{ project_id }}";
+    const WORKSPACE_URL = "{{ workspace_url }}";
+    const GUIDE_SKIP_KEY = `workspaceGuideSkipAllSessions_${PROJECT_ID}`;
+
+    let guidePdf = null;
+    let guidePdfUrl = null;
+    let guidePageCount = 0;
+    let guidePageIndex = 0;
+    let renderTask = null;
+    let resizeTimer = null;
+
+    const viewerEl = document.getElementById('guideViewer');
+    const statusPanelEl = document.getElementById('guideStatusPanel');
+    const counterEl = document.getElementById('guideSlideCounter');
+    const filenameEl = document.getElementById('guideFilename');
+    const canvasEl = document.getElementById('guidePdfCanvas');
+    const fallbackFrameEl = document.getElementById('guidePdfFallbackFrame');
+    const skipAllSessionsCheckbox = document.getElementById('guideSkipAllSessionsCheckbox');
+    const prevBtn = document.getElementById('guidePrevBtn');
+    const nextBtn = document.getElementById('guideNextBtn');
+    const startBtn = document.getElementById('guideStartBtn');
+
+    function startWorkspace() {
+        if (skipAllSessionsCheckbox?.checked) {
+            localStorage.setItem(GUIDE_SKIP_KEY, '1');
+        }
+        window.location.href = WORKSPACE_URL;
+    }
+
+    function setStatus(title, message, canStart = true) {
+        viewerEl.classList.add('hidden');
+        statusPanelEl.classList.remove('hidden');
+        statusPanelEl.classList.add('flex');
+        document.getElementById('guideStatusTitle').textContent = title;
+        document.getElementById('guideStatusMessage').textContent = message;
+        statusPanelEl.querySelector('button').classList.toggle('hidden', !canStart);
+    }
+
+    function showViewer() {
+        statusPanelEl.classList.add('hidden');
+        statusPanelEl.classList.remove('flex');
+        viewerEl.classList.remove('hidden');
+    }
+
+    function updateControls() {
+        if (!guidePageCount) {
+            counterEl.textContent = 'Slide 0/0';
+            prevBtn.disabled = true;
+            nextBtn.classList.add('hidden');
+            startBtn.classList.remove('hidden');
+            return;
+        }
+
+        const isLastSlide = guidePageIndex >= guidePageCount - 1;
+        counterEl.textContent = `Slide ${guidePageIndex + 1}/${guidePageCount}`;
+        prevBtn.disabled = guidePageIndex === 0;
+        nextBtn.classList.toggle('hidden', isLastSlide);
+        startBtn.classList.toggle('hidden', !isLastSlide);
+    }
+
+    async function renderGuideSlide(index) {
+        if (!guidePageCount || !guidePdfUrl) return;
+
+        guidePageIndex = Math.max(0, Math.min(index, guidePageCount - 1));
+        updateControls();
+
+        if (!guidePdf || !canvasEl) {
+            canvasEl?.classList.add('hidden');
+            fallbackFrameEl.classList.remove('hidden');
+            fallbackFrameEl.src = `${guidePdfUrl}#page=${guidePageIndex + 1}&toolbar=0&navpanes=0&view=Fit`;
+            return;
+        }
+
+        fallbackFrameEl.classList.add('hidden');
+        canvasEl.classList.remove('hidden');
+
+        if (renderTask) {
+            renderTask.cancel();
+        }
+
+        const page = await guidePdf.getPage(guidePageIndex + 1);
+        const viewport = page.getViewport({ scale: 1 });
+        const container = document.getElementById('guidePdfViewport');
+        const availableWidth = Math.max(320, container.clientWidth - 40);
+        const availableHeight = Math.max(260, container.clientHeight - 40);
+        const fitScale = Math.min(availableWidth / viewport.width, availableHeight / viewport.height);
+        const scale = Math.max(0.45, Math.min(2.25, fitScale));
+        const scaledViewport = page.getViewport({ scale });
+        const context = canvasEl.getContext('2d');
+
+        canvasEl.width = Math.floor(scaledViewport.width);
+        canvasEl.height = Math.floor(scaledViewport.height);
+
+        const currentTask = page.render({
+            canvasContext: context,
+            viewport: scaledViewport
+        });
+        renderTask = currentTask;
+
+        try {
+            await currentTask.promise;
+        } catch (error) {
+            if (error?.name !== 'RenderingCancelledException') {
+                throw error;
+            }
+        } finally {
+            if (renderTask === currentTask) {
+                renderTask = null;
+            }
+        }
+    }
+
+    function nextGuideSlide() {
+        if (guidePageIndex < guidePageCount - 1) {
+            renderGuideSlide(guidePageIndex + 1);
+        }
+    }
+
+    function prevGuideSlide() {
+        if (guidePageIndex > 0) {
+            renderGuideSlide(guidePageIndex - 1);
+        }
+    }
+
+    async function loadGuide() {
+        try {
+            if (localStorage.getItem(GUIDE_SKIP_KEY) === '1') {
+                window.location.replace(WORKSPACE_URL);
+                return;
+            }
+
+            setStatus('Đang tải hướng dẫn...', 'Vui lòng chờ trong giây lát.', false);
+
+            const guide = await API.getProjectGuide(PROJECT_ID);
+            if (!guide.exists) {
+                window.location.replace(WORKSPACE_URL);
+                return;
+            }
+
+            guidePdfUrl = guide.file_url || `/api/projects/${PROJECT_ID}/guide/file`;
+            guidePageCount = Number(guide.page_count) || 0;
+            filenameEl.textContent = guide.filename || 'guide.pdf';
+
+            if (!window.pdfjsLib) {
+                if (!guidePageCount) {
+                    startWorkspace();
+                    return;
+                }
+                showViewer();
+                renderGuideSlide(0);
+                return;
+            }
+
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            guidePdf = await window.pdfjsLib.getDocument(guidePdfUrl).promise;
+            guidePageCount = guidePdf.numPages || guidePageCount;
+
+            if (!guidePageCount) {
+                startWorkspace();
+                return;
+            }
+
+            showViewer();
+            await renderGuideSlide(0);
+        } catch (error) {
+            console.error('Failed to load guide:', error);
+            setStatus('Không thể tải hướng dẫn', 'Bạn vẫn có thể bấm Bắt đầu để vào workspace và tiếp tục làm việc.', true);
+        }
+    }
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'ArrowLeft') {
+            event.preventDefault();
+            prevGuideSlide();
+        } else if (event.key === 'ArrowRight') {
+            event.preventDefault();
+            if (guidePageIndex >= guidePageCount - 1) {
+                startWorkspace();
+            } else {
+                nextGuideSlide();
+            }
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => renderGuideSlide(guidePageIndex), 120);
+    });
+
+    loadGuide();
+</script>
+{% endblock %}

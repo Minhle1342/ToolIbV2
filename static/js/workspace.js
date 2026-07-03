@@ -3228,15 +3228,6 @@ function toggleDropdown(event, buttonId, dropdownId, dropdownWidth) {
 
     const isHidden = dropdown.classList.contains('hidden');
     if (isHidden) {
-        if (buttonId === 'btnAutoLabelToggle') {
-            const password = prompt('Nhập mật khẩu để mở Auto Label:');
-            if (password !== 'nlm1342') {
-                if (password !== null) {
-                    alert('Mật khẩu không đúng.');
-                }
-                return;
-            }
-        }
         dropdown.classList.remove('hidden');
         positionFixedDropdown(btn, dropdown, dropdownWidth);
     } else {

@@ -4,6 +4,7 @@ from flask import Blueprint, jsonify, request, current_app
 import flask
 from models import db, Project, View, Image, AIModel, Tag
 import os
+import re
 import shutil
 from datetime import datetime
 import utils
@@ -12,6 +13,32 @@ from inference import YOLOInference, ClassificationInference
 # Initialize Inference Engines
 inference_engine = None
 classifier_engine = None
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+GUIDE_STORAGE_DIR = os.path.join(BASE_DIR, 'project_guides')
+
+
+def get_project_guide_path(project_id):
+    return os.path.join(GUIDE_STORAGE_DIR, str(project_id), 'guide.pdf')
+
+
+def get_project_guide_meta_path(project_id):
+    return os.path.join(GUIDE_STORAGE_DIR, str(project_id), 'guide.json')
+
+
+def get_pdf_page_count(pdf_path):
+    if not os.path.exists(pdf_path):
+        return 0
+
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(pdf_path).pages)
+    except Exception:
+        try:
+            with open(pdf_path, 'rb') as f:
+                content = f.read().decode('latin-1', errors='ignore')
+            return len(re.findall(r'/Type\s*/Page\b', content))
+        except Exception:
+            return 0
 
 def get_inference_engine():
     global inference_engine
@@ -112,6 +139,7 @@ def delete_project(project_id):
     data = request.get_json(silent=True) or {}
     delete_folder = data.get('delete_folder', False)
     project_root = project.root_path
+    guide_path = get_project_guide_path(project.id)
     try:
         db.session.delete(project)
         db.session.commit()
@@ -120,10 +148,108 @@ def delete_project(project_id):
             parent_root = os.path.dirname(normalized_root)
             if normalized_root and parent_root and normalized_root != parent_root:
                 shutil.rmtree(normalized_root)
+        guide_dir = os.path.dirname(guide_path)
+        if os.path.isdir(guide_dir):
+            shutil.rmtree(guide_dir, ignore_errors=True)
         return jsonify({'message': 'Project deleted successfully'})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
+
+
+@api_bp.route('/projects/<int:project_id>/guide', methods=['GET', 'POST'])
+def project_guide(project_id):
+    Project.query.get_or_404(project_id)
+    guide_path = get_project_guide_path(project_id)
+
+    if request.method == 'GET':
+        if not os.path.exists(guide_path):
+            return jsonify({
+                'exists': False,
+                'filename': None,
+                'page_count': 0
+            })
+
+        try:
+            page_count = get_pdf_page_count(guide_path)
+            meta_path = get_project_guide_meta_path(project_id)
+            display_name = os.path.basename(guide_path)
+            if os.path.exists(meta_path):
+                try:
+                    import json
+                    with open(meta_path, 'r', encoding='utf-8') as f:
+                        meta = json.load(f)
+                    display_name = meta.get('filename') or display_name
+                except Exception:
+                    pass
+            return jsonify({
+                'exists': True,
+                'filename': display_name,
+                'page_count': page_count,
+                'file_url': f'/api/projects/{project_id}/guide/file',
+                'modified_at': os.path.getmtime(guide_path)
+            })
+        except Exception as e:
+            return jsonify({'error': f'Cannot read guide file: {str(e)}'}), 400
+
+    from werkzeug.utils import secure_filename
+
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({'error': 'Vui lòng chọn file .pdf.'}), 400
+    if not file.filename.lower().endswith('.pdf'):
+        return jsonify({'error': 'Chỉ chấp nhận file .pdf.'}), 400
+
+    guide_dir = os.path.dirname(guide_path)
+    os.makedirs(guide_dir, exist_ok=True)
+
+    try:
+        file.save(guide_path)
+        meta_path = get_project_guide_meta_path(project_id)
+        import json
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'filename': secure_filename(file.filename),
+                'stored_filename': 'guide.pdf',
+                'modified_at': datetime.utcnow().isoformat()
+            }, f, ensure_ascii=False, indent=2)
+        page_count = get_pdf_page_count(guide_path)
+        return jsonify({
+            'message': 'Guide uploaded successfully',
+            'exists': True,
+            'filename': secure_filename(file.filename),
+            'page_count': page_count,
+            'file_url': f'/api/projects/{project_id}/guide/file',
+            'modified_at': os.path.getmtime(guide_path)
+        }), 201
+    except Exception as e:
+        if os.path.exists(guide_path):
+            try:
+                os.remove(guide_path)
+            except Exception:
+                pass
+        meta_path = get_project_guide_meta_path(project_id)
+        if os.path.exists(meta_path):
+            try:
+                os.remove(meta_path)
+            except Exception:
+                pass
+        return jsonify({'error': f'Cannot save guide file: {str(e)}'}), 400
+
+
+@api_bp.route('/projects/<int:project_id>/guide/file', methods=['GET'])
+def serve_project_guide_file(project_id):
+    Project.query.get_or_404(project_id)
+    guide_path = get_project_guide_path(project_id)
+    if not os.path.exists(guide_path):
+        return jsonify({'error': 'Guide file not found'}), 404
+
+    return flask.send_file(
+        guide_path,
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name='guide.pdf'
+    )
 
 
 
