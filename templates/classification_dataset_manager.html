@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="h-full flex flex-col bg-surface overflow-auto p-6">
+    <div class="max-w-7xl mx-auto w-full space-y-6">
+        <div class="flex flex-wrap items-start justify-between gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-content">Quản lý Dataset Classification</h1>
+                <p class="text-sm text-content-muted mt-1">Theo dõi crops đã thu thập, xem nhanh từng class và export dataset classification để train trên Colab.</p>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/models-experiment" class="px-4 py-2 bg-surface border border-border text-content rounded hover:bg-panel transition-colors">
+                    <i class="fa-solid fa-flask mr-2"></i> Về trang thí nghiệm model
+                </a>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[0.95fr_1.35fr] gap-6">
+            <section class="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
+                <div class="p-5 border-b border-border bg-surface">
+                    <h2 class="text-lg font-semibold text-content flex items-center gap-2">
+                        <i class="fa-solid fa-box-archive text-amber-500"></i> Tổng quan
+                    </h2>
+                    <p class="text-sm text-content-muted mt-1">Crops được tạo từ bounding boxes trong workspace sẽ được gom ở đây để chuẩn bị dataset classification.</p>
+                </div>
+                <div class="p-5 space-y-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div class="border border-border rounded bg-surface p-4">
+                            <div class="text-xs uppercase tracking-wide text-content-muted">Classes</div>
+                            <div id="overviewClassCount" class="mt-2 text-2xl font-bold text-content">0</div>
+                        </div>
+                        <div class="border border-border rounded bg-surface p-4">
+                            <div class="text-xs uppercase tracking-wide text-content-muted">Total Crops</div>
+                            <div id="overviewCropCount" class="mt-2 text-2xl font-bold text-content">0</div>
+                        </div>
+                        <div class="border border-border rounded bg-surface p-4">
+                            <div class="text-xs uppercase tracking-wide text-content-muted">Export State</div>
+                            <div id="overviewExportState" class="mt-2 text-sm font-semibold text-content">Idle</div>
+                        </div>
+                    </div>
+
+                    <div class="border border-border rounded bg-surface p-4 space-y-3">
+                        <div class="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                                <h3 class="text-sm font-semibold text-content">Export Dataset</h3>
+                                <p class="text-xs text-content-muted mt-1">Tạo file ZIP theo chuẩn classification dataset và mở sẵn mã Colab để train.</p>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="refreshCropStats()" class="px-3 py-1.5 text-xs bg-panel border border-border rounded text-content-muted hover:text-content hover:bg-surface transition-colors">
+                                    <i class="fa-solid fa-rotate"></i> Làm mới
+                                </button>
+                                <button onclick="exportCollectedCrops()" class="px-3 py-1.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700 transition-colors font-medium" id="btnExportCrops">
+                                    <i class="fa-solid fa-download"></i> Export Crops (.zip)
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="exportCropsProgressContainer" class="hidden bg-panel border border-border rounded p-3 space-y-2">
+                            <div class="flex items-center justify-between gap-3">
+                                <div id="exportCropsProgressText" class="text-xs font-semibold text-content truncate">
+                                    Preparing export...
+                                </div>
+                                <i class="fa-solid fa-file-zipper text-amber-500"></i>
+                            </div>
+                            <div class="w-full bg-surface border border-border rounded overflow-hidden h-2">
+                                <div id="exportCropsProgressBar" class="h-full bg-amber-500 transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                            <div id="exportCropsProgressMeta" class="text-[11px] text-content-muted truncate">
+                                0 / 0 files
+                            </div>
+                            <div id="exportCropsProgressActions" class="hidden items-center gap-2 pt-1">
+                                <button id="btnDownloadExportCrops"
+                                    class="px-3 py-1.5 text-xs bg-secondary text-white rounded hover:bg-green-600 transition-colors font-medium">
+                                    <i class="fa-solid fa-download"></i> Download ZIP
+                                </button>
+                                <button id="btnCancelExportCrops"
+                                    class="px-3 py-1.5 text-xs bg-surface border border-border rounded text-content-muted hover:text-red-500 transition-colors">
+                                    <i class="fa-solid fa-xmark"></i> Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="border border-border rounded bg-surface p-4">
+                        <h3 class="text-sm font-semibold text-content mb-2">Workflow</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs text-content-muted">
+                            <div class="border border-border rounded p-3 bg-panel">
+                                <div class="font-semibold text-content mb-1">1. Thu thập crops</div>
+                                Từ workspace, chọn bounding boxes và dùng chức năng collect crop.
+                            </div>
+                            <div class="border border-border rounded p-3 bg-panel">
+                                <div class="font-semibold text-content mb-1">2. Rà soát class</div>
+                                Kiểm tra số lượng, mở preview và xóa những class chưa ổn.
+                            </div>
+                            <div class="border border-border rounded p-3 bg-panel">
+                                <div class="font-semibold text-content mb-1">3. Export và train</div>
+                                Tải ZIP rồi chạy mã Colab sinh sẵn để train classification.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bg-panel border border-border rounded-lg shadow-sm overflow-hidden">
+                <div class="p-5 border-b border-border bg-surface">
+                    <h2 class="text-lg font-semibold text-content flex items-center gap-2">
+                        <i class="fa-solid fa-scissors text-amber-500"></i> Dataset Crops Thu thập
+                    </h2>
+                    <p class="text-sm text-content-muted mt-1">Danh sách classes hiện có trong dataset classification, sắp theo số lượng crops giảm dần.</p>
+                </div>
+                <div class="p-5">
+                    <div id="cropsStatsContent" class="text-sm text-content-muted">
+                        <div class="flex items-center gap-2 py-10 justify-center">
+                            <i class="fa-solid fa-spinner fa-spin"></i> Đang tải thống kê...
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+<div id="cropPreviewModal" class="fixed inset-0 bg-black/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm" onclick="if(event.target === this) closeCropPreview()">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-border" onclick="event.stopPropagation()">
+        <div class="px-4 py-3 border-b border-border flex justify-between items-center bg-surface rounded-t-lg">
+            <h3 class="text-lg font-bold text-content flex items-center gap-2">
+                <i class="fa-solid fa-images text-amber-500"></i>
+                <span id="cropPreviewTitle">Preview</span>
+            </h3>
+            <button onclick="closeCropPreview()" class="text-content-muted hover:text-content transition-colors">
+                <i class="fa-solid fa-times text-lg"></i>
+            </button>
+        </div>
+        <div id="cropPreviewGrid" class="p-4 overflow-y-auto flex-1 bg-surface"></div>
+    </div>
+</div>
+
+<div id="classificationColabModal" class="fixed inset-0 bg-black/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm" onclick="if(event.target === this) closeClassificationColabModal()">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-border" onclick="event.stopPropagation()">
+        <div class="px-4 py-3 border-b border-border flex justify-between items-center bg-surface rounded-t-lg">
+            <h3 class="text-lg font-bold text-content flex items-center gap-2">
+                <i class="fa-brands fa-google text-amber-500"></i>
+                <span>Google Colab Training Code</span>
+            </h3>
+            <button onclick="closeClassificationColabModal()" class="text-content-muted hover:text-content transition-colors">
+                <i class="fa-solid fa-times text-lg"></i>
+            </button>
+        </div>
+        <div class="p-4 bg-surface overflow-y-auto flex-1">
+            <div class="relative bg-sidebar border border-border rounded">
+                <pre class="p-4 text-sm font-mono text-content-muted overflow-x-auto whitespace-pre-wrap max-h-[55vh]"><code id="classificationColabCode"></code></pre>
+                <button
+                    onclick="copyClassificationColabCode(this)"
+                    class="absolute top-2 right-2 px-2 py-1 bg-surface hover:bg-panel border border-border rounded text-xs text-content transition-colors">
+                    <i class="fa-solid fa-copy"></i> Copy
+                </button>
+            </div>
+        </div>
+        <div class="px-4 py-3 border-t border-border flex justify-end bg-sidebar rounded-b-lg">
+            <button onclick="closeClassificationColabModal()" class="px-4 py-2 text-sm bg-primary hover:opacity-90 text-content-inv rounded transition-opacity">
+                Đóng
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentExportCropsJobId = null;
+    let exportCropsDownloadedJobId = null;
+    let exportCropsPollToken = 0;
+
+    function formatBytes(bytes) {
+        const value = Number(bytes || 0);
+        if (value < 1024) return `${value} B`;
+        const units = ['KB', 'MB', 'GB', 'TB'];
+        let size = value / 1024;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex += 1;
+        }
+        return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+    }
+
+    function triggerExportCropsDownload(job) {
+        if (!job?.download_url) return;
+        const a = document.createElement('a');
+        a.href = job.download_url;
+        a.download = 'classification_crops.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    function setExportCropsButtonBusy(isBusy) {
+        const btn = document.getElementById('btnExportCrops');
+        if (!btn) return;
+        btn.disabled = isBusy;
+        btn.innerHTML = isBusy
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...'
+            : '<i class="fa-solid fa-download"></i> Export Crops (.zip)';
+    }
+
+    function updateOverview(stats = {}) {
+        document.getElementById('overviewClassCount').textContent = `${stats.classCount || 0}`;
+        document.getElementById('overviewCropCount').textContent = `${stats.cropCount || 0}`;
+        document.getElementById('overviewExportState').textContent = stats.exportState || 'Idle';
+    }
+
+    function updateExportCropsProgress(job) {
+        const container = document.getElementById('exportCropsProgressContainer');
+        const bar = document.getElementById('exportCropsProgressBar');
+        const text = document.getElementById('exportCropsProgressText');
+        const meta = document.getElementById('exportCropsProgressMeta');
+        const actions = document.getElementById('exportCropsProgressActions');
+        const downloadBtn = document.getElementById('btnDownloadExportCrops');
+        const cancelBtn = document.getElementById('btnCancelExportCrops');
+        if (!container) return;
+
+        const total = Number(job.total_files || 0);
+        const processed = Number(job.processed_files || 0);
+        const written = Number(job.written_files || 0);
+        const skipped = Number(job.skipped_files || 0);
+        const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+        const isActive = ['queued', 'running', 'cancelling'].includes(job.status);
+        const isCompleted = job.status === 'completed';
+        const isFailed = job.status === 'failed';
+        const isCancelled = job.status === 'cancelled';
+
+        updateOverview({
+            exportState: isCompleted ? 'Completed' : isFailed ? 'Failed' : isCancelled ? 'Cancelled' : isActive ? 'Running' : 'Idle'
+        });
+
+        container.classList.remove('hidden');
+        if (bar) {
+            bar.style.width = `${isCompleted ? 100 : percent}%`;
+            bar.className = 'h-full transition-all duration-300';
+            if (isFailed || isCancelled) {
+                bar.classList.add('bg-red-500');
+            } else if (isCompleted) {
+                bar.classList.add('bg-green-500');
+            } else {
+                bar.classList.add('bg-amber-500');
+            }
+        }
+
+        if (text) {
+            if (isFailed) {
+                text.textContent = 'Failed';
+            } else if (isCancelled) {
+                text.textContent = 'Cancelled';
+            } else if (isCompleted) {
+                text.textContent = `Completed ${written}/${total} files`;
+            } else if (job.status === 'queued') {
+                text.textContent = `Preparing export... ${processed}/${total} files (${percent}%)`;
+            } else if (job.status === 'cancelling') {
+                text.textContent = `Cancelling... ${processed}/${total} files (${percent}%)`;
+            } else {
+                text.textContent = `Exporting crops... ${processed}/${total} files (${percent}%)`;
+            }
+        }
+
+        if (meta) {
+            if (isFailed || isCancelled) {
+                meta.textContent = job.error || job.message || 'Export stopped';
+            } else {
+                const classes = Number(job.class_count || 0);
+                const size = formatBytes(job.file_size || 0);
+                const current = job.current_file ? ` - ${job.current_file}` : '';
+                meta.textContent = `Written ${written} - Skipped ${skipped} - Classes ${classes} - ZIP ${size}${current}`;
+            }
+        }
+
+        if (actions) {
+            actions.classList.toggle('hidden', !(isActive || isCompleted));
+            actions.classList.toggle('flex', isActive || isCompleted);
+        }
+        if (downloadBtn) {
+            downloadBtn.classList.toggle('hidden', !isCompleted);
+            downloadBtn.disabled = !isCompleted;
+            downloadBtn.onclick = () => triggerExportCropsDownload(job);
+        }
+        if (cancelBtn) {
+            cancelBtn.classList.toggle('hidden', !isActive);
+            cancelBtn.disabled = !isActive || job.status === 'cancelling';
+            cancelBtn.onclick = () => cancelExportCropsJob(job.job_id);
+        }
+    }
+
+    async function pollExportCropsJob(jobId, { autoDownload = true } = {}) {
+        const pollToken = ++exportCropsPollToken;
+        currentExportCropsJobId = jobId;
+        setExportCropsButtonBusy(true);
+
+        while (pollToken === exportCropsPollToken) {
+            const res = await fetch(`/api/collect-crops/export/jobs/${jobId}`);
+            const job = await res.json();
+            if (!res.ok) {
+                throw new Error(job.error || 'Failed to read export progress');
+            }
+
+            updateExportCropsProgress(job);
+
+            if (job.status === 'completed') {
+                setExportCropsButtonBusy(false);
+                refreshCropStats();
+                if (autoDownload && exportCropsDownloadedJobId !== job.job_id) {
+                    exportCropsDownloadedJobId = job.job_id;
+                    triggerExportCropsDownload(job);
+                    showClassificationColabCode();
+                }
+                return job;
+            }
+
+            if (job.status === 'failed' || job.status === 'cancelled') {
+                setExportCropsButtonBusy(false);
+                return job;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        return null;
+    }
+
+    async function cancelExportCropsJob(jobId) {
+        if (!jobId) return;
+        const res = await fetch(`/api/collect-crops/export/jobs/${jobId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) {
+            alert('Cancel failed: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        updateExportCropsProgress(data.job);
+    }
+
+    async function restoreLatestExportCropsJob() {
+        try {
+            const res = await fetch('/api/collect-crops/export/jobs/latest');
+            if (!res.ok) return;
+            const data = await res.json();
+            const job = data.job || data;
+            if (!job?.job_id) return;
+            updateExportCropsProgress(job);
+            if (['queued', 'running', 'cancelling'].includes(job.status)) {
+                pollExportCropsJob(job.job_id, { autoDownload: true }).catch(error => {
+                    setExportCropsButtonBusy(false);
+                    alert('Export progress error: ' + error.message);
+                });
+            }
+        } catch (error) {
+            console.warn('Could not restore latest export job', error);
+        }
+    }
+
+    async function exportCollectedCrops() {
+        setExportCropsButtonBusy(true);
+        updateOverview({ exportState: 'Running' });
+
+        try {
+            const res = await fetch('/api/collect-crops/export/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ val_ratio: 0.2 })
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                const activeExport = Array.isArray(data.active_jobs)
+                    ? data.active_jobs.find(job => ['queued', 'running', 'cancelling'].includes(job.status))
+                    : null;
+                if (res.status === 409 && activeExport?.job_id) {
+                    updateExportCropsProgress(activeExport);
+                    await pollExportCropsJob(activeExport.job_id, { autoDownload: true });
+                    return;
+                }
+                throw new Error(data.error || 'Export failed');
+            }
+
+            currentExportCropsJobId = data.job_id;
+            updateExportCropsProgress({
+                job_id: data.job_id,
+                status: 'queued',
+                processed_files: 0,
+                total_files: data.total_files || 0,
+                written_files: 0,
+                skipped_files: 0,
+                class_count: 0,
+                file_size: 0,
+                message: 'Queued'
+            });
+            await pollExportCropsJob(data.job_id, { autoDownload: true });
+        } catch (e) {
+            setExportCropsButtonBusy(false);
+            updateOverview({ exportState: 'Failed' });
+            alert('Export error: ' + e.message);
+        }
+    }
+
+    async function refreshCropStats() {
+        const container = document.getElementById('cropsStatsContent');
+        container.innerHTML = '<div class="flex items-center gap-2 py-10 justify-center"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải thống kê...</div>';
+
+        try {
+            const res = await fetch('/api/collect-crops/stats');
+            const data = await res.json();
+            renderCropStats(data);
+            const stats = data.stats || {};
+            updateOverview({
+                classCount: Object.keys(stats).length,
+                cropCount: data.total || 0,
+                exportState: document.getElementById('overviewExportState').textContent || 'Idle'
+            });
+        } catch (e) {
+            container.innerHTML = `<div class="text-red-400 text-center py-4"><i class="fa-solid fa-triangle-exclamation mr-2"></i>Lỗi: ${e.message}</div>`;
+        }
+    }
+
+    function renderCropStats(data) {
+        const container = document.getElementById('cropsStatsContent');
+        const stats = data.stats || {};
+        const total = data.total || 0;
+        const classes = Object.keys(stats);
+
+        if (classes.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-12 text-content-muted">
+                    <i class="fa-solid fa-box-open text-3xl mb-3 text-amber-500/50"></i>
+                    <p class="text-sm">Chưa có crops nào được thu thập.</p>
+                    <p class="text-xs mt-1">Mở workspace, chọn bounding box rồi dùng chức năng <strong>Collect Crop</strong> để bắt đầu.</p>
+                </div>
+            `;
+            return;
+        }
+
+        let html = `
+            <div class="flex items-center gap-4 mb-5">
+                <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-2 flex items-center gap-2">
+                    <i class="fa-solid fa-image text-amber-500"></i>
+                    <span class="text-content font-bold text-lg">${total}</span>
+                    <span class="text-content-muted text-xs">crops tổng cộng</span>
+                </div>
+                <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg px-4 py-2 flex items-center gap-2">
+                    <i class="fa-solid fa-layer-group text-blue-500"></i>
+                    <span class="text-content font-bold text-lg">${classes.length}</span>
+                    <span class="text-content-muted text-xs">classes</span>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+        `;
+
+        classes.sort((a, b) => stats[b] - stats[a]);
+        const maxCount = Math.max(...Object.values(stats));
+
+        classes.forEach(cls => {
+            const count = stats[cls];
+            html += `
+                <div class="bg-surface border border-border rounded-lg p-4 flex flex-col gap-3 group hover:border-amber-500/50 transition-colors">
+                    <div class="flex justify-between items-start gap-3">
+                        <div class="min-w-0">
+                            <div class="font-bold text-content text-sm truncate" title="${cls}">${cls}</div>
+                            <div class="text-xs text-content-muted mt-1">${count} crops</div>
+                        </div>
+                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onclick="previewCropClass('${cls.replace(/'/g, "\\'")}')" class="text-content-muted hover:text-blue-500 p-1" title="Xem ảnh">
+                                <i class="fa-solid fa-eye text-xs"></i>
+                            </button>
+                            <button onclick="deleteCropClass('${cls.replace(/'/g, "\\'")}')" class="text-content-muted hover:text-red-500 p-1" title="Xóa class">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 bg-panel rounded-full h-1.5 overflow-hidden">
+                            <div class="h-full bg-amber-500 rounded-full transition-all" style="width: ${Math.min(100, (count / maxCount) * 100)}%"></div>
+                        </div>
+                        <span class="text-xs font-mono text-content-muted font-bold">${count}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    async function deleteCropClass(className) {
+        if (!confirm(`Xóa tất cả ${className} crops? Hành động này không thể hoàn tác.`)) return;
+
+        try {
+            const res = await fetch(`/api/collect-crops/${encodeURIComponent(className)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if (data.success) {
+                refreshCropStats();
+            } else {
+                alert(data.error || 'Lỗi khi xóa');
+            }
+        } catch (e) {
+            alert('Lỗi: ' + e.message);
+        }
+    }
+
+    async function previewCropClass(className) {
+        document.getElementById('cropPreviewTitle').textContent = `Preview: ${className}`;
+        document.getElementById('cropPreviewGrid').innerHTML = '<div class="flex items-center justify-center py-10"><i class="fa-solid fa-spinner fa-spin text-2xl text-content-muted"></i></div>';
+        document.getElementById('cropPreviewModal').classList.remove('hidden');
+
+        try {
+            const res = await fetch(`/api/collect-crops/preview/${encodeURIComponent(className)}`);
+            const data = await res.json();
+
+            if (data.error) {
+                document.getElementById('cropPreviewGrid').innerHTML = `<div class="text-red-400 text-center py-10">${data.error}</div>`;
+                return;
+            }
+
+            const files = data.files || [];
+            if (files.length === 0) {
+                document.getElementById('cropPreviewGrid').innerHTML = '<div class="text-content-muted text-center py-10">Không có ảnh nào.</div>';
+                return;
+            }
+
+            let html = `<div class="text-xs text-content-muted mb-3">Hiển thị ${files.length} / ${data.total} ảnh gần nhất</div>`;
+            html += '<div class="grid grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2">';
+            files.forEach(f => {
+                html += `
+                    <div class="aspect-square rounded border border-border overflow-hidden bg-panel hover:border-amber-500 transition-colors cursor-pointer" onclick="window.open('/api/collect-crops/serve/${encodeURIComponent(className)}/${encodeURIComponent(f)}', '_blank')">
+                        <img src="/api/collect-crops/serve/${encodeURIComponent(className)}/${encodeURIComponent(f)}"
+                             class="w-full h-full object-cover" loading="lazy" alt="${f}">
+                    </div>
+                `;
+            });
+            html += '</div>';
+            document.getElementById('cropPreviewGrid').innerHTML = html;
+        } catch (e) {
+            document.getElementById('cropPreviewGrid').innerHTML = `<div class="text-red-400 text-center py-10">Lỗi: ${e.message}</div>`;
+        }
+    }
+
+    function closeCropPreview() {
+        document.getElementById('cropPreviewModal').classList.add('hidden');
+    }
+
+    function getClassificationColabCode() {
+        return `!pip install -U ultralytics
+
+from google.colab import files
+from ultralytics import YOLO
+import pathlib
+import zipfile
+
+uploaded = files.upload()
+zip_path = next(iter(uploaded))
+
+extract_root = pathlib.Path("/content")
+with zipfile.ZipFile(zip_path, "r") as z:
+    z.extractall(extract_root)
+
+dataset_root = extract_root / "classification_dataset"
+print("Train:", dataset_root / "train")
+print("Val:", dataset_root / "val")
+
+model = YOLO("yolo11n-cls.pt")
+results = model.train(
+    data=str(dataset_root),
+    epochs=50,
+    imgsz=224,
+    batch=32,
+    patience=10,
+    device=0
+)
+
+metrics = model.val(data=str(dataset_root))
+print(metrics)
+`;
+    }
+
+    function showClassificationColabCode() {
+        const codeEl = document.getElementById('classificationColabCode');
+        if (codeEl) {
+            codeEl.textContent = getClassificationColabCode();
+        }
+        document.getElementById('classificationColabModal')?.classList.remove('hidden');
+    }
+
+    function closeClassificationColabModal() {
+        document.getElementById('classificationColabModal')?.classList.add('hidden');
+    }
+
+    async function copyClassificationColabCode(btn) {
+        const code = document.getElementById('classificationColabCode')?.textContent || getClassificationColabCode();
+        await navigator.clipboard.writeText(code);
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(() => {
+            btn.innerHTML = original;
+        }, 1600);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        updateOverview({ classCount: 0, cropCount: 0, exportState: 'Idle' });
+        refreshCropStats();
+        restoreLatestExportCropsJob();
+    });
+</script>
+{% endblock %}

@@ -120,6 +120,10 @@ def create_app():
     @app.route('/models-experiment')
     def models_experiment_page():
         return render_template('models_experiment.html')
+
+    @app.route('/classification-datasets')
+    def classification_datasets_page():
+        return render_template('classification_dataset_manager.html')
     
     
     # Initialize SocketIO
