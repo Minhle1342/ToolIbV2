@@ -99,6 +99,24 @@
                     Uploading... 0%</div>
             </div>
 
+            <!-- Collect Crops Progress Bar (Hidden by default) -->
+            <div id="collectCropsProgressContainer"
+                class="hidden space-y-1.5 sidebar-content bg-panel border border-border rounded p-2">
+                <div class="flex items-center justify-between gap-2">
+                    <div id="collectCropsProgressText" class="text-[10px] font-semibold text-content truncate">
+                        Cropping... 0/0 images (0%)
+                    </div>
+                    <i class="fa-solid fa-scissors text-amber-500 text-xs"></i>
+                </div>
+                <div class="w-full bg-surface border border-border rounded overflow-hidden h-1.5">
+                    <div id="collectCropsProgressBar"
+                        class="h-full bg-amber-500 transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <div id="collectCropsProgressMeta" class="text-[10px] text-content-muted truncate">
+                    Collected 0 crops • Skipped 0
+                </div>
+            </div>
+
             <div id="sidebarFiltersContent" class="hidden space-y-2 sidebar-content">
                 <div class="flex gap-2">
                     <select id="viewFilter" onchange="loadImages()"
@@ -116,6 +134,7 @@
                         <option value="NotReviewed" data-i18n="filter_not_reviewed">Not Reviewed</option>
                         <option value="Labeled" data-i18n="filter_labeled">Đã có Bounding Box</option>
                         <option value="Unlabeled" data-i18n="filter_unlabeled">Chưa có Bounding Box</option>
+                        <option value="Tagged" data-i18n="filter_tagged">Đã gán tag</option>
                     </select>
                 </div>
                 <div class="space-y-1">
@@ -348,12 +367,29 @@
 
                 <!-- Group 6: Zoom & Extra Classifier Utilities -->
                 <div class="flex items-center gap-1 pr-2 border-r border-border flex-shrink-0">
-                    <button id="btnCollectAll"
-                        class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
-                        title="Collect all box crops for classifier retraining"
-                        onclick="currentWorkspace.collectAllBoxes()">
-                        <i class="fa-solid fa-scissors text-lg"></i>
-                    </button>
+                    <div class="relative" id="collectCropsDropdownWrapper">
+                        <button id="btnCollectAll"
+                            class="p-2 text-content-muted hover:text-amber-500 rounded hover:bg-panel transition-colors"
+                            title="Collect crops for classifier retraining"
+                            onclick="toggleDropdown(event, 'btnCollectAll', 'collectCropsDropdown', 192)">
+                            <i class="fa-solid fa-scissors text-lg"></i>
+                        </button>
+                        <div id="collectCropsDropdown"
+                            class="fixed hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-48 overflow-hidden">
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-amber-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('collectCropsDropdown').classList.add('hidden'); currentWorkspace.collectAllBoxes()">
+                                <i class="fa-solid fa-crop-simple w-4 text-center"></i>
+                                <span>Crop ảnh hiện tại</span>
+                            </button>
+                            <button
+                                class="text-left px-3 py-2 hover:bg-surface text-content hover:text-amber-500 transition-colors flex items-center gap-2"
+                                onclick="document.getElementById('collectCropsDropdown').classList.add('hidden'); currentWorkspace.collectAllProjectBoxes()">
+                                <i class="fa-solid fa-images w-4 text-center"></i>
+                                <span>Crop tất cả ảnh</span>
+                            </button>
+                        </div>
+                    </div>
 
                     <button class="p-2 text-content-muted hover:text-content-inv rounded hover:bg-panel"
                         onclick="editor.zoomIn()">

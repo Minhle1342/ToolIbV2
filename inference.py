@@ -1,5 +1,6 @@
 import os
 import json
+import ast
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -11,6 +12,7 @@ class YOLOInference:
         self.session = None
         self.input_name = None
         self.class_names = {}
+        self.metadata = {}
         self.input_width = 640
         self.input_height = 640
         self.ensure_session()
@@ -38,9 +40,13 @@ class YOLOInference:
                 # Load class names from model metadata
                 try:
                     meta = self.session.get_modelmeta().custom_metadata_map
+                    self.metadata = dict(meta or {})
                     if 'names' in meta:
-                        import ast
-                        self.class_names = ast.literal_eval(meta['names'])
+                        names = ast.literal_eval(meta['names'])
+                        if isinstance(names, dict):
+                            self.class_names = {int(k): v for k, v in names.items()}
+                        elif isinstance(names, (list, tuple)):
+                            self.class_names = {idx: name for idx, name in enumerate(names)}
                 except Exception as meta_err:
                     print(f"Warning: Could not load class names from model metadata: {meta_err}")
             except Exception as e:
@@ -131,33 +137,44 @@ class YOLOInference:
         outputs = self.session.run(None, {self.input_name: input_tensor})
         
         # 3. Postprocess
-        # Attempt to handle different shapes. Setup usually (1, 4+nc, N)
-        output = outputs[0]
-        
-        # Squeeze batch if present
-        if output.ndim == 3:
-            output = output[0] # (4+nc, N)
-            
-        # Check standard YOLO output layout
-        # usually [cx, cy, w, h, score...]
-        # If shape is (N, 4+nc), transpose isn't needed. 
-        # But usually it is (channels, anchors) -> Transpose to (anchors, channels)
-        if output.shape[0] < output.shape[1]: 
-            output = output.transpose() # Now (N, 4+nc)
-            
-        rows = output.shape[0]
+        output = self._prepare_output_rows(outputs[0])
+        if output is None or output.size == 0 or output.ndim != 2 or output.shape[1] < 5:
+            return {'success': True, 'boxes': []}
+
+        if self._is_end2end_output(output, conf_threshold):
+            return self._postprocess_end2end_output(
+                output,
+                conf_threshold,
+                full_w,
+                full_h,
+                orig_w,
+                orig_h,
+                ratio,
+                pad_w,
+                pad_h,
+                offset_x,
+                offset_y
+            )
+
         boxes = []
         confidences = []
         class_ids = []
 
-        # Find max scores
-        # First 4 columns are box coords
         box_data = output[:, :4]
         scores_data = output[:, 4:]
         
-        # Get max confidence and class index for each row
-        class_scores = np.max(scores_data, axis=1)
-        classes = np.argmax(scores_data, axis=1)
+        class_count = len(self.class_names)
+        if scores_data.shape[1] == 1:
+            class_scores = scores_data[:, 0]
+            classes = np.zeros_like(class_scores, dtype=np.int32)
+        elif class_count and scores_data.shape[1] == class_count + 1:
+            objectness = scores_data[:, 0]
+            per_class_scores = scores_data[:, 1:]
+            classes = np.argmax(per_class_scores, axis=1)
+            class_scores = objectness * np.max(per_class_scores, axis=1)
+        else:
+            class_scores = np.max(scores_data, axis=1)
+            classes = np.argmax(scores_data, axis=1)
         
         # Filter by threshold
         mask = class_scores > conf_threshold
@@ -169,6 +186,12 @@ class YOLOInference:
         # Convert to XYWH (center to top-left) and rescale from letterbox to original
         for i in range(len(filtered_boxes)):
             cx, cy, bw, bh = filtered_boxes[i]
+
+            if max(abs(cx), abs(cy), abs(bw), abs(bh)) <= 2.0:
+                cx *= self.input_width
+                bw *= self.input_width
+                cy *= self.input_height
+                bh *= self.input_height
             
             # Undo letterbox: remove padding, then divide by ratio
             x = ((cx - bw / 2) - pad_w) / ratio
@@ -203,13 +226,144 @@ class YOLOInference:
 
                 results.append({
                     'class_id': class_ids[i],
-                    'x': float(cx),
-                    'y': float(cy),
-                    'w': float(nw),
-                    'h': float(nh),
+                    'x': float(np.clip(cx, 0.0, 1.0)),
+                    'y': float(np.clip(cy, 0.0, 1.0)),
+                    'w': float(np.clip(nw, 0.0, 1.0)),
+                    'h': float(np.clip(nh, 0.0, 1.0)),
                     'conf': confidences[i]
                 })
                 
+        return {'success': True, 'boxes': results}
+
+    def _prepare_output_rows(self, output):
+        output = np.asarray(output)
+        if output.ndim == 3 and output.shape[0] == 1:
+            output = output[0]
+        elif output.ndim == 3 and output.shape[1] == 1:
+            output = output[:, 0, :]
+        elif output.ndim > 3:
+            output = np.squeeze(output)
+
+        if output.ndim == 1:
+            output = output.reshape(1, -1)
+
+        if output.ndim != 2:
+            return None
+
+        # Ultralytics non-end2end exports are commonly (channels, anchors);
+        # end2end/NMS exports are commonly (detections, 6). Normalize to rows.
+        if output.shape[0] < output.shape[1] and output.shape[0] <= 256:
+            output = output.transpose()
+
+        return output.astype(np.float32, copy=False)
+
+    def _metadata_bool(self, key):
+        value = self.metadata.get(key)
+        if value is None:
+            return False
+        return str(value).strip().lower() in ('1', 'true', 'yes', 'y')
+
+    def _is_end2end_output(self, rows, conf_threshold):
+        if rows.shape[1] < 6:
+            return False
+
+        if self._metadata_bool('end2end') or self._metadata_bool('nms'):
+            return True
+
+        if rows.shape[1] != 6:
+            return False
+
+        # YOLO26 end-to-end and Ultralytics nms=True detection exports use
+        # [x1, y1, x2, y2, confidence, class_id], often with max_det=300.
+        if rows.shape[0] > 1000:
+            return False
+
+        conf = rows[:, 4]
+        cls = rows[:, 5]
+        valid_conf = np.isfinite(conf) & (conf >= 0.0) & (conf <= 1.0)
+        valid_cls = np.isfinite(cls) & (cls >= 0.0) & (np.abs(cls - np.round(cls)) < 1e-3)
+        candidates = valid_conf & valid_cls & (conf > max(conf_threshold * 0.25, 0.01))
+        if not np.any(candidates):
+            return False
+
+        boxes = rows[candidates, :4]
+        if np.max(np.abs(boxes)) <= 2.0:
+            x1 = boxes[:, 0] * self.input_width
+            y1 = boxes[:, 1] * self.input_height
+            x2 = boxes[:, 2] * self.input_width
+            y2 = boxes[:, 3] * self.input_height
+        else:
+            x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+
+        ordered = (x2 >= x1) & (y2 >= y1)
+        return bool(np.mean(ordered) >= 0.8)
+
+    def _postprocess_end2end_output(
+        self,
+        rows,
+        conf_threshold,
+        full_w,
+        full_h,
+        orig_w,
+        orig_h,
+        ratio,
+        pad_w,
+        pad_h,
+        offset_x,
+        offset_y
+    ):
+        results = []
+        for row in rows:
+            if row.shape[0] < 6:
+                continue
+
+            conf = float(row[4])
+            if not np.isfinite(conf) or conf < conf_threshold:
+                continue
+
+            class_id = int(round(float(row[5])))
+            x1, y1, x2, y2 = [float(v) for v in row[:4]]
+
+            if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 2.0:
+                x1 *= self.input_width
+                x2 *= self.input_width
+                y1 *= self.input_height
+                y2 *= self.input_height
+
+            x1 = (x1 - pad_w) / ratio
+            y1 = (y1 - pad_h) / ratio
+            x2 = (x2 - pad_w) / ratio
+            y2 = (y2 - pad_h) / ratio
+
+            x1 = np.clip(x1, 0, orig_w)
+            y1 = np.clip(y1, 0, orig_h)
+            x2 = np.clip(x2, 0, orig_w)
+            y2 = np.clip(y2, 0, orig_h)
+
+            abs_x1 = min(x1, x2) + offset_x
+            abs_y1 = min(y1, y2) + offset_y
+            abs_x2 = max(x1, x2) + offset_x
+            abs_y2 = max(y1, y2) + offset_y
+            abs_w = max(0.0, abs_x2 - abs_x1)
+            abs_h = max(0.0, abs_y2 - abs_y1)
+
+            if abs_w <= 0 or abs_h <= 0:
+                continue
+
+            cx = (abs_x1 + abs_w / 2) / full_w
+            cy = (abs_y1 + abs_h / 2) / full_h
+            nw = abs_w / full_w
+            nh = abs_h / full_h
+
+            results.append({
+                'class_id': class_id,
+                'x': float(np.clip(cx, 0.0, 1.0)),
+                'y': float(np.clip(cy, 0.0, 1.0)),
+                'w': float(np.clip(nw, 0.0, 1.0)),
+                'h': float(np.clip(nh, 0.0, 1.0)),
+                'conf': conf
+            })
+
         return {'success': True, 'boxes': results}
 
 

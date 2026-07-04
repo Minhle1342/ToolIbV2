@@ -18,6 +18,7 @@ const translations = {
         "filter_flagged": "Flagged",
         "filter_labeled": "Labeled",
         "filter_unlabeled": "Unlabeled",
+        "filter_tagged": "Tagged",
         "filter_by_classes": "Filter by Classes",
         "loading_classes": "Loading classes...",
         "btn_assign": "Assign",
@@ -131,6 +132,7 @@ const translations = {
         "dashboard_btnMerge": "Proceed to Merge"
     },
     vi: {
+        "filter_tagged": "Đã gán tag",
         // Base
         "brand": "YOLO Hub",
         "nav_dashboard": "Bảng điều khiển",

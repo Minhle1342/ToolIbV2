@@ -13,6 +13,7 @@ class Workspace {
         this.copiedFromImageId = null;
         this.zoomOnFocus = localStorage.getItem('zoomOnFocus') !== 'false';
         this.imageById = new Map();
+        this.collectCropsJobToken = 0;
         this.setupImageListDelegation();
         this.init();
         this.imageList = [];
@@ -1431,6 +1432,133 @@ class Workspace {
         }
     }
 
+    updateCollectCropsProgress(job) {
+        const container = document.getElementById('collectCropsProgressContainer');
+        const bar = document.getElementById('collectCropsProgressBar');
+        const text = document.getElementById('collectCropsProgressText');
+        const meta = document.getElementById('collectCropsProgressMeta');
+        if (!container) return;
+
+        const totalImages = Number(job.total_images || 0);
+        const processedImages = Number(job.processed_images || 0);
+        const percent = totalImages > 0 ? Math.min(100, Math.round((processedImages / totalImages) * 100)) : 0;
+        const collected = Number(job.collected || 0);
+        const skipped = Number(job.skipped || 0);
+        const current = job.current_image ? ` • ${job.current_image}` : '';
+
+        container.classList.remove('hidden');
+
+        if (bar) {
+            bar.style.width = `${job.status === 'completed' ? 100 : percent}%`;
+            bar.className = 'h-full transition-all duration-300';
+            if (job.status === 'failed') {
+                bar.classList.add('bg-red-500');
+            } else if (job.status === 'completed') {
+                bar.classList.add('bg-green-500');
+            } else {
+                bar.classList.add('bg-amber-500');
+            }
+        }
+
+        if (text) {
+            if (job.status === 'failed') {
+                text.innerText = 'Crop failed';
+            } else if (job.status === 'completed') {
+                text.innerText = `Hoàn tất ${processedImages}/${totalImages} images (100%)`;
+            } else {
+                text.innerText = `Cropping... ${processedImages}/${totalImages} images (${percent}%)`;
+            }
+        }
+
+        if (meta) {
+            if (job.status === 'failed') {
+                meta.innerText = job.error || job.message || 'Unknown error';
+            } else {
+                meta.innerText = `Collected ${collected} crops • Skipped ${skipped}${current}`;
+            }
+        }
+    }
+
+    async waitForCollectCropsJob(jobId, token) {
+        while (token === this.collectCropsJobToken) {
+            const job = await API.getCollectCropsJob(jobId);
+            if (job.error && !job.status) {
+                throw new Error(job.error);
+            }
+
+            this.updateCollectCropsProgress(job);
+
+            if (job.status === 'completed') {
+                setTimeout(() => {
+                    if (token === this.collectCropsJobToken) {
+                        document.getElementById('collectCropsProgressContainer')?.classList.add('hidden');
+                    }
+                }, 3500);
+                return job;
+            }
+
+            if (job.status === 'failed') {
+                throw new Error(job.error || job.message || 'Crop job failed');
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        return null;
+    }
+
+    async collectAllProjectBoxes() {
+        if (!confirm('Crop tất cả bounding boxes của project hiện tại? Crops cũ của project này sẽ được tạo lại để tránh trùng dữ liệu.')) {
+            return;
+        }
+
+        const btn = document.getElementById('btnCollectAll');
+        const originalHtml = btn ? btn.innerHTML : '';
+        const token = ++this.collectCropsJobToken;
+
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-lg"></i>';
+            btn.disabled = true;
+        }
+
+        this.updateCollectCropsProgress({
+            status: 'queued',
+            processed_images: 0,
+            total_images: 0,
+            collected: 0,
+            skipped: 0,
+            current_image: '',
+            message: 'Queued'
+        });
+
+        try {
+            const startResult = await API.startCollectProjectCrops(PROJECT_ID, { reset_project: true });
+            if (!startResult.success || !startResult.job_id) {
+                throw new Error(startResult.error || 'Failed to start crop job');
+            }
+
+            const finalJob = await this.waitForCollectCropsJob(startResult.job_id, token);
+            if (finalJob) {
+                this.showToast(`Collected ${finalJob.collected || 0} crops from project`, 'success');
+            }
+        } catch (e) {
+            this.updateCollectCropsProgress({
+                status: 'failed',
+                processed_images: 0,
+                total_images: 0,
+                collected: 0,
+                skipped: 0,
+                error: e.message
+            });
+            this.showToast('Crop all failed: ' + e.message, 'error');
+        } finally {
+            if (btn && token === this.collectCropsJobToken) {
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+        }
+    }
+
     showToast(message, type = 'info') {
         // Create a floating toast notification
         const toast = document.createElement('div');
@@ -2043,9 +2171,16 @@ class Workspace {
                     format: 'yolo'
                 })
             });
-            const result = await res.json();
+            const contentType = res.headers.get('content-type') || '';
+            const result = contentType.includes('application/json')
+                ? await res.json()
+                : {
+                    status: 'error',
+                    message: `Export failed with a non-JSON response (${res.status}).`,
+                    detail: await res.text()
+                };
 
-            if (result.status === 'success') {
+            if (res.ok && result.status === 'success') {
                 closeModal('exportModal');
 
                 // Reload images to get updated split_type from backend
@@ -2145,7 +2280,8 @@ files.download(onnx_path)
                 document.getElementById('colabSnippetCode').textContent = colabCode;
                 document.getElementById('colabCodeModal').classList.remove('hidden');
             } else {
-                alert('Export Failed: ' + result.message);
+                const message = result.message || result.error || result.detail || res.statusText || 'Unknown error';
+                alert('Export Failed: ' + message);
             }
         } catch (e) {
             alert('Error: ' + e.message);
@@ -2817,8 +2953,8 @@ function copyImageName(event, filename) {
     });
 }
 
-const IMAGE_LIST_INITIAL_RENDER = 160;
-const IMAGE_LIST_CHUNK_SIZE = 240;
+const IMAGE_LIST_ITEM_ESTIMATED_HEIGHT = 52;
+const IMAGE_LIST_PREFETCH_OFFSET = 900;
 let imageListRenderState = null;
 
 function escapeHtml(value) {
@@ -2833,8 +2969,14 @@ function escapeHtml(value) {
 function cancelImageListRender() {
     if (!imageListRenderState) return;
     imageListRenderState.cancelled = true;
+    if (imageListRenderState.intersectionObserver) {
+        imageListRenderState.intersectionObserver.disconnect();
+    }
     if (imageListRenderState.scrollHandler && imageListRenderState.container) {
         imageListRenderState.container.removeEventListener('scroll', imageListRenderState.scrollHandler);
+    }
+    if (imageListRenderState.sentinel && imageListRenderState.sentinel.parentNode) {
+        imageListRenderState.sentinel.parentNode.removeChild(imageListRenderState.sentinel);
     }
     imageListRenderState = null;
 }
@@ -2844,6 +2986,54 @@ function scheduleIdle(callback) {
         return window.requestIdleCallback(callback, { timeout: 120 });
     }
     return window.setTimeout(callback, 16);
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function getImageListRenderConfig(totalItems, container) {
+    if (!totalItems) {
+        return { initialRender: 0, chunkSize: 0 };
+    }
+
+    const viewportItems = Math.max(
+        12,
+        Math.ceil((container?.clientHeight || 0) / IMAGE_LIST_ITEM_ESTIMATED_HEIGHT) + 6
+    );
+
+    if (totalItems <= 120) {
+        return {
+            initialRender: totalItems,
+            chunkSize: totalItems
+        };
+    }
+
+    if (totalItems <= 400) {
+        return {
+            initialRender: Math.min(totalItems, clamp(viewportItems * 3, 60, 144)),
+            chunkSize: clamp(viewportItems * 2, 48, 120)
+        };
+    }
+
+    if (totalItems <= 1200) {
+        return {
+            initialRender: Math.min(totalItems, clamp(viewportItems * 2, 48, 108)),
+            chunkSize: clamp(viewportItems * 2, 72, 144)
+        };
+    }
+
+    if (totalItems <= 2500) {
+        return {
+            initialRender: Math.min(totalItems, clamp(Math.round(viewportItems * 1.5), 42, 84)),
+            chunkSize: clamp(Math.round(viewportItems * 1.75), 72, 120)
+        };
+    }
+
+    return {
+        initialRender: Math.min(totalItems, clamp(Math.round(viewportItems * 1.25), 36, 72)),
+        chunkSize: clamp(Math.round(viewportItems * 1.5), 60, 96)
+    };
 }
 
 function imageListItemHtml(img, overlapThreshold) {
@@ -2886,6 +3076,10 @@ function appendImageListChunk(state, count) {
         html += imageListItemHtml(state.images[i], state.overlapThreshold);
     }
 
+    if (state.sentinel && state.sentinel.parentNode === state.container) {
+        state.sentinel.remove();
+    }
+
     if (state.nextIndex === 0) {
         state.container.innerHTML = html;
     } else {
@@ -2893,10 +3087,39 @@ function appendImageListChunk(state, count) {
     }
 
     state.nextIndex = end;
+    syncImageListSentinel(state);
 
     if (typeof window.updateAllUserIndicators === 'function') {
         window.updateAllUserIndicators();
     }
+}
+
+function maybeFillImageListViewport(state) {
+    if (!state || state.cancelled) return;
+
+    while (
+        state.nextIndex < state.images.length &&
+        state.container.scrollHeight <= state.container.clientHeight + IMAGE_LIST_PREFETCH_OFFSET / 2
+    ) {
+        appendImageListChunk(state, state.chunkSize);
+    }
+}
+
+function syncImageListSentinel(state) {
+    if (!state || state.cancelled || !state.sentinel) return;
+
+    if (state.nextIndex >= state.images.length) {
+        if (state.intersectionObserver) {
+            state.intersectionObserver.disconnect();
+            state.intersectionObserver = null;
+        }
+        if (state.sentinel.parentNode) {
+            state.sentinel.remove();
+        }
+        return;
+    }
+
+    state.container.appendChild(state.sentinel);
 }
 
 function renderMoreImagesSoon(state) {
@@ -2905,7 +3128,8 @@ function renderMoreImagesSoon(state) {
     state.pending = true;
     scheduleIdle(() => {
         state.pending = false;
-        appendImageListChunk(state, IMAGE_LIST_CHUNK_SIZE);
+        appendImageListChunk(state, state.chunkSize);
+        maybeFillImageListViewport(state);
     });
 }
 
@@ -2917,27 +3141,52 @@ function renderImageList(container, images, overlapThreshold) {
         return;
     }
 
+    const renderConfig = getImageListRenderConfig(images.length, container);
+
     const state = {
         container,
         images,
         overlapThreshold,
+        initialRender: renderConfig.initialRender,
+        chunkSize: renderConfig.chunkSize,
         nextIndex: 0,
         pending: false,
         cancelled: false,
-        scrollHandler: null
+        scrollHandler: null,
+        intersectionObserver: null,
+        sentinel: document.createElement('div')
     };
 
-    imageListRenderState = state;
-    appendImageListChunk(state, IMAGE_LIST_INITIAL_RENDER);
+    state.sentinel.className = 'h-px w-full pointer-events-none';
+    state.sentinel.setAttribute('aria-hidden', 'true');
 
-    state.scrollHandler = () => {
+    imageListRenderState = state;
+    appendImageListChunk(state, state.initialRender);
+    maybeFillImageListViewport(state);
+
+    const onNearBottom = () => {
         const remaining = state.container.scrollHeight - state.container.scrollTop - state.container.clientHeight;
-        if (remaining < 900) {
+        if (remaining < IMAGE_LIST_PREFETCH_OFFSET) {
             renderMoreImagesSoon(state);
         }
     };
 
+    state.scrollHandler = onNearBottom;
+
+    if ('IntersectionObserver' in window) {
+        state.intersectionObserver = new IntersectionObserver((entries) => {
+            if (entries.some(entry => entry.isIntersecting)) {
+                renderMoreImagesSoon(state);
+            }
+        }, {
+            root: container,
+            rootMargin: `0px 0px ${IMAGE_LIST_PREFETCH_OFFSET}px 0px`
+        });
+        state.intersectionObserver.observe(state.sentinel);
+    }
+
     container.addEventListener('scroll', state.scrollHandler, { passive: true });
+    onNearBottom();
     renderMoreImagesSoon(state);
 }
 
@@ -2949,7 +3198,7 @@ function ensureImageListItemRendered(imageId) {
     if (targetIndex === -1) return null;
 
     while (state.nextIndex <= targetIndex) {
-        appendImageListChunk(state, IMAGE_LIST_CHUNK_SIZE);
+        appendImageListChunk(state, state.chunkSize);
     }
 
     return document.getElementById(`img-${imageId}`);
@@ -3069,6 +3318,8 @@ async function loadImages(fetchFromServer = true) {
                 filters.is_reviewed = 'true';
             } else if (flag === 'NotReviewed') {
                 filters.is_reviewed = 'false';
+            } else if (flag === 'Tagged') {
+                filters.has_any_tag = 'true';
             } else {
                 filters.flag_status = flag;
             }
@@ -3384,7 +3635,7 @@ function toggleDropdown(event, buttonId, dropdownId, dropdownWidth) {
     if (!btn || !dropdown) return;
 
     // Hide other dropdowns first
-    const allDropdowns = ['autoLabelDropdown', 'sequenceDropdown'];
+    const allDropdowns = ['autoLabelDropdown', 'sequenceDropdown', 'collectCropsDropdown'];
     allDropdowns.forEach(id => {
         if (id !== dropdownId) {
             const el = document.getElementById(id);
@@ -3424,11 +3675,16 @@ document.addEventListener('click', function (event) {
     if (seqDropdown && !seqDropdown.classList.contains('hidden') && !event.target.closest('#btnShowSequenceNumbers') && !event.target.closest('#sequenceDropdown')) {
         seqDropdown.classList.add('hidden');
     }
+    const collectDropdown = document.getElementById('collectCropsDropdown');
+    if (collectDropdown && !collectDropdown.classList.contains('hidden') && !event.target.closest('#collectCropsDropdownWrapper')) {
+        collectDropdown.classList.add('hidden');
+    }
 });
 
 window.addEventListener('resize', () => {
     positionFixedDropdown(document.getElementById('btnAutoLabelToggle'), document.getElementById('autoLabelDropdown'), 192);
     positionFixedDropdown(document.getElementById('btnShowSequenceNumbers'), document.getElementById('sequenceDropdown'), 192);
+    positionFixedDropdown(document.getElementById('btnCollectAll'), document.getElementById('collectCropsDropdown'), 192);
 });
 
 window.addEventListener('scroll', () => {

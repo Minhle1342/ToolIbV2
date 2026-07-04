@@ -180,6 +180,30 @@
                 <i class="fa-solid fa-spinner fa-spin"></i> Đang tải thống kê...
             </div>
         </div>
+        <div id="exportCropsProgressContainer" class="hidden mt-4 bg-surface border border-border rounded p-3 space-y-2">
+            <div class="flex items-center justify-between gap-3">
+                <div id="exportCropsProgressText" class="text-xs font-semibold text-content truncate">
+                    Preparing export...
+                </div>
+                <i class="fa-solid fa-file-zipper text-amber-500"></i>
+            </div>
+            <div class="w-full bg-panel border border-border rounded overflow-hidden h-2">
+                <div id="exportCropsProgressBar" class="h-full bg-amber-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+            <div id="exportCropsProgressMeta" class="text-[11px] text-content-muted truncate">
+                0 / 0 files
+            </div>
+            <div id="exportCropsProgressActions" class="hidden items-center gap-2 pt-1">
+                <button id="btnDownloadExportCrops"
+                    class="px-3 py-1.5 text-xs bg-secondary text-white rounded hover:bg-green-600 transition-colors font-medium">
+                    <i class="fa-solid fa-download"></i> Download ZIP
+                </button>
+                <button id="btnCancelExportCrops"
+                    class="px-3 py-1.5 text-xs bg-surface border border-border rounded text-content-muted hover:text-red-500 transition-colors">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -197,6 +221,36 @@
         </div>
         <div id="cropPreviewGrid" class="p-4 overflow-y-auto flex-1 bg-surface">
             <!-- Images injected here -->
+        </div>
+    </div>
+</div>
+
+<!-- Classification Colab Code Modal -->
+<div id="classificationColabModal" class="fixed inset-0 bg-black/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm" onclick="if(event.target === this) closeClassificationColabModal()">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-4xl max-h-[85vh] flex flex-col border border-border" onclick="event.stopPropagation()">
+        <div class="px-4 py-3 border-b border-border flex justify-between items-center bg-surface rounded-t-lg">
+            <h3 class="text-lg font-bold text-content flex items-center gap-2">
+                <i class="fa-brands fa-google text-amber-500"></i>
+                <span>Google Colab Training Code</span>
+            </h3>
+            <button onclick="closeClassificationColabModal()" class="text-content-muted hover:text-content transition-colors">
+                <i class="fa-solid fa-times text-lg"></i>
+            </button>
+        </div>
+        <div class="p-4 bg-surface overflow-y-auto flex-1">
+            <div class="relative bg-sidebar border border-border rounded">
+                <pre class="p-4 text-sm font-mono text-content-muted overflow-x-auto whitespace-pre-wrap max-h-[55vh]"><code id="classificationColabCode"></code></pre>
+                <button
+                    onclick="copyClassificationColabCode(this)"
+                    class="absolute top-2 right-2 px-2 py-1 bg-surface hover:bg-panel border border-border rounded text-xs text-content transition-colors">
+                    <i class="fa-solid fa-copy"></i> Copy
+                </button>
+            </div>
+        </div>
+        <div class="px-4 py-3 border-t border-border flex justify-end bg-sidebar rounded-b-lg">
+            <button onclick="closeClassificationColabModal()" class="px-4 py-2 text-sm bg-primary hover:opacity-90 text-content-inv rounded transition-opacity">
+                Đóng
+            </button>
         </div>
     </div>
 </div>
@@ -386,6 +440,225 @@
         document.getElementById('mappingFileWrapper').classList.toggle('hidden', !isClassification);
     }
     // Attach event listeners to radio buttons
+    let currentExportCropsJobId = null;
+    let exportCropsDownloadedJobId = null;
+    let exportCropsPollToken = 0;
+
+    function formatBytes(bytes) {
+        const value = Number(bytes || 0);
+        if (value < 1024) return `${value} B`;
+        const units = ['KB', 'MB', 'GB', 'TB'];
+        let size = value / 1024;
+        let unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.length - 1) {
+            size /= 1024;
+            unitIndex += 1;
+        }
+        return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+    }
+
+    function triggerExportCropsDownload(job) {
+        if (!job?.download_url) return;
+        const a = document.createElement('a');
+        a.href = job.download_url;
+        a.download = 'classification_crops.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    function setExportCropsButtonBusy(isBusy) {
+        const btn = document.getElementById('btnExportCrops');
+        if (!btn) return;
+        btn.disabled = isBusy;
+        btn.innerHTML = isBusy
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...'
+            : '<i class="fa-solid fa-download"></i> Export Crops (.zip)';
+    }
+
+    function updateExportCropsProgress(job) {
+        const container = document.getElementById('exportCropsProgressContainer');
+        const bar = document.getElementById('exportCropsProgressBar');
+        const text = document.getElementById('exportCropsProgressText');
+        const meta = document.getElementById('exportCropsProgressMeta');
+        const actions = document.getElementById('exportCropsProgressActions');
+        const downloadBtn = document.getElementById('btnDownloadExportCrops');
+        const cancelBtn = document.getElementById('btnCancelExportCrops');
+        if (!container) return;
+
+        const total = Number(job.total_files || 0);
+        const processed = Number(job.processed_files || 0);
+        const written = Number(job.written_files || 0);
+        const skipped = Number(job.skipped_files || 0);
+        const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+        const isActive = ['queued', 'running', 'cancelling'].includes(job.status);
+        const isCompleted = job.status === 'completed';
+        const isFailed = job.status === 'failed';
+        const isCancelled = job.status === 'cancelled';
+
+        container.classList.remove('hidden');
+        if (bar) {
+            bar.style.width = `${isCompleted ? 100 : percent}%`;
+            bar.className = 'h-full transition-all duration-300';
+            if (isFailed || isCancelled) {
+                bar.classList.add('bg-red-500');
+            } else if (isCompleted) {
+                bar.classList.add('bg-green-500');
+            } else {
+                bar.classList.add('bg-amber-500');
+            }
+        }
+
+        if (text) {
+            if (isFailed) {
+                text.textContent = 'Failed';
+            } else if (isCancelled) {
+                text.textContent = 'Cancelled';
+            } else if (isCompleted) {
+                text.textContent = `Completed ${written}/${total} files`;
+            } else if (job.status === 'queued') {
+                text.textContent = `Preparing export... ${processed}/${total} files (${percent}%)`;
+            } else if (job.status === 'cancelling') {
+                text.textContent = `Cancelling... ${processed}/${total} files (${percent}%)`;
+            } else {
+                text.textContent = `Exporting crops... ${processed}/${total} files (${percent}%)`;
+            }
+        }
+
+        if (meta) {
+            if (isFailed || isCancelled) {
+                meta.textContent = job.error || job.message || 'Export stopped';
+            } else {
+                const classes = Number(job.class_count || 0);
+                const size = formatBytes(job.file_size || 0);
+                const current = job.current_file ? ` - ${job.current_file}` : '';
+                meta.textContent = `Written ${written} - Skipped ${skipped} - Classes ${classes} - ZIP ${size}${current}`;
+            }
+        }
+
+        if (actions) {
+            actions.classList.toggle('hidden', !(isActive || isCompleted));
+            actions.classList.toggle('flex', isActive || isCompleted);
+        }
+        if (downloadBtn) {
+            downloadBtn.classList.toggle('hidden', !isCompleted);
+            downloadBtn.disabled = !isCompleted;
+            downloadBtn.onclick = () => triggerExportCropsDownload(job);
+        }
+        if (cancelBtn) {
+            cancelBtn.classList.toggle('hidden', !isActive);
+            cancelBtn.disabled = !isActive || job.status === 'cancelling';
+            cancelBtn.onclick = () => cancelExportCropsJob(job.job_id);
+        }
+    }
+
+    async function pollExportCropsJob(jobId, { autoDownload = true } = {}) {
+        const pollToken = ++exportCropsPollToken;
+        currentExportCropsJobId = jobId;
+        setExportCropsButtonBusy(true);
+
+        while (pollToken === exportCropsPollToken) {
+            const res = await fetch(`/api/collect-crops/export/jobs/${jobId}`);
+            const job = await res.json();
+            if (!res.ok) {
+                throw new Error(job.error || 'Failed to read export progress');
+            }
+
+            updateExportCropsProgress(job);
+
+            if (job.status === 'completed') {
+                setExportCropsButtonBusy(false);
+                refreshCropStats();
+                if (autoDownload && exportCropsDownloadedJobId !== job.job_id) {
+                    exportCropsDownloadedJobId = job.job_id;
+                    triggerExportCropsDownload(job);
+                    showClassificationColabCode();
+                }
+                return job;
+            }
+
+            if (job.status === 'failed' || job.status === 'cancelled') {
+                setExportCropsButtonBusy(false);
+                return job;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        return null;
+    }
+
+    async function cancelExportCropsJob(jobId) {
+        if (!jobId) return;
+        const res = await fetch(`/api/collect-crops/export/jobs/${jobId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok) {
+            alert('Cancel failed: ' + (data.error || 'Unknown error'));
+            return;
+        }
+        updateExportCropsProgress(data.job);
+    }
+
+    async function restoreLatestExportCropsJob() {
+        try {
+            const res = await fetch('/api/collect-crops/export/jobs/latest');
+            if (!res.ok) return;
+            const data = await res.json();
+            const job = data.job || data;
+            if (!job?.job_id) return;
+            updateExportCropsProgress(job);
+            if (['queued', 'running', 'cancelling'].includes(job.status)) {
+                pollExportCropsJob(job.job_id, { autoDownload: true }).catch(error => {
+                    setExportCropsButtonBusy(false);
+                    alert('Export progress error: ' + error.message);
+                });
+            }
+        } catch (error) {
+            console.warn('Could not restore latest export job', error);
+        }
+    }
+
+    async function exportCollectedCrops() {
+        setExportCropsButtonBusy(true);
+
+        try {
+            const res = await fetch('/api/collect-crops/export/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ val_ratio: 0.2 })
+            });
+            const data = await res.json();
+
+            if (!res.ok) {
+                const activeExport = Array.isArray(data.active_jobs)
+                    ? data.active_jobs.find(job => ['queued', 'running', 'cancelling'].includes(job.status))
+                    : null;
+                if (res.status === 409 && activeExport?.job_id) {
+                    updateExportCropsProgress(activeExport);
+                    await pollExportCropsJob(activeExport.job_id, { autoDownload: true });
+                    return;
+                }
+                throw new Error(data.error || 'Export failed');
+            }
+
+            currentExportCropsJobId = data.job_id;
+            updateExportCropsProgress({
+                job_id: data.job_id,
+                status: 'queued',
+                processed_files: 0,
+                total_files: data.total_files || 0,
+                written_files: 0,
+                skipped_files: 0,
+                class_count: 0,
+                file_size: 0,
+                message: 'Queued'
+            });
+            await pollExportCropsJob(data.job_id, { autoDownload: true });
+        } catch (e) {
+            setExportCropsButtonBusy(false);
+            alert('Export error: ' + e.message);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('input[name="modelType"]').forEach(r => {
             r.addEventListener('change', toggleMappingField);
@@ -1267,8 +1540,133 @@
     function closeCropPreview() {
         document.getElementById('cropPreviewModal').classList.add('hidden');
     }
-    
-    async function exportCollectedCrops() {
+
+    function getClassificationColabCode() {
+        return `!pip install -U ultralytics
+
+from google.colab import files
+from ultralytics import YOLO
+import pathlib
+import zipfile
+
+uploaded = files.upload()
+zip_path = next(iter(uploaded))
+
+extract_root = pathlib.Path("/content")
+with zipfile.ZipFile(zip_path, "r") as z:
+    z.extractall(extract_root)
+
+dataset_root = extract_root / "classification_dataset"
+print("Train:", dataset_root / "train")
+print("Val:", dataset_root / "val")
+
+model = YOLO("yolo11n-cls.pt")
+results = model.train(
+    data=str(dataset_root),
+    epochs=50,
+    imgsz=224,
+    batch=32,
+    patience=10,
+    device=0
+)
+
+metrics = model.val(data=str(dataset_root))
+print(metrics)
+`;
+    }
+
+    function showClassificationColabCode() {
+        const codeEl = document.getElementById('classificationColabCode');
+        if (codeEl) {
+            codeEl.textContent = getClassificationColabCode();
+        }
+        document.getElementById('classificationColabModal')?.classList.remove('hidden');
+    }
+
+    function closeClassificationColabModal() {
+        document.getElementById('classificationColabModal')?.classList.add('hidden');
+    }
+
+    async function copyClassificationColabCode(btn) {
+        const code = document.getElementById('classificationColabCode')?.textContent || getClassificationColabCode();
+        await navigator.clipboard.writeText(code);
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        setTimeout(() => {
+            btn.innerHTML = original;
+        }, 1600);
+    }
+
+    function legacyUpdateExportCropsProgress(job) {
+        const container = document.getElementById('exportCropsProgressContainer');
+        const bar = document.getElementById('exportCropsProgressBar');
+        const text = document.getElementById('exportCropsProgressText');
+        const meta = document.getElementById('exportCropsProgressMeta');
+        if (!container) return;
+
+        const total = Number(job.total_files || 0);
+        const processed = Number(job.processed_files || 0);
+        const written = Number(job.written_files || 0);
+        const skipped = Number(job.skipped_files || 0);
+        const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+
+        container.classList.remove('hidden');
+        if (bar) {
+            bar.style.width = `${job.status === 'completed' ? 100 : percent}%`;
+            bar.className = 'h-full transition-all duration-300';
+            if (job.status === 'failed') {
+                bar.classList.add('bg-red-500');
+            } else if (job.status === 'completed') {
+                bar.classList.add('bg-green-500');
+            } else {
+                bar.classList.add('bg-amber-500');
+            }
+        }
+
+        if (text) {
+            if (job.status === 'failed') {
+                text.textContent = 'Export failed';
+            } else if (job.status === 'completed') {
+                text.textContent = `Hoàn tất export ${processed}/${total} files (100%)`;
+            } else {
+                text.textContent = `Exporting crops... ${processed}/${total} files (${percent}%)`;
+            }
+        }
+
+        if (meta) {
+            if (job.status === 'failed') {
+                meta.textContent = job.error || job.message || 'Unknown error';
+            } else {
+                const sizeMb = job.file_size ? ` • ${(Number(job.file_size) / 1024 / 1024).toFixed(1)} MB` : '';
+                const current = job.current_file ? ` • ${job.current_file}` : '';
+                meta.textContent = `Written ${written} • Skipped ${skipped}${sizeMb}${current}`;
+            }
+        }
+    }
+
+    async function legacyWaitForExportCropsJob(jobId) {
+        while (true) {
+            const res = await fetch(`/api/collect-crops/export/jobs/${jobId}`);
+            const job = await res.json();
+            if (!res.ok) {
+                throw new Error(job.error || 'Failed to read export progress');
+            }
+
+            updateExportCropsProgress(job);
+
+            if (job.status === 'completed') {
+                return job;
+            }
+
+            if (job.status === 'failed') {
+                throw new Error(job.error || job.message || 'Export failed');
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    async function legacyExportCollectedCrops() {
         const btn = document.getElementById('btnExportCrops');
         const ogHtml = btn.innerHTML;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang xuất...';
@@ -1296,6 +1694,7 @@
             a.click();
             a.remove();
             window.URL.revokeObjectURL(url);
+            showClassificationColabCode();
         } catch (e) {
             alert('Lỗi export: ' + e.message);
         } finally {
@@ -1308,6 +1707,7 @@
     document.addEventListener('DOMContentLoaded', () => {
         loadModels();
         refreshCropStats();
+        restoreLatestExportCropsJob();
     });
 </script>
 {% endblock %}

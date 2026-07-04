@@ -141,6 +141,20 @@ class startAPI {
         return await res.json();
     }
 
+    async startCollectProjectCrops(projectId, data = {}) {
+        const res = await fetch(`/api/projects/${projectId}/collect-crops/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        return await res.json();
+    }
+
+    async getCollectCropsJob(jobId) {
+        const res = await fetch(`/api/collect-crops/jobs/${jobId}`);
+        return await res.json();
+    }
+
     async getCollectStats() {
         const res = await fetch('/api/collect-crops/stats');
         return await res.json();

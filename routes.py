@@ -6,7 +6,18 @@ from models import db, Project, View, Image, AIModel, Tag
 import os
 import re
 import shutil
+import contextlib
+import csv
+import io
+import json
+import random
+import tempfile
+import threading
+import time
+import uuid
+import zipfile
 from datetime import datetime
+from clear_header import validate_and_rename_yolo_dataset
 import utils
 from inference import YOLOInference, ClassificationInference
 
@@ -430,6 +441,7 @@ def get_images():
     view_id = request.args.get('view_id')
     flag_status = request.args.get('flag_status')
     is_labeled = request.args.get('is_labeled')
+    has_any_tag = request.args.get('has_any_tag')
     
     query = Image.query
     if project_id:
@@ -438,6 +450,8 @@ def get_images():
         query = query.filter_by(view_id=view_id)
     if flag_status:
         query = query.filter_by(flag_status=flag_status)
+    if has_any_tag is not None and has_any_tag.lower() in ('true', '1', 'yes'):
+        query = query.filter(Image.tags.any())
     
     is_reviewed = request.args.get('is_reviewed')
     if is_reviewed is not None:
@@ -686,9 +700,31 @@ def delete_project_class(project_id, class_idx):
     return jsonify({'message': 'Class deleted', 'classes': classes}), 200
 
 # --- Export ---
+def run_clear_header_for_export(export_path):
+    """Remove generated numeric prefixes from exported YOLO image/label pairs."""
+    cleaned_splits = []
+    split_layouts = [
+        (split, os.path.join(export_path, 'images', split), os.path.join(export_path, 'labels', split))
+        for split in ('train', 'val', 'test')
+    ] + [
+        (split, os.path.join(export_path, split, 'images'), os.path.join(export_path, split, 'labels'))
+        for split in ('train', 'val', 'test')
+    ]
+
+    for split, image_path, label_path in split_layouts:
+        if not os.path.isdir(image_path) or not os.path.isdir(label_path):
+            continue
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            validate_and_rename_yolo_dataset(image_path, label_path, dry_run=False)
+        cleaned_splits.append(split)
+
+    return cleaned_splits
+
+
 @api_bp.route('/export', methods=['POST'])
 def export_dataset():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     # Support multiple criteria types
     criteria = {}
     if 'project_ids' in data:
@@ -716,8 +752,29 @@ def export_dataset():
     # Get splits or default
     splits = data.get('splits', {'train': 80, 'val': 20, 'test': 0})
         
-    result = utils.export_dataset(criteria, splits=splits, format=export_fmt)
-    return jsonify(result)
+    try:
+        result = utils.export_dataset(criteria, splits=splits, format=export_fmt)
+        status_code = 200 if result.get('status') == 'success' else 400
+        if status_code == 200:
+            result['clear_header_splits'] = run_clear_header_for_export(result['export_path'])
+        return jsonify(result), status_code
+    except PermissionError as exc:
+        current_app.logger.exception('Export failed because the export directory is locked')
+        return jsonify({
+            'status': 'error',
+            'message': (
+                'Cannot prepare exported_dataset because it is being used by another process. '
+                'Close File Explorer, terminal, archive tools, or any program currently opening that folder, then export again.'
+            ),
+            'detail': str(exc)
+        }), 423
+    except Exception as exc:
+        current_app.logger.exception('Export failed')
+        return jsonify({
+            'status': 'error',
+            'message': 'Export failed on the server. Please check the server log for details.',
+            'detail': str(exc)
+        }), 500
 
 @api_bp.route('/autolabel/<int:image_id>', methods=['POST'])
 def auto_label(image_id):
@@ -878,6 +935,645 @@ def classify_boxes():
 # ============================================================
 
 CROPS_DIR = os.path.join(os.getcwd(), 'classification_crops')
+EXPORT_JOBS_DIR = os.path.join(os.getcwd(), 'exports', 'classification_jobs')
+CROP_JOB_LOCK = threading.Lock()
+CROP_JOBS = {}
+CROP_IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
+CROP_ACTIVE_STATUSES = {'queued', 'running'}
+EXPORT_JOB_LOCK = threading.Lock()
+EXPORT_JOB_FILE_LOCK = threading.RLock()
+EXPORT_JOBS = {}
+EXPORT_ACTIVE_STATUSES = {'queued', 'running', 'cancelling'}
+
+
+def sanitize_crop_class_name(class_name):
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', '_', str(class_name or '').strip())
+    safe = safe.strip(' .')
+    return safe or 'unknown'
+
+
+def get_project_crops_dir(project_id):
+    return os.path.join(CROPS_DIR, f'project_{project_id}')
+
+
+def is_crop_image(filename):
+    return filename.lower().endswith(CROP_IMAGE_EXTENSIONS)
+
+
+def infer_crop_source_image(filename):
+    name = os.path.splitext(filename)[0]
+    if name.startswith('crop_'):
+        name = name[5:]
+    name = re.sub(r'_\d{8}_\d{6}.*$', '', name)
+    name = re.sub(r'_box\d+.*$', '', name)
+    name = re.sub(r'^\d+_', '', name)
+    return name or ''
+
+
+def iter_collected_crop_records():
+    if not os.path.exists(CROPS_DIR):
+        return
+
+    try:
+        crop_entries = sorted(os.listdir(CROPS_DIR))
+    except OSError:
+        return
+
+    for entry in crop_entries:
+        entry_path = os.path.join(CROPS_DIR, entry)
+        if not os.path.isdir(entry_path):
+            continue
+
+        project_match = re.fullmatch(r'project_(\d+)', entry)
+        if project_match:
+            project_id = int(project_match.group(1))
+            try:
+                class_names = sorted(os.listdir(entry_path))
+            except OSError:
+                continue
+
+            for class_name in class_names:
+                class_dir = os.path.join(entry_path, class_name)
+                if not os.path.isdir(class_dir):
+                    continue
+                try:
+                    filenames = sorted(os.listdir(class_dir))
+                except OSError:
+                    continue
+
+                for filename in filenames:
+                    crop_path = os.path.join(class_dir, filename)
+                    if is_crop_image(filename):
+                        yield {
+                            'project_id': project_id,
+                            'class_name': class_name,
+                            'filename': filename,
+                            'path': crop_path,
+                            'source_image': infer_crop_source_image(filename)
+                        }
+            continue
+
+        # Legacy layout: classification_crops/<class_name>/<crop>.jpg
+        try:
+            filenames = sorted(os.listdir(entry_path))
+        except OSError:
+            continue
+
+        for filename in filenames:
+            crop_path = os.path.join(entry_path, filename)
+            if is_crop_image(filename):
+                yield {
+                    'project_id': '',
+                    'class_name': entry,
+                    'filename': filename,
+                    'path': crop_path,
+                    'source_image': infer_crop_source_image(filename)
+                }
+
+
+def find_collected_crop_path(class_name, filename):
+    for record in iter_collected_crop_records() or []:
+        if record['class_name'] == class_name and record['filename'] == filename:
+            return record['path']
+    return None
+
+
+def update_crop_job(job_id, **updates):
+    with CROP_JOB_LOCK:
+        job = CROP_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+
+
+def get_active_crop_jobs():
+    with CROP_JOB_LOCK:
+        return [
+            dict(job)
+            for job in CROP_JOBS.values()
+            if job.get('status') in CROP_ACTIVE_STATUSES
+        ]
+
+
+def update_export_job(job_id, **updates):
+    with EXPORT_JOB_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+    if not job:
+        job = load_export_job_from_disk(job_id)
+        if not job:
+            return
+
+    with EXPORT_JOB_LOCK:
+        job.update(updates)
+        job['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        EXPORT_JOBS[job_id] = job
+    persist_export_job(job)
+
+
+def get_active_export_jobs():
+    load_persisted_export_jobs()
+    with EXPORT_JOB_LOCK:
+        return [
+            dict(job)
+            for job in EXPORT_JOBS.values()
+            if job.get('status') in EXPORT_ACTIVE_STATUSES
+        ]
+
+
+def get_export_job_dir(job_id):
+    return os.path.join(EXPORT_JOBS_DIR, job_id)
+
+
+def get_export_job_path(job_id):
+    return os.path.join(get_export_job_dir(job_id), 'job.json')
+
+
+def get_export_snapshot_path(job_id):
+    return os.path.join(get_export_job_dir(job_id), 'snapshot_manifest.json')
+
+
+def safe_export_job(job):
+    safe = dict(job)
+    safe.pop('file_path', None)
+    safe.pop('partial_path', None)
+    safe.pop('job_dir', None)
+    safe.pop('snapshot_path', None)
+    return safe
+
+
+def persist_export_job(job, retries=8):
+    job_snapshot = dict(job)
+    job_dir = job.get('job_dir') or get_export_job_dir(job['job_id'])
+    os.makedirs(job_dir, exist_ok=True)
+    job_path = os.path.join(job_dir, 'job.json')
+    last_error = None
+
+    for attempt in range(retries):
+        tmp_path = f"{job_path}.{os.getpid()}.{threading.get_ident()}.{uuid.uuid4().hex}.tmp"
+        try:
+            with EXPORT_JOB_FILE_LOCK:
+                with open(tmp_path, 'w', encoding='utf-8') as f:
+                    json.dump(job_snapshot, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, job_path)
+            return True
+        except PermissionError as exc:
+            last_error = exc
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            time.sleep(0.05 * (attempt + 1))
+        except OSError as exc:
+            last_error = exc
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            time.sleep(0.05 * (attempt + 1))
+
+    raise last_error or OSError(f'Could not persist export job: {job_path}')
+
+
+def load_export_job_from_disk(job_id):
+    job_path = get_export_job_path(job_id)
+    if not os.path.exists(job_path):
+        return None
+    try:
+        with EXPORT_JOB_FILE_LOCK:
+            with open(job_path, 'r', encoding='utf-8') as f:
+                job = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if job.get('status') in EXPORT_ACTIVE_STATUSES and job_id not in EXPORT_JOBS:
+        job['status'] = 'failed'
+        job['error'] = 'Export interrupted before completion. Please start export again.'
+        job['message'] = 'Export interrupted'
+        job['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+        persist_export_job(job)
+    with EXPORT_JOB_LOCK:
+        EXPORT_JOBS[job_id] = job
+    return job
+
+
+def load_persisted_export_jobs():
+    if not os.path.isdir(EXPORT_JOBS_DIR):
+        return
+    for job_id in os.listdir(EXPORT_JOBS_DIR):
+        if job_id in EXPORT_JOBS:
+            continue
+        load_export_job_from_disk(job_id)
+
+
+def get_export_job(job_id):
+    with EXPORT_JOB_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+    if job:
+        return job
+    return load_export_job_from_disk(job_id)
+
+
+def get_latest_export_job():
+    load_persisted_export_jobs()
+    with EXPORT_JOB_LOCK:
+        jobs = list(EXPORT_JOBS.values())
+    if not jobs:
+        return None
+    return max(jobs, key=lambda job: job.get('created_at', ''))
+
+
+def estimate_records_size(records):
+    total = 0
+    missing = 0
+    for record in records:
+        try:
+            total += os.path.getsize(record['path'])
+        except OSError:
+            missing += 1
+    return total, missing
+
+
+def write_export_snapshot(job_id, records):
+    snapshot_path = get_export_snapshot_path(job_id)
+    with open(snapshot_path, 'w', encoding='utf-8') as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+    return snapshot_path
+
+
+def crop_box_to_dir(img, img_w, img_h, box, class_dir, crop_filename):
+    import cv2
+
+    cx, cy, bw, bh = float(box['x']), float(box['y']), float(box['w']), float(box['h'])
+    xmin = int(max(0, (cx - bw / 2) * img_w))
+    ymin = int(max(0, (cy - bh / 2) * img_h))
+    xmax = int(min(img_w, (cx + bw / 2) * img_w))
+    ymax = int(min(img_h, (cy + bh / 2) * img_h))
+
+    if xmin >= xmax or ymin >= ymax:
+        return False
+
+    crop = img[ymin:ymax, xmin:xmax]
+    os.makedirs(class_dir, exist_ok=True)
+    return bool(cv2.imwrite(os.path.join(class_dir, crop_filename), crop))
+
+
+def build_classification_colab_code():
+    return '''!pip install -U ultralytics
+
+from google.colab import files
+from ultralytics import YOLO
+import pathlib
+import zipfile
+
+uploaded = files.upload()
+zip_path = next(iter(uploaded))
+
+extract_root = pathlib.Path("/content")
+with zipfile.ZipFile(zip_path, "r") as z:
+    z.extractall(extract_root)
+
+dataset_root = extract_root / "classification_dataset"
+print("Train:", dataset_root / "train")
+print("Val:", dataset_root / "val")
+
+model = YOLO("yolo11n-cls.pt")
+results = model.train(
+    data=str(dataset_root),
+    epochs=50,
+    imgsz=224,
+    batch=32,
+    patience=10,
+    device=0
+)
+
+metrics = model.val(data=str(dataset_root))
+print(metrics)
+'''
+
+
+def build_classification_crops_zip(records, tmp_path, val_ratio=0.2, progress_callback=None, cancel_check=None):
+    grouped = {}
+    for record in records:
+        grouped.setdefault(record['class_name'], []).append(record)
+
+    class_names = sorted(grouped.keys())
+    class_mapping = {str(idx): class_name for idx, class_name in enumerate(class_names)}
+    manifest_rows = []
+    rng = random.Random(42)
+    total_files = sum(len(items) for items in grouped.values())
+    processed_files = 0
+    written_files = 0
+    skipped_files = 0
+    skipped_rows = []
+
+    with zipfile.ZipFile(tmp_path, 'w', compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for class_name in class_names:
+            if cancel_check and cancel_check():
+                raise InterruptedError('Export cancelled')
+
+            class_records = list(grouped[class_name])
+            rng.shuffle(class_records)
+            zf.writestr(f"classification_dataset/train/{class_name}/", '', compress_type=zipfile.ZIP_STORED)
+            zf.writestr(f"classification_dataset/val/{class_name}/", '', compress_type=zipfile.ZIP_STORED)
+
+            if len(class_records) <= 1:
+                split_idx = len(class_records)
+            else:
+                split_idx = int(len(class_records) * (1 - val_ratio))
+                split_idx = max(1, min(len(class_records) - 1, split_idx))
+
+            for index, record in enumerate(class_records):
+                processed_files += 1
+                if progress_callback:
+                    progress_callback(
+                        processed_files=processed_files,
+                        total_files=total_files,
+                        written_files=written_files,
+                        skipped_files=skipped_files,
+                        current_file=record['filename'],
+                        message=f"Exporting {record['filename']}"
+                    )
+
+                if cancel_check and cancel_check():
+                    raise InterruptedError('Export cancelled')
+
+                if not os.path.exists(record['path']):
+                    skipped_files += 1
+                    skipped_rows.append({
+                        'project_id': record.get('project_id', ''),
+                        'class_name': class_name,
+                        'source_image': record.get('source_image', ''),
+                        'crop_filename': record.get('filename', ''),
+                        'reason': 'missing_file'
+                    })
+                    continue
+
+                split = 'train' if index < split_idx else 'val'
+                arcname = f"classification_dataset/{split}/{class_name}/{record['filename']}"
+                try:
+                    zf.write(record['path'], arcname, compress_type=zipfile.ZIP_STORED)
+                    written_files += 1
+                    manifest_rows.append({
+                        'project_id': record['project_id'],
+                        'class_name': class_name,
+                        'source_image': record['source_image'],
+                        'crop_filename': record['filename'],
+                        'split': split
+                    })
+                except OSError as exc:
+                    skipped_files += 1
+                    skipped_rows.append({
+                        'project_id': record.get('project_id', ''),
+                        'class_name': class_name,
+                        'source_image': record.get('source_image', ''),
+                        'crop_filename': record.get('filename', ''),
+                        'reason': str(exc)
+                    })
+                    continue
+
+        zf.writestr(
+            'classification_dataset/metadata/class_mapping.json',
+            json.dumps(class_mapping, ensure_ascii=False, indent=2),
+            compress_type=zipfile.ZIP_DEFLATED
+        )
+
+        manifest_buffer = io.StringIO()
+        writer = csv.DictWriter(
+            manifest_buffer,
+            fieldnames=['project_id', 'class_name', 'source_image', 'crop_filename', 'split']
+        )
+        writer.writeheader()
+        writer.writerows(manifest_rows)
+        zf.writestr(
+            'classification_dataset/metadata/manifest.csv',
+            manifest_buffer.getvalue(),
+            compress_type=zipfile.ZIP_DEFLATED
+        )
+
+        skipped_buffer = io.StringIO()
+        skipped_writer = csv.DictWriter(
+            skipped_buffer,
+            fieldnames=['project_id', 'class_name', 'source_image', 'crop_filename', 'reason']
+        )
+        skipped_writer.writeheader()
+        skipped_writer.writerows(skipped_rows)
+        zf.writestr(
+            'classification_dataset/metadata/skipped_files.csv',
+            skipped_buffer.getvalue(),
+            compress_type=zipfile.ZIP_DEFLATED
+        )
+
+        summary = {
+            'total_files': total_files,
+            'processed_files': processed_files,
+            'written_files': written_files,
+            'skipped_files': skipped_files,
+            'class_count': len(class_names),
+            'created_at': datetime.utcnow().isoformat() + 'Z',
+            'format': 'ultralytics_classification'
+        }
+        zf.writestr(
+            'classification_dataset/metadata/export_summary.json',
+            json.dumps(summary, ensure_ascii=False, indent=2),
+            compress_type=zipfile.ZIP_DEFLATED
+        )
+        zf.writestr(
+            'classification_dataset/colab_train_classification.py',
+            build_classification_colab_code(),
+            compress_type=zipfile.ZIP_DEFLATED
+        )
+
+    return {
+        'total_files': total_files,
+        'processed_files': processed_files,
+        'written_files': written_files,
+        'skipped_files': skipped_files,
+        'class_count': len(class_names)
+    }
+
+
+def run_export_crops_job(job_id, val_ratio):
+    job = get_export_job(job_id)
+    if not job:
+        return
+
+    snapshot_path = job.get('snapshot_path') or get_export_snapshot_path(job_id)
+    partial_path = job.get('partial_path')
+    final_path = job.get('file_path')
+    last_progress_update = {'time': 0.0, 'processed_files': 0}
+
+    def on_progress(**updates):
+        now = time.monotonic()
+        processed_files = int(updates.get('processed_files') or 0)
+        total_files = int(updates.get('total_files') or 0)
+        should_update = (
+            processed_files >= total_files
+            or processed_files - last_progress_update['processed_files'] >= 25
+            or now - last_progress_update['time'] >= 0.5
+        )
+        if not should_update:
+            return
+
+        last_progress_update['time'] = now
+        last_progress_update['processed_files'] = processed_files
+        if partial_path and os.path.exists(partial_path):
+            try:
+                updates['file_size'] = os.path.getsize(partial_path)
+            except OSError:
+                pass
+        update_export_job(job_id, **updates)
+
+    def is_cancelled():
+        current_job = get_export_job(job_id) or {}
+        return bool(current_job.get('cancel_requested')) or current_job.get('status') == 'cancelling'
+
+    try:
+        with open(snapshot_path, 'r', encoding='utf-8') as f:
+            records = json.load(f)
+
+        update_export_job(
+            job_id,
+            status='running',
+            total_files=len(records),
+            processed_files=0,
+            written_files=0,
+            skipped_files=0,
+            current_file='',
+            message='Preparing export'
+        )
+
+        if is_cancelled():
+            raise InterruptedError('Export cancelled')
+
+        result = build_classification_crops_zip(records, partial_path, val_ratio, on_progress, is_cancelled)
+        os.replace(partial_path, final_path)
+        file_size = os.path.getsize(final_path) if os.path.exists(final_path) else 0
+        update_export_job(
+            job_id,
+            status='completed',
+            processed_files=result['processed_files'],
+            total_files=result['total_files'],
+            written_files=result['written_files'],
+            skipped_files=result['skipped_files'],
+            class_count=result['class_count'],
+            current_file='',
+            message='Completed',
+            download_url=f'/api/collect-crops/export/jobs/{job_id}/download',
+            partial_path=None,
+            file_size=file_size
+        )
+    except InterruptedError as exc:
+        if partial_path and os.path.exists(partial_path):
+            try:
+                os.remove(partial_path)
+            except OSError:
+                pass
+        update_export_job(job_id, status='cancelled', current_file='', message='Cancelled', error=str(exc))
+    except Exception as exc:
+        if partial_path and os.path.exists(partial_path):
+            try:
+                os.remove(partial_path)
+            except OSError:
+                pass
+        update_export_job(job_id, status='failed', error=str(exc), message='Export failed')
+
+
+def run_collect_project_crops_job(app, job_id, project_id, reset_project=True):
+    with app.app_context():
+        try:
+            project = Project.query.get(project_id)
+            if not project:
+                update_crop_job(job_id, status='failed', error='Project not found', message='Project not found')
+                return
+
+            images = Image.query.filter_by(project_id=project.id, is_labeled=True).order_by(Image.id.asc()).all()
+            project_crop_dir = get_project_crops_dir(project.id)
+            if reset_project and os.path.exists(project_crop_dir):
+                shutil.rmtree(project_crop_dir)
+            os.makedirs(project_crop_dir, exist_ok=True)
+
+            classes = utils.get_classes(project)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            collected = 0
+            skipped = 0
+            processed_boxes = 0
+            per_class = {}
+
+            update_crop_job(
+                job_id,
+                status='running',
+                total_images=len(images),
+                processed_images=0,
+                message='Starting crop job'
+            )
+
+            for image_index, image in enumerate(images, start=1):
+                update_crop_job(job_id, current_image=image.filename, message=f'Cropping {image.filename}')
+                image_path = os.path.join(project.root_path, image.filename)
+                img = utils.imread_with_exif(image_path)
+                if img is None:
+                    skipped += 1
+                    update_crop_job(
+                        job_id,
+                        processed_images=image_index,
+                        skipped=skipped,
+                        message=f'Skipped unreadable image: {image.filename}'
+                    )
+                    continue
+
+                img_h, img_w = img.shape[:2]
+                labels = utils.read_yolo_label(image)
+                image_stem = os.path.splitext(image.filename)[0].replace('/', '_').replace('\\', '_')
+
+                for box_index, label in enumerate(labels):
+                    processed_boxes += 1
+                    class_id = label.get('class_id')
+                    if class_id is None or class_id < 0 or class_id >= len(classes):
+                        skipped += 1
+                        continue
+
+                    class_name = sanitize_crop_class_name(classes[class_id])
+                    class_dir = os.path.join(project_crop_dir, class_name)
+                    crop_filename = f"crop_{image.id}_{image_stem}_{timestamp}_box{box_index:04d}.jpg"
+                    try:
+                        ok = crop_box_to_dir(img, img_w, img_h, label, class_dir, crop_filename)
+                    except (KeyError, TypeError, ValueError):
+                        ok = False
+
+                    if ok:
+                        collected += 1
+                        per_class[class_name] = per_class.get(class_name, 0) + 1
+                    else:
+                        skipped += 1
+
+                update_crop_job(
+                    job_id,
+                    processed_images=image_index,
+                    processed_boxes=processed_boxes,
+                    collected=collected,
+                    skipped=skipped,
+                    per_class=per_class
+                )
+
+            update_crop_job(
+                job_id,
+                status='completed',
+                processed_images=len(images),
+                current_image='',
+                message='Completed',
+                collected=collected,
+                skipped=skipped,
+                processed_boxes=processed_boxes,
+                per_class=per_class
+            )
+        except Exception as exc:
+            update_crop_job(job_id, status='failed', error=str(exc), message='Crop job failed')
+        finally:
+            db.session.remove()
 
 @api_bp.route('/collect-crop', methods=['POST'])
 def collect_crop():
@@ -999,20 +1695,62 @@ def collect_crop_batch():
         'total_boxes': len(boxes)
     })
 
+@api_bp.route('/projects/<int:project_id>/collect-crops/jobs', methods=['POST'])
+def start_collect_project_crops_job(project_id):
+    """Start a background job to crop all labeled boxes for a project."""
+    Project.query.get_or_404(project_id)
+    data = request.json or {}
+    reset_project = data.get('reset_project', True)
+    job_id = uuid.uuid4().hex
+
+    with CROP_JOB_LOCK:
+        CROP_JOBS[job_id] = {
+            'job_id': job_id,
+            'status': 'queued',
+            'project_id': project_id,
+            'processed_images': 0,
+            'total_images': 0,
+            'processed_boxes': 0,
+            'collected': 0,
+            'skipped': 0,
+            'current_image': '',
+            'message': 'Queued',
+            'error': None,
+            'per_class': {},
+            'created_at': datetime.utcnow().isoformat() + 'Z',
+            'updated_at': datetime.utcnow().isoformat() + 'Z'
+        }
+
+    app = current_app._get_current_object()
+    thread = threading.Thread(
+        target=run_collect_project_crops_job,
+        args=(app, job_id, project_id, bool(reset_project)),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id})
+
+
+@api_bp.route('/collect-crops/jobs/<job_id>', methods=['GET'])
+def get_collect_crops_job(job_id):
+    with CROP_JOB_LOCK:
+        job = CROP_JOBS.get(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        return jsonify(dict(job))
+
+
 @api_bp.route('/collect-crops/stats', methods=['GET'])
 def collect_crops_stats():
     """Get statistics about collected crops."""
     stats = {}
     total = 0
-    
-    if os.path.exists(CROPS_DIR):
-        for class_name in sorted(os.listdir(CROPS_DIR)):
-            class_dir = os.path.join(CROPS_DIR, class_name)
-            if os.path.isdir(class_dir):
-                count = len([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
-                if count > 0:
-                    stats[class_name] = count
-                    total += count
+
+    for record in iter_collected_crop_records() or []:
+        class_name = record['class_name']
+        stats[class_name] = stats.get(class_name, 0) + 1
+        total += 1
     
     return jsonify({
         'stats': stats,
@@ -1021,92 +1759,188 @@ def collect_crops_stats():
     })
 
 @api_bp.route('/collect-crops/export', methods=['POST'])
+@api_bp.route('/collect-crops/export/jobs', methods=['POST'])
 def collect_crops_export():
-    """Export collected crops as a zip file organized into train/val splits."""
-    import zipfile
-    import random
-    import tempfile
-    
-    if not os.path.exists(CROPS_DIR):
+    """Start a background export job for collected crops."""
+    active_jobs = get_active_crop_jobs()
+    if active_jobs:
+        return jsonify({
+            'error': 'Tiến trình crop ảnh vẫn đang chạy. Vui lòng đợi hoàn tất rồi export crops.',
+            'active_jobs': active_jobs
+        }), 409
+
+    active_export_jobs = get_active_export_jobs()
+    if active_export_jobs:
+        return jsonify({
+            'error': 'Tiến trình export crops vẫn đang chạy. Vui lòng đợi hoàn tất.',
+            'active_jobs': active_export_jobs
+        }), 409
+
+    records = list(iter_collected_crop_records() or [])
+    if not records:
         return jsonify({'error': 'No crops collected yet'}), 400
     
     data = request.json or {}
-    val_ratio = data.get('val_ratio', 0.2)
-    
-    # Create zip in temp
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.zip', prefix='cls_crops_')
-    tmp_path = tmp.name
-    tmp.close()
-    
-    try:
-        with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Write class_mapping.json
-            mapping_src = os.path.join(os.getcwd(), 'models', 'class_mapping.json')
-            if os.path.exists(mapping_src):
-                zf.write(mapping_src, 'class_mapping.json')
-            
-            for class_name in sorted(os.listdir(CROPS_DIR)):
-                class_dir = os.path.join(CROPS_DIR, class_name)
-                if not os.path.isdir(class_dir):
-                    continue
-                
-                files = [f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
-                if not files:
-                    continue
-                
-                random.shuffle(files)
-                split_idx = max(1, int(len(files) * (1 - val_ratio)))
-                
-                train_files = files[:split_idx]
-                val_files = files[split_idx:]
-                
-                for f in train_files:
-                    zf.write(os.path.join(class_dir, f), f'train/{class_name}/{f}')
-                for f in val_files:
-                    zf.write(os.path.join(class_dir, f), f'val/{class_name}/{f}')
-        
-        return flask.send_file(tmp_path, as_attachment=True, download_name='classification_crops.zip', mimetype='application/zip')
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    val_ratio = float(data.get('val_ratio', 0.2))
+    val_ratio = max(0.0, min(0.8, val_ratio))
+
+    job_id = uuid.uuid4().hex
+    job_dir = get_export_job_dir(job_id)
+    os.makedirs(job_dir, exist_ok=True)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    partial_path = os.path.join(job_dir, f'classification_crops_{timestamp}.zip.part')
+    final_path = os.path.join(job_dir, f'classification_crops_{timestamp}.zip')
+    snapshot_path = write_export_snapshot(job_id, records)
+    estimated_size, missing_at_snapshot = estimate_records_size(records)
+    free_space = shutil.disk_usage(job_dir).free
+    required_space = int(estimated_size * 1.05) + (100 * 1024 * 1024)
+    if free_space < required_space:
+        return jsonify({
+            'error': 'Khong du dung luong trong de export crops.',
+            'estimated_size': estimated_size,
+            'required_space': required_space,
+            'free_space': free_space
+        }), 507
+
+    job = {
+        'job_id': job_id,
+        'status': 'queued',
+        'processed_files': 0,
+        'total_files': len(records),
+        'written_files': 0,
+        'skipped_files': 0,
+        'class_count': 0,
+        'current_file': '',
+        'message': 'Queued',
+        'error': None,
+        'download_url': None,
+        'job_dir': job_dir,
+        'snapshot_path': snapshot_path,
+        'file_path': final_path,
+        'partial_path': partial_path,
+        'file_size': 0,
+        'estimated_size': estimated_size,
+        'missing_at_snapshot': missing_at_snapshot,
+        'cancel_requested': False,
+        'created_at': datetime.utcnow().isoformat() + 'Z',
+        'updated_at': datetime.utcnow().isoformat() + 'Z'
+    }
+
+    with EXPORT_JOB_LOCK:
+        EXPORT_JOBS[job_id] = job
+    persist_export_job(job)
+
+    thread = threading.Thread(
+        target=run_export_crops_job,
+        args=(job_id, val_ratio),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({'success': True, 'job_id': job_id, 'total_files': len(records)})
+
+
+@api_bp.route('/collect-crops/export/jobs/latest', methods=['GET'])
+def get_latest_collect_crops_export_job():
+    job = get_latest_export_job()
+    if not job:
+        return jsonify({'success': True, 'job': None})
+    return jsonify({'success': True, 'job': safe_export_job(job)})
+
+
+@api_bp.route('/collect-crops/export/jobs/<job_id>', methods=['GET'])
+def get_collect_crops_export_job(job_id):
+    job = get_export_job(job_id)
+    if not job:
+        return jsonify({'error': 'Export job not found'}), 404
+    return jsonify(safe_export_job(job))
+
+
+@api_bp.route('/collect-crops/export/jobs/<job_id>/download', methods=['GET'])
+def download_collect_crops_export(job_id):
+    job = get_export_job(job_id)
+    if not job:
+        return jsonify({'error': 'Export job not found'}), 404
+    if job.get('status') != 'completed':
+        return jsonify({'error': 'Export is not ready yet'}), 409
+    file_path = job.get('file_path')
+
+    if not file_path or not os.path.exists(file_path):
+        return jsonify({'error': 'Export file is missing. Please run export again.'}), 404
+
+    return flask.send_file(
+        file_path,
+        as_attachment=True,
+        download_name='classification_crops.zip',
+        mimetype='application/zip'
+    )
+
+
+@api_bp.route('/collect-crops/export/jobs/<job_id>', methods=['DELETE'])
+def cancel_collect_crops_export_job(job_id):
+    job = get_export_job(job_id)
+    if not job:
+        return jsonify({'error': 'Export job not found'}), 404
+    if job.get('status') not in EXPORT_ACTIVE_STATUSES:
+        return jsonify({'success': True, 'job': safe_export_job(job)})
+    update_export_job(job_id, status='cancelling', cancel_requested=True, message='Cancelling export')
+    updated = get_export_job(job_id)
+    return jsonify({'success': True, 'job': safe_export_job(updated)})
 
 @api_bp.route('/collect-crops/<class_name>', methods=['DELETE'])
 def delete_collected_class(class_name):
     """Delete all collected crops for a specific class."""
-    import shutil
-    class_dir = os.path.join(CROPS_DIR, class_name)
-    
-    if not os.path.exists(class_dir):
+    deleted_count = 0
+    deleted_dirs = []
+
+    legacy_dir = os.path.join(CROPS_DIR, class_name)
+    if os.path.isdir(legacy_dir):
+        deleted_count += len([f for f in os.listdir(legacy_dir) if is_crop_image(f)])
+        shutil.rmtree(legacy_dir)
+        deleted_dirs.append(legacy_dir)
+
+    if os.path.exists(CROPS_DIR):
+        for entry in os.listdir(CROPS_DIR):
+            entry_path = os.path.join(CROPS_DIR, entry)
+            if not re.fullmatch(r'project_\d+', entry) or not os.path.isdir(entry_path):
+                continue
+            project_class_dir = os.path.join(entry_path, class_name)
+            if os.path.isdir(project_class_dir):
+                deleted_count += len([f for f in os.listdir(project_class_dir) if is_crop_image(f)])
+                shutil.rmtree(project_class_dir)
+                deleted_dirs.append(project_class_dir)
+
+    if not deleted_dirs:
         return jsonify({'error': f'Class "{class_name}" not found in collected crops'}), 404
-    
-    count = len([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
-    shutil.rmtree(class_dir)
-    
-    return jsonify({'success': True, 'deleted_count': count, 'class_name': class_name})
+
+    return jsonify({'success': True, 'deleted_count': deleted_count, 'class_name': class_name})
 
 @api_bp.route('/collect-crops/preview/<class_name>', methods=['GET'])
 def preview_collected_class(class_name):
     """Return a list of crop image paths for preview."""
-    class_dir = os.path.join(CROPS_DIR, class_name)
-    
-    if not os.path.exists(class_dir):
+    records = [record for record in (iter_collected_crop_records() or []) if record['class_name'] == class_name]
+
+    if not records:
         return jsonify({'error': f'Class "{class_name}" not found'}), 404
-    
-    files = sorted([f for f in os.listdir(class_dir) if f.lower().endswith(('.jpg', '.png', '.jpeg'))])
+
+    records.sort(key=lambda record: os.path.getmtime(record['path']))
     
     # Return only last 50 for preview
-    files = files[-50:]
+    files = [record['filename'] for record in records[-50:]]
     
     return jsonify({
         'class_name': class_name,
         'files': files,
-        'total': len(os.listdir(class_dir))
+        'total': len(records)
     })
 
 @api_bp.route('/collect-crops/serve/<class_name>/<filename>')
 def serve_collected_crop(class_name, filename):
     """Serve a collected crop image."""
-    class_dir = os.path.join(CROPS_DIR, class_name)
-    return flask.send_from_directory(class_dir, filename)
+    crop_path = find_collected_crop_path(class_name, filename)
+    if not crop_path:
+        return jsonify({'error': 'Crop not found'}), 404
+    return flask.send_from_directory(os.path.dirname(crop_path), os.path.basename(crop_path))
 
 @api_bp.route('/progress', methods=['GET'])
 def get_progress():
@@ -1134,8 +1968,13 @@ def get_progress():
             v_dict = v.to_dict()
             v_total = Image.query.filter_by(view_id=v.id).count()
             v_labeled = Image.query.filter_by(view_id=v.id, is_labeled=True).count()
+            v_tagged = Image.query.filter(
+                Image.view_id == v.id,
+                Image.tags.any()
+            ).count()
             v_dict['total_images'] = v_total
             v_dict['labeled_images'] = v_labeled
+            v_dict['tagged_images'] = v_tagged
             p_data['views'].append(v_dict)
             
         res.append(p_data)

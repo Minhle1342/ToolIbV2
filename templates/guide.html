@@ -67,8 +67,8 @@
 {% block scripts %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
-    const PROJECT_ID = "{{ project_id }}";
-    const WORKSPACE_URL = "{{ workspace_url }}";
+    const PROJECT_ID = {{ project_id|tojson }};
+    const WORKSPACE_URL = {{ workspace_url|tojson }};
     const GUIDE_SKIP_KEY = `workspaceGuideSkipAllSessions_${PROJECT_ID}`;
 
     let guidePdf = null;

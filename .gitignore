@@ -1,12 +1,79 @@
+# Dependencies and virtual environments
 node_modules/
-__pycache__/
 .venv/
+venv/
+env/
+
+# Python caches and test/build output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local application state
+yolo_labeling.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Uploaded/generated datasets and exports
 uploads/
 exported_dataset/
-models/
-yolo_labeling.db
+exports/
 classification_crops/
+project_backup/
+test_data/
+
+# Model weights and generated ML artifacts
+models/
+*.onnx
+*.pt
+*.pth
+*.engine
+*.tflite
+*.mlpackage
+*.mlmodel
+*.weights
+
+# Secrets, certificates, and local env files
+.env
+.env.*
+!.env.example
 cert.pem
 key.pem
-project_backup/
+*.pem
+*.key
+*.crt
+
+# Archives and large generated files
+*.zip
 *.rar
+*.7z
+*.tar
+*.tar.gz
+*.tgz
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.temp
+tmp/
+temp/
+
+# Local tool metadata
+.agent/
+.vercel/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini

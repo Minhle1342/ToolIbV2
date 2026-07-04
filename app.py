@@ -87,12 +87,15 @@ def create_app():
     def project_guide(project_identifier):
         project = resolve_project(project_identifier)
         project_slug = slugify_project_name(project.name)
+        workspace_url = f'/project/{project_slug}/'
+        if request.query_string:
+            workspace_url = f"{workspace_url}?{request.query_string.decode('utf-8')}"
         return render_template(
             'guide.html',
             project_id=project.id,
             project_slug=project_slug,
             project_name=project.name,
-            workspace_url=f'/project/{project_slug}/'
+            workspace_url=workspace_url
         )
 
     @app.route('/project/<project_identifier>/')

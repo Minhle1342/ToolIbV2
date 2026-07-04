@@ -542,6 +542,13 @@ def export_dataset(criteria, splits=None, format='yolo'):
         'project_tags': [],
         'images': {}
     }
+    selected_metadata_tag_ids = set()
+    for tag_id in criteria.get('tags') or []:
+        try:
+            selected_metadata_tag_ids.add(int(tag_id))
+        except (TypeError, ValueError):
+            pass
+
     used_tags = {}
     
     for split_set in [train_set, val_set, test_set]:
@@ -551,14 +558,16 @@ def export_dataset(criteria, splits=None, format='yolo'):
             if getattr(img, 'tags', None):
                 tag_names = []
                 for tag in img.tags:
+                    if selected_metadata_tag_ids and tag.id not in selected_metadata_tag_ids:
+                        continue
                     tag_names.append(tag.name)
-                    if tag.name not in used_tags:
-                        used_tags[tag.name] = tag.color
+                    if tag.id not in used_tags:
+                        used_tags[tag.id] = {'name': tag.name, 'color': tag.color}
                 if tag_names:
                     tags_metadata['images'][exported_filename] = tag_names
                 
-    for name, color in used_tags.items():
-        tags_metadata['project_tags'].append({'name': name, 'color': color})
+    for tag_data in used_tags.values():
+        tags_metadata['project_tags'].append(tag_data)
         
     if used_tags:
         tags_json_path = os.path.join(base_export_dir, 'dataset_tags.json')
