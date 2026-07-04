@@ -71,7 +71,14 @@ temp/
 
 # Local tool metadata
 .agent/
+.agents/
+.specify/
 .vercel/
+
+# Local cloned helper repos
+external/GitNexus/
+external/spec-kit/
+ToolIbV2/
 
 # OS/editor noise
 .DS_Store

@@ -17,6 +17,10 @@ class Workspace {
         this.setupImageListDelegation();
         this.init();
         this.imageList = [];
+        this.projectTags = null;
+        this.activeTagFilterIds = [];
+        this.tagFilterDraftIds = [];
+        this.lastStandardViewFilter = '';
     }
 
     setupImageListDelegation() {
@@ -979,8 +983,8 @@ class Workspace {
         }
     }
 
-    async loadProjectTags() {
-        if (!this.projectTags) {
+    async loadProjectTags(forceReload = false) {
+        if (forceReload || !Array.isArray(this.projectTags)) {
             try {
                 const res = await fetch(`/api/projects/${PROJECT_ID}/tags`);
                 if (res.ok) {
@@ -994,6 +998,105 @@ class Workspace {
             }
         }
         return this.projectTags;
+    }
+
+    async openTagFilterModal() {
+        await this.loadProjectTags(true);
+        this.tagFilterDraftIds = [...this.activeTagFilterIds];
+
+        const container = document.getElementById('tagFilterList');
+        if (!container) return;
+
+        if (!this.projectTags || this.projectTags.length === 0) {
+            container.innerHTML = '<div class="text-sm text-content-muted p-2 text-right" data-i18n="no_tags_in_project">Không có tag nào trong project này.</div>';
+        } else {
+            const selectedTagIds = new Set(this.tagFilterDraftIds.map(id => parseInt(id, 10)));
+            container.innerHTML = this.projectTags.map(tag => `
+                <label class="flex flex-row-reverse items-center gap-3 text-sm text-content hover:bg-surface p-2 rounded cursor-pointer border border-transparent hover:border-border transition-colors">
+                    <input type="checkbox" name="tagFilter" value="${tag.id}" ${selectedTagIds.has(parseInt(tag.id, 10)) ? 'checked' : ''} class="form-checkbox h-4 w-4 text-primary rounded border-border bg-surface focus:ring-primary focus:ring-offset-panel">
+                    <span class="text-xs bg-surface-alt px-2 py-0.5 rounded text-content-muted whitespace-nowrap">${tag.image_count || 0}</span>
+                    <div class="flex flex-row-reverse items-center gap-2 flex-1 min-w-0 text-right">
+                        <span class="w-3 h-3 rounded-full flex-shrink-0" style="background-color: ${tag.color}"></span>
+                        <span class="truncate">${tag.name}</span>
+                    </div>
+                </label>
+            `).join('');
+        }
+
+        if (typeof applyTranslations === 'function') {
+            applyTranslations();
+        }
+
+        document.getElementById('tagFilterModal')?.classList.remove('hidden');
+    }
+
+    closeTagFilterModal() {
+        document.getElementById('tagFilterModal')?.classList.add('hidden');
+
+        const viewFilterEl = document.getElementById('viewFilter');
+        if (viewFilterEl && viewFilterEl.value === 'tag_view' && this.activeTagFilterIds.length === 0) {
+            viewFilterEl.value = this.lastStandardViewFilter || '';
+        }
+    }
+
+    applyTagFilter() {
+        const checkedBoxes = Array.from(document.querySelectorAll('input[name="tagFilter"]:checked'));
+        this.activeTagFilterIds = checkedBoxes.map(cb => parseInt(cb.value, 10));
+        this.tagFilterDraftIds = [...this.activeTagFilterIds];
+
+        const viewFilterEl = document.getElementById('viewFilter');
+        if (viewFilterEl) {
+            viewFilterEl.value = this.activeTagFilterIds.length > 0 ? 'tag_view' : (this.lastStandardViewFilter || '');
+        }
+
+        this.updateTagFilterSummary();
+        this.closeTagFilterModal();
+        loadImages(!!this.allImages ? false : true);
+    }
+
+    clearTagFilter(shouldReload = true) {
+        this.activeTagFilterIds = [];
+        this.tagFilterDraftIds = [];
+
+        const viewFilterEl = document.getElementById('viewFilter');
+        if (viewFilterEl && viewFilterEl.value === 'tag_view') {
+            viewFilterEl.value = this.lastStandardViewFilter || '';
+        }
+
+        this.updateTagFilterSummary();
+        document.getElementById('tagFilterModal')?.classList.add('hidden');
+
+        if (shouldReload) {
+            loadImages(!!this.allImages ? false : true);
+        }
+    }
+
+    updateTagFilterSummary() {
+        const summary = document.getElementById('tagFilterSummary');
+        const summaryText = document.getElementById('tagFilterSummaryText');
+        if (!summary || !summaryText) return;
+
+        if (!this.activeTagFilterIds.length) {
+            summary.classList.add('hidden');
+            summaryText.textContent = '';
+            return;
+        }
+
+        const selectedTags = this.activeTagFilterIds
+            .map(id => (this.projectTags || []).find(tag => parseInt(tag.id, 10) === parseInt(id, 10)))
+            .filter(Boolean);
+
+        if (selectedTags.length === 0) {
+            summary.classList.add('hidden');
+            summaryText.textContent = '';
+            return;
+        }
+
+        summaryText.textContent = selectedTags.length <= 2
+            ? selectedTags.map(tag => `${tag.name} (${tag.image_count || 0})`).join(', ')
+            : `${selectedTags.slice(0, 2).map(tag => tag.name).join(', ')} +${selectedTags.length - 2}`;
+
+        summary.classList.remove('hidden');
     }
 
     async openTagManager() {
@@ -1035,8 +1138,12 @@ class Workspace {
             });
             const data = await res.json();
             if (res.ok) {
+                if (!Array.isArray(this.projectTags)) {
+                    this.projectTags = [];
+                }
                 this.projectTags.push(data);
                 this.renderTagManagerList();
+                this.updateTagFilterSummary();
                 nameInput.value = '';
             } else {
                 alert(data.error || 'Failed to add tag');
@@ -1053,11 +1160,21 @@ class Workspace {
             const res = await fetch(`/api/tags/${tagId}`, { method: 'DELETE' });
             if (res.ok) {
                 this.projectTags = this.projectTags.filter(t => t.id !== tagId);
+                this.activeTagFilterIds = this.activeTagFilterIds.filter(id => id !== tagId);
+                this.tagFilterDraftIds = this.tagFilterDraftIds.filter(id => id !== tagId);
+                if (this.activeTagFilterIds.length === 0) {
+                    const viewFilterEl = document.getElementById('viewFilter');
+                    if (viewFilterEl && viewFilterEl.value === 'tag_view') {
+                        viewFilterEl.value = this.lastStandardViewFilter || '';
+                    }
+                }
                 this.renderTagManagerList();
                 if (currentImage && currentImage.tags) {
                     currentImage.tags = currentImage.tags.filter(t => t.id !== tagId);
                     this.renderImageTags();
                 }
+                this.updateTagFilterSummary();
+                loadImages(false);
             } else {
                 const data = await res.json();
                 alert(data.error || 'Failed to delete tag');
@@ -1127,9 +1244,15 @@ class Workspace {
 
                 const listImg = this.allImages.find(img => img.id === currentImage.id);
                 if (listImg) listImg.tags = data.tags;
+                this.projectTags = null;
+                this.loadProjectTags(true).then(() => this.updateTagFilterSummary());
 
                 if (typeof closeModal === 'function') {
                     closeModal('tagSelectorModal');
+                }
+
+                if (this.activeTagFilterIds.length > 0 || document.getElementById('flagFilter')?.value === 'Tagged') {
+                    loadImages(false);
                 }
             } else {
                 const data = await res.json();
@@ -3280,15 +3403,31 @@ function applyAdvancedClassFilter() {
     loadImages(false);
 }
 
+function handleViewFilterChange() {
+    const viewFilterEl = document.getElementById('viewFilter');
+    if (!viewFilterEl) return;
+
+    const view = viewFilterEl.value;
+    if (view === 'tag_view') {
+        currentWorkspace.openTagFilterModal();
+        return;
+    }
+
+    currentWorkspace.lastStandardViewFilter = view;
+    currentWorkspace.activeTagFilterIds = [];
+    currentWorkspace.tagFilterDraftIds = [];
+    currentWorkspace.updateTagFilterSummary();
+    loadImages();
+}
+
 async function loadImages(fetchFromServer = true) {
     const container = document.getElementById('imageList');
+    const viewFilterEl = document.getElementById('viewFilter');
     if (container && (fetchFromServer || !currentWorkspace.allImages)) {
         container.innerHTML = '<div class="p-4 text-sm text-content-muted flex items-center justify-center"><i class="fas fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>';
     }
 
     if (fetchFromServer || !currentWorkspace.allImages) {
-        const viewFilterEl = document.getElementById('viewFilter');
-
         // Parse view_id from URL
         const urlParams = new URLSearchParams(window.location.search);
         const urlViewId = urlParams.get('view_id');
@@ -3343,6 +3482,15 @@ async function loadImages(fetchFromServer = true) {
 
     // Filter images
     let filteredImages = currentWorkspace.allImages;
+    const activeTagFilterIds = currentWorkspace.activeTagFilterIds.map(id => parseInt(id, 10));
+
+    if (viewFilterEl && viewFilterEl.value === 'tag_view' && activeTagFilterIds.length > 0) {
+        filteredImages = filteredImages.filter(img => {
+            if (!Array.isArray(img.tags) || img.tags.length === 0) return false;
+            return img.tags.some(tag => activeTagFilterIds.includes(parseInt(tag.id, 10)));
+        });
+    }
+
     if (advancedClassFilterActive && advancedSelectedClasses.length > 0) {
         // Advanced Filter: Image must contain ONLY the selected class(es)
         filteredImages = filteredImages.filter(img => {

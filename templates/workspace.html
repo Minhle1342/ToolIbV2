@@ -119,11 +119,29 @@
 
             <div id="sidebarFiltersContent" class="hidden space-y-2 sidebar-content">
                 <div class="flex gap-2">
-                    <select id="viewFilter" onchange="loadImages()"
+                    <select id="viewFilter" onchange="handleViewFilterChange()"
                         class="w-full bg-surface border border-border text-sm rounded px-2 py-1 text-content">
                         <option value="" data-i18n="filter_all_images">All Images</option>
                         <option value="my_view" data-i18n="filter_my_view">My View</option>
+                        <option value="tag_view" data-i18n="filter_by_tag_view">Hiển thị theo tag</option>
                     </select>
+                </div>
+                <div id="tagFilterSummary" class="hidden rounded border border-border bg-surface px-2 py-2">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                            <div class="text-[10px] font-semibold uppercase tracking-wider text-content-muted"
+                                data-i18n="tag_filter_active">Tag filter active</div>
+                            <div id="tagFilterSummaryText" class="truncate text-xs text-content"></div>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button type="button" onclick="currentWorkspace.openTagFilterModal()"
+                                class="text-[10px] text-primary hover:text-blue-500 transition-colors"
+                                data-i18n="tag_filter_edit">Edit</button>
+                            <button type="button" onclick="currentWorkspace.clearTagFilter()"
+                                class="text-[10px] text-content-muted hover:text-red-500 transition-colors"
+                                data-i18n="tag_filter_clear">Clear</button>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex gap-2">
                     <select id="flagFilter" onchange="loadImages()"
@@ -772,6 +790,37 @@
             <button type="button"
                 class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-white rounded transition-colors"
                 onclick="currentWorkspace.saveImageTags()">Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Tag Filter Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="tagFilterModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-md p-6 border border-border flex flex-col max-h-[80vh]">
+        <div class="flex justify-between items-start gap-4 mb-4">
+            <div>
+                <h2 class="text-xl font-bold text-content" data-i18n="filter_by_tag_view">Hiển thị theo tag</h2>
+                <p class="text-sm text-content-muted mt-1" data-i18n="tag_filter_description">Chọn một hoặc nhiều tag để lọc ảnh.</p>
+            </div>
+            <button onclick="currentWorkspace.closeTagFilterModal()" class="text-content-muted hover:text-content">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <div id="tagFilterList" class="flex-1 overflow-y-auto space-y-2 mb-4 pr-2">
+            <!-- Tag filter options injected by JS -->
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="currentWorkspace.clearTagFilter()" data-i18n="tag_filter_clear">Clear</button>
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="currentWorkspace.closeTagFilterModal()" data-i18n="cancel">Cancel</button>
+            <button type="button"
+                class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-white rounded transition-colors"
+                onclick="currentWorkspace.applyTagFilter()" data-i18n="tag_filter_apply">Apply filter</button>
         </div>
     </div>
 </div>
