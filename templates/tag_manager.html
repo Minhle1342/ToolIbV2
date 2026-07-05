@@ -162,6 +162,10 @@
                     </label>
                 </div>
                 <div class="p-4">
+                    <label class="flex items-center gap-2 text-sm text-content cursor-pointer mb-3">
+                        <input type="checkbox" id="exportIncludeUntagged" onchange="tagManager.updateExportTagControls()" class="text-primary bg-surface border-border rounded focus:ring-primary">
+                        <span>Bao gom anh khong co tag</span>
+                    </label>
                     <div id="exportTagsList" class="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[420px] overflow-y-auto pr-1"></div>
                     <div id="exportTagsHint" class="text-xs text-content-muted mt-3">Uncheck All tags to choose specific tags.</div>
                 </div>
@@ -584,11 +588,13 @@ const tagManager = {
 
     updateExportTagControls() {
         const allTagsEl = document.getElementById('exportAllTags');
+        const includeUntaggedEl = document.getElementById('exportIncludeUntagged');
         const listEl = document.getElementById('exportTagsList');
         const hintEl = document.getElementById('exportTagsHint');
         if (!allTagsEl || !listEl) return;
 
         const useAllTags = allTagsEl.checked;
+        const includeUntagged = includeUntaggedEl?.checked === true;
         const checkboxes = Array.from(document.querySelectorAll('input[name="exportTags"]'));
         checkboxes.forEach(cb => {
             cb.disabled = useAllTags;
@@ -596,9 +602,15 @@ const tagManager = {
 
         listEl.classList.toggle('opacity-50', useAllTags);
         if (hintEl) {
-            hintEl.textContent = useAllTags
-                ? 'All tagged images will be exported.'
-                : 'Choose one or more tags to export.';
+            if (useAllTags && includeUntagged) {
+                hintEl.textContent = 'All labeled images will be exported, including images without tags.';
+            } else if (useAllTags) {
+                hintEl.textContent = 'All tagged images will be exported.';
+            } else if (includeUntagged) {
+                hintEl.textContent = 'Choose tags to export, and untagged images will also be included.';
+            } else {
+                hintEl.textContent = 'Choose one or more tags to export.';
+            }
         }
 
         this.updateExportSummary();
@@ -621,22 +633,28 @@ const tagManager = {
         const test = parseInt(document.getElementById('exportTestSplit').value) || 0;
         const exportMode = this.getExportMode();
         const exportAllTags = document.getElementById('exportAllTags')?.checked !== false;
+        const includeUntagged = document.getElementById('exportIncludeUntagged')?.checked === true;
         const selectedTagIds = this.getSelectedExportTagIds();
 
-        modeEl.textContent = exportMode === 'tagged_only' ? 'Tagged only' : 'Export All';
+        modeEl.textContent = exportMode === 'tagged_only'
+            ? (includeUntagged ? 'Tagged + Untagged' : 'Tagged only')
+            : 'Export All';
         splitEl.textContent = `${train} / ${val} / ${test}`;
 
         if (exportMode !== 'tagged_only') {
             tagsEl.textContent = 'Not filtered';
         } else if (exportAllTags) {
-            tagsEl.textContent = 'All tags';
+            tagsEl.textContent = includeUntagged ? 'All tags + untagged' : 'All tags';
+        } else if (selectedTagIds.length === 0 && includeUntagged) {
+            tagsEl.textContent = 'Untagged only';
         } else if (selectedTagIds.length === 0) {
             tagsEl.textContent = 'No tag selected';
         } else {
             const names = selectedTagIds
                 .map(id => this.tags.find(tag => parseInt(tag.id) === id)?.name)
                 .filter(Boolean);
-            tagsEl.textContent = names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+            const label = names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} +${names.length - 2}`;
+            tagsEl.textContent = includeUntagged ? `${label} + untagged` : label;
         }
     },
     
@@ -678,13 +696,18 @@ const tagManager = {
         return allImages;
     },
 
-    buildTaggedSplitAssignments(images, splits, selectedTagIds = []) {
+    buildTaggedSplitAssignments(images, splits, selectedTagIds = [], includeUntagged = false) {
         const selectedTagSet = new Set(selectedTagIds.map(id => parseInt(id)).filter(Number.isFinite));
         const taggedImages = images
             .filter(img => {
-                if (!Array.isArray(img.tags) || img.tags.length === 0) return false;
+                const tags = Array.isArray(img.tags) ? img.tags : [];
+                const hasAnyTag = tags.length > 0;
+
+                if (!hasAnyTag) {
+                    return includeUntagged;
+                }
                 if (selectedTagSet.size === 0) return true;
-                return img.tags.some(tag => selectedTagSet.has(parseInt(tag.id)));
+                return tags.some(tag => selectedTagSet.has(parseInt(tag.id)));
             })
             .sort((a, b) => a.id - b.id);
 
@@ -718,6 +741,7 @@ const tagManager = {
         
         const exportMode = this.getExportMode();
         const exportAllTags = document.getElementById('exportAllTags')?.checked !== false;
+        const includeUntagged = document.getElementById('exportIncludeUntagged')?.checked === true;
         let selectedTagIds = [];
 
         const payload = {
@@ -726,15 +750,20 @@ const tagManager = {
         };
 
         if (exportMode === 'tagged_only') {
+            payload.include_untagged = includeUntagged;
             if (exportAllTags) {
-                payload.has_any_tag = true;
+                if (!includeUntagged) {
+                    payload.has_any_tag = true;
+                }
             } else {
                 selectedTagIds = this.getSelectedExportTagIds();
-                if (selectedTagIds.length === 0) {
-                    this.showToast('Please select at least one tag to export.', 'error');
+                if (selectedTagIds.length === 0 && !includeUntagged) {
+                    this.showToast('Please select at least one tag or enable untagged export.', 'error');
                     return;
                 }
-                payload.tags = selectedTagIds;
+                if (selectedTagIds.length > 0) {
+                    payload.tags = selectedTagIds;
+                }
             }
         }
 
@@ -746,7 +775,12 @@ const tagManager = {
         try {
             if (exportMode === 'tagged_only') {
                 const allImages = await this.getAllProjectImages();
-                payload.tagged_split_assignments = this.buildTaggedSplitAssignments(allImages, { train, val, test }, selectedTagIds);
+                payload.tagged_split_assignments = this.buildTaggedSplitAssignments(
+                    allImages,
+                    { train, val, test },
+                    selectedTagIds,
+                    includeUntagged
+                );
             }
 
             const res = await fetch('/api/export', {

@@ -10,6 +10,14 @@ socketio = SocketIO(cors_allowed_origins="*")
 LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
+def get_default_database_uri():
+    basedir = os.path.abspath(os.path.dirname(__file__))
+    return os.environ.get(
+        'YOLO_LABELING_DB_URI',
+        'sqlite:///' + os.path.join(basedir, 'yolo_labeling.db')
+    )
+
+
 def should_redirect_to_https():
     if not current_app.config.get('FORCE_HTTPS_REDIRECTS', True):
         return False
@@ -43,20 +51,24 @@ def resolve_project(identifier):
 
     abort(404)
 
-def create_app():
+def create_app(config_overrides=None):
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     
     # Configuration
-    basedir = os.path.abspath(os.path.dirname(__file__))
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'yolo_labeling.db')
-    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['PREFERRED_URL_SCHEME'] = 'https'
-    app.config['FORCE_HTTPS_REDIRECTS'] = True
+    app.config.update({
+        'SQLALCHEMY_DATABASE_URI': get_default_database_uri(),
+        'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+        'PREFERRED_URL_SCHEME': 'https',
+        'FORCE_HTTPS_REDIRECTS': True,
+    })
     
     # Increase maximum upload limit to 10GB for large datasets
     app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 * 1024
     app.config['MAX_FORM_PARTS'] = 100000  # Allow large number of files
+
+    if config_overrides:
+        app.config.update(config_overrides)
     
     # Initialize DB
     db.init_app(app)

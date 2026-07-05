@@ -1,8 +1,11 @@
 import os
 import glob
 import shutil
+import json
 import yaml
 import random
+from sqlalchemy import or_
+from datetime import datetime
 from models import db, Image, Project, View, Tag
 
 try:
@@ -13,6 +16,50 @@ except ImportError:
     np = None
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp'}
+
+
+def get_dataset_tags_path(project):
+    return os.path.join(project.root_path, 'dataset_tags.json')
+
+
+def persist_dataset_tags(project):
+    """
+    Persist project tags and image-tag assignments to dataset_tags.json
+    inside the project root for recovery outside the database.
+    """
+    if not project or not project.root_path:
+        return None
+
+    os.makedirs(project.root_path, exist_ok=True)
+
+    tags = Tag.query.filter_by(project_id=project.id).order_by(Tag.id.asc()).all()
+    images = Image.query.filter_by(project_id=project.id).order_by(Image.id.asc()).all()
+
+    payload = {
+        'project_id': project.id,
+        'project_name': project.name,
+        'updated_at': datetime.utcnow().isoformat() + 'Z',
+        'project_tags': [
+            {
+                'id': tag.id,
+                'name': tag.name,
+                'color': tag.color,
+            }
+            for tag in tags
+        ],
+        'images': {}
+    }
+
+    for image in images:
+        tag_names = sorted(tag.name for tag in image.tags)
+        if tag_names:
+            payload['images'][image.filename] = tag_names
+
+    tags_file = get_dataset_tags_path(project)
+    with open(tags_file, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, ensure_ascii=False, indent=4)
+
+    return tags_file
 
 
 def imread_with_exif(image_path, flags=None):
@@ -133,11 +180,10 @@ def sync_dataset_tags(project):
     """
     Syncs tags from dataset_tags.json if it exists in the project root.
     """
-    tags_file = os.path.join(project.root_path, 'dataset_tags.json')
+    tags_file = get_dataset_tags_path(project)
     if not os.path.exists(tags_file):
         return
-        
-    import json
+
     try:
         with open(tags_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -273,6 +319,19 @@ def export_dataset(criteria, splits=None, format='yolo'):
     """
     if splits is None:
         splits = {'train': 80, 'val': 20, 'test': 0}
+    elif isinstance(splits, (int, float)):
+        # Backward compatibility: old callers passed a train ratio like 0.8.
+        train_ratio = float(splits)
+        if 0 <= train_ratio <= 1:
+            train_pct = int(round(train_ratio * 100))
+        else:
+            train_pct = int(round(train_ratio))
+        train_pct = max(0, min(train_pct, 100))
+        splits = {
+            'train': train_pct,
+            'val': 100 - train_pct,
+            'test': 0
+        }
         
     # 1. Prepare Export Directory
     base_export_dir = os.path.abspath("exported_dataset")
@@ -308,6 +367,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
     
     # 2. Gather Images based on Criteria
     target_images = []
+    include_untagged = criteria.get('include_untagged', False)
     
     if criteria.get('image_ids'):
         # Specific images (e.g. from selection)
@@ -318,11 +378,20 @@ def export_dataset(criteria, splits=None, format='yolo'):
         target_images = Image.query.filter_by(view_id=criteria['view_id'], is_labeled=True).all()
         
     elif criteria.get('tags') and criteria.get('project_ids'):
-        target_images = Image.query.filter(
+        query = Image.query.filter(
             Image.project_id.in_(criteria['project_ids']),
-            Image.tags.any(Tag.id.in_(criteria['tags'])),
-            Image.is_labeled==True
-        ).all()
+            Image.is_labeled == True
+        )
+        if include_untagged:
+            query = query.filter(
+                or_(
+                    Image.tags.any(Tag.id.in_(criteria['tags'])),
+                    ~Image.tags.any()
+                )
+            )
+        else:
+            query = query.filter(Image.tags.any(Tag.id.in_(criteria['tags'])))
+        target_images = query.all()
         
     elif criteria.get('project_ids'):
         # Multiple projects

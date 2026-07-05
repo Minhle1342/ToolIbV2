@@ -308,7 +308,9 @@
     function renderCompareOptions() {
         const container = document.getElementById('compareModelsList');
         container.innerHTML = '';
-        modelsData.forEach(m => {
+        modelsData
+        .filter(m => m.model_type !== 'classification')
+        .forEach(m => {
             const lbl = document.createElement('label');
             lbl.className = "flex items-center gap-2 cursor-pointer bg-surface border border-border px-3 py-1.5 rounded text-sm hover:border-primary transition-colors";
             lbl.innerHTML = `

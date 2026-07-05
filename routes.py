@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import random
+import subprocess
 import tempfile
 import threading
 import time
@@ -36,6 +37,51 @@ def get_project_guide_meta_path(project_id):
     return os.path.join(GUIDE_STORAGE_DIR, str(project_id), 'guide.json')
 
 
+def normalize_deletable_directory(path):
+    if not path or not os.path.isdir(path):
+        return None
+
+    normalized = os.path.abspath(path)
+    parent_root = os.path.dirname(normalized)
+    if not normalized or not parent_root or normalized == parent_root:
+        raise ValueError(f'Unsafe project directory: {path}')
+
+    return normalized
+
+
+def move_directory_to_recycle_bin(path):
+    normalized = normalize_deletable_directory(path)
+    if not normalized:
+        return False
+
+    powershell_exe = shutil.which('powershell.exe') or shutil.which('powershell') or shutil.which('pwsh')
+    if not powershell_exe:
+        raise RuntimeError('PowerShell is not available to move the folder to Recycle Bin.')
+
+    escaped_path = normalized.replace("'", "''")
+    recycle_script = (
+        "Add-Type -AssemblyName Microsoft.VisualBasic; "
+        f"$target = '{escaped_path}'; "
+        "if (-not (Test-Path -LiteralPath $target)) { exit 0 }; "
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("
+        "$target, "
+        "[Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, "
+        "[Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)"
+    )
+
+    result = subprocess.run(
+        [powershell_exe, '-NoProfile', '-NonInteractive', '-Command', recycle_script],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        error_text = (result.stderr or result.stdout or '').strip()
+        raise RuntimeError(error_text or 'Failed to move the project folder to Recycle Bin.')
+
+    return True
+
+
 def get_pdf_page_count(pdf_path):
     if not os.path.exists(pdf_path):
         return 0
@@ -50,6 +96,7 @@ def get_pdf_page_count(pdf_path):
             return len(re.findall(r'/Type\s*/Page\b', content))
         except Exception:
             return 0
+
 
 def get_inference_engine():
     global inference_engine
@@ -87,6 +134,49 @@ def get_classifier_engine():
 api_bp = Blueprint('api', __name__)
 
 # --- Projects ---
+@api_bp.route('/system/select-directory', methods=['POST'])
+def select_directory():
+    """Open a native folder picker and return the selected absolute path."""
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or 'Chon thu muc').strip()
+    initial_path = (data.get('initial_path') or '').strip()
+
+    if not os.path.isdir(initial_path):
+        initial_path = os.getcwd()
+
+    root = None
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        with contextlib.suppress(Exception):
+            root.attributes('-topmost', True)
+            root.lift()
+            root.focus_force()
+
+        selected_path = filedialog.askdirectory(
+            parent=root,
+            initialdir=initial_path,
+            title=title,
+            mustexist=False
+        )
+    except Exception as exc:
+        return jsonify({'error': f'Cannot open folder picker: {exc}'}), 500
+    finally:
+        if root is not None:
+            with contextlib.suppress(Exception):
+                root.destroy()
+
+    if not selected_path:
+        return jsonify({'cancelled': True, 'path': ''})
+
+    return jsonify({
+        'cancelled': False,
+        'path': os.path.abspath(selected_path)
+    })
+
 @api_bp.route('/projects', methods=['GET'])
 def get_projects():
     projects = Project.query.all()
@@ -152,17 +242,19 @@ def delete_project(project_id):
     project_root = project.root_path
     guide_path = get_project_guide_path(project.id)
     try:
+        moved_to_recycle_bin = False
+        if delete_folder:
+            moved_to_recycle_bin = move_directory_to_recycle_bin(project_root)
+
         db.session.delete(project)
         db.session.commit()
-        if delete_folder and project_root and os.path.isdir(project_root):
-            normalized_root = os.path.abspath(project_root)
-            parent_root = os.path.dirname(normalized_root)
-            if normalized_root and parent_root and normalized_root != parent_root:
-                shutil.rmtree(normalized_root)
         guide_dir = os.path.dirname(guide_path)
         if os.path.isdir(guide_dir):
             shutil.rmtree(guide_dir, ignore_errors=True)
-        return jsonify({'message': 'Project deleted successfully'})
+        message = 'Project deleted successfully'
+        if moved_to_recycle_bin:
+            message = 'Project deleted successfully. The project folder was moved to Recycle Bin.'
+        return jsonify({'message': message})
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
@@ -742,6 +834,9 @@ def export_dataset():
         
     if 'has_any_tag' in data:
         criteria['has_any_tag'] = data['has_any_tag']
+
+    if 'include_untagged' in data:
+        criteria['include_untagged'] = data['include_untagged']
 
     if 'tagged_split_assignments' in data:
         criteria['tagged_split_assignments'] = data['tagged_split_assignments']
@@ -1924,14 +2019,26 @@ def preview_collected_class(class_name):
         return jsonify({'error': f'Class "{class_name}" not found'}), 404
 
     records.sort(key=lambda record: os.path.getmtime(record['path']))
-    
-    # Return only last 50 for preview
-    files = [record['filename'] for record in records[-50:]]
-    
+
+    total = len(records)
+    limit = request.args.get('limit', default=48, type=int) or 48
+    page = request.args.get('page', default=1, type=int) or 1
+
+    limit = max(1, min(limit, 200))
+    total_pages = max(1, (total + limit - 1) // limit)
+    page = max(1, min(page, total_pages))
+
+    start_index = max(total - (page * limit), 0)
+    end_index = total - ((page - 1) * limit)
+    files = [record['filename'] for record in records[start_index:end_index]]
+
     return jsonify({
         'class_name': class_name,
         'files': files,
-        'total': len(records)
+        'total': total,
+        'page': page,
+        'limit': limit,
+        'total_pages': total_pages
     })
 
 @api_bp.route('/collect-crops/serve/<class_name>/<filename>')
@@ -2342,6 +2449,7 @@ def get_tags(project_id):
 
 @api_bp.route('/projects/<int:project_id>/tags', methods=['POST'])
 def create_tag(project_id):
+    project = Project.query.get_or_404(project_id)
     data = request.json
     name = data.get('name')
     color = data.get('color', '#3b82f6')
@@ -2355,11 +2463,13 @@ def create_tag(project_id):
     tag = Tag(name=name, project_id=project_id, color=color)
     db.session.add(tag)
     db.session.commit()
+    utils.persist_dataset_tags(project)
     return jsonify(tag.to_dict()), 201
 
 @api_bp.route('/tags/<int:tag_id>', methods=['PUT'])
 def update_tag(tag_id):
     tag = Tag.query.get_or_404(tag_id)
+    project = Project.query.get_or_404(tag.project_id)
     data = request.json
     if 'name' in data:
         existing = Tag.query.filter_by(project_id=tag.project_id, name=data['name']).first()
@@ -2370,14 +2480,17 @@ def update_tag(tag_id):
         tag.color = data['color']
         
     db.session.commit()
+    utils.persist_dataset_tags(project)
     return jsonify(tag.to_dict())
 
 @api_bp.route('/tags/<int:tag_id>', methods=['DELETE'])
 def delete_tag(tag_id):
     tag = Tag.query.get_or_404(tag_id)
+    project = Project.query.get_or_404(tag.project_id)
     try:
         db.session.delete(tag)
         db.session.commit()
+        utils.persist_dataset_tags(project)
         return jsonify({'message': 'Tag deleted'})
     except Exception as e:
         db.session.rollback()
@@ -2386,12 +2499,14 @@ def delete_tag(tag_id):
 @api_bp.route('/images/<int:image_id>/tags', methods=['POST'])
 def set_image_tags(image_id):
     image = Image.query.get_or_404(image_id)
+    project = Project.query.get_or_404(image.project_id)
     data = request.json
     tag_ids = data.get('tag_ids', [])
     
     tags = Tag.query.filter(Tag.id.in_(tag_ids), Tag.project_id == image.project_id).all()
     image.tags = tags
     db.session.commit()
+    utils.persist_dataset_tags(project)
     
     return jsonify({'message': 'Tags updated', 'tags': [t.to_dict() for t in image.tags]})
 
@@ -2417,7 +2532,7 @@ def get_images_paginated(project_id):
 
 @api_bp.route('/projects/<int:project_id>/bulk_assign_tags', methods=['POST'])
 def bulk_assign_tags(project_id):
-    Project.query.get_or_404(project_id)
+    project = Project.query.get_or_404(project_id)
     data = request.json
     image_ids = data.get('image_ids', []) # Can be "all" or list of ids
     tag_ids = data.get('tag_ids', [])
@@ -2443,6 +2558,7 @@ def bulk_assign_tags(project_id):
                     image.tags.remove(t)
                     
     db.session.commit()
+    utils.persist_dataset_tags(project)
     return jsonify({'message': f'Bulk tags updated for {len(images)} images', 'success': True})
 
 # --- Backup ---

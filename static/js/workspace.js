@@ -3188,6 +3188,23 @@ function imageListItemHtml(img, overlapThreshold) {
     `;
 }
 
+function updateTotalImageCountFromImageList() {
+    const totalImageCountEl = document.getElementById('totalImageCount');
+    if (!totalImageCountEl) return;
+
+    const container = document.getElementById('imageList');
+    if (!container) {
+        totalImageCountEl.innerText = '(0)';
+        return;
+    }
+
+    const totalIds = new Set(
+        Array.from(container.querySelectorAll('.image-item[data-id]'), el => el.dataset.id)
+    ).size;
+
+    totalImageCountEl.innerText = `(${totalIds})`;
+}
+
 function appendImageListChunk(state, count) {
     if (!state || state.cancelled) return;
 
@@ -3211,6 +3228,7 @@ function appendImageListChunk(state, count) {
 
     state.nextIndex = end;
     syncImageListSentinel(state);
+    updateTotalImageCountFromImageList();
 
     if (typeof window.updateAllUserIndicators === 'function') {
         window.updateAllUserIndicators();
@@ -3261,6 +3279,7 @@ function renderImageList(container, images, overlapThreshold) {
 
     if (images.length === 0) {
         container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">KhÃ´ng cÃ³ áº£nh nÃ o khá»›p vá»›i bá»™ lá»c</div>';
+        updateTotalImageCountFromImageList();
         return;
     }
 
@@ -3427,6 +3446,10 @@ async function loadImages(fetchFromServer = true) {
         container.innerHTML = '<div class="p-4 text-sm text-content-muted flex items-center justify-center"><i class="fas fa-spinner fa-spin mr-2"></i>Đang tải dữ liệu...</div>';
     }
 
+    if (container && (fetchFromServer || !currentWorkspace.allImages)) {
+        updateTotalImageCountFromImageList();
+    }
+
     if (fetchFromServer || !currentWorkspace.allImages) {
         // Parse view_id from URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -3468,11 +3491,6 @@ async function loadImages(fetchFromServer = true) {
         currentWorkspace.allImages = images;
     }
     currentWorkspace.imageById = new Map((currentWorkspace.allImages || []).map(img => [img.id, img]));
-
-    const totalImageCountEl = document.getElementById('totalImageCount');
-    if (totalImageCountEl) {
-        totalImageCountEl.innerText = `(${currentWorkspace.allImages ? currentWorkspace.allImages.length : 0})`;
-    }
 
     // Read active class filters
     const checkboxes = document.querySelectorAll('.class-filter-checkbox');

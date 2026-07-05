@@ -103,9 +103,15 @@
             <!-- Destination Folder Path -->
             <div class="space-y-1">
                 <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_destinationFolderPath">Đường dẫn thư mục đích (Tuyệt đối)</label>
-                <input type="text" name="root_path" id="merge_root_path" oninput="debouncePreflight()"
-                    class="w-full bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
-                    required placeholder="e.g. D:\Dataset\Colgate_Merged">
+                <div class="flex gap-2">
+                    <input type="text" name="root_path" id="merge_root_path"
+                        class="flex-1 bg-surface border border-border rounded px-3 py-2 text-content focus:outline-none focus:border-primary transition-colors"
+                        required readonly placeholder="Nháº¥n 'Chá»n thÆ° má»¥c' Ä‘á»ƒ chá»n Ä‘Æ°á»ng dáº«n Ä‘Ã­ch">
+                    <button type="button" id="mergeBrowsePathBtn" onclick="browseMergeDestinationFolder()"
+                        class="shrink-0 px-3 py-2 bg-surface border border-border rounded text-content hover:border-primary hover:bg-primary/5 transition-colors text-sm font-medium">
+                        <i class="fa-regular fa-folder-open mr-1"></i> Chá»n thÆ° má»¥c
+                    </button>
+                </div>
             </div>
 
             <!-- Collision Policy Selection -->
@@ -1116,6 +1122,47 @@
         openModal('mergeProjectsModal');
     }
 
+    async function browseMergeDestinationFolder() {
+        const browseBtn = document.getElementById('mergeBrowsePathBtn');
+        const input = document.getElementById('merge_root_path');
+        if (!browseBtn || !input) return;
+
+        const originalHtml = browseBtn.innerHTML;
+        browseBtn.disabled = true;
+        browseBtn.classList.add('opacity-60', 'cursor-not-allowed');
+        browseBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Äang má»Ÿ...';
+
+        try {
+            const response = await fetch('/api/system/select-directory', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    initial_path: input.value.trim(),
+                    title: 'Chá»n thÆ° má»¥c Ä‘Ã­ch cho dá»± Ã¡n gá»™p'
+                })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                window.showToast(data.error || 'KhÃ´ng thá»ƒ má»Ÿ há»™p thoáº¡i chá»n thÆ° má»¥c.', 'error');
+                return;
+            }
+
+            if (data.cancelled || !data.path) {
+                return;
+            }
+
+            input.value = data.path;
+            runMergePreflight();
+        } catch (err) {
+            window.showToast('Lá»—i: ' + err.message, 'error');
+        } finally {
+            browseBtn.disabled = false;
+            browseBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+            browseBtn.innerHTML = originalHtml;
+        }
+    }
+
     async function runMergePreflight() {
         const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
         const projectIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
@@ -1272,6 +1319,14 @@
         } finally {
             hideLoadingOverlay();
         }
+    }
+
+    const deleteProjectRemoveFolderBtn = document.getElementById('deleteProjectRemoveFolderBtn');
+    if (deleteProjectRemoveFolderBtn) {
+        deleteProjectRemoveFolderBtn.innerHTML = `
+            <div class="font-semibold text-red-500 mb-1">Dua thu muc du an vao Recycle Bin</div>
+            <div class="text-sm text-content-muted">Xoa metadata va chuyen thu muc goc cua du an vao Recycle Bin, khong xoa vinh vien.</div>
+        `;
     }
 
     // Initial Load

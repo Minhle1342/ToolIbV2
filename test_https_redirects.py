@@ -1,13 +1,19 @@
 import unittest
+import os
+import tempfile
 
-from app import create_app
+from test_helpers import create_isolated_test_app
 
 
 class HttpsRedirectTests(unittest.TestCase):
     def setUp(self):
-        self.app = create_app()
-        self.app.config.update(TESTING=True)
+        self.temp_dir = tempfile.TemporaryDirectory(prefix='toolib_https_test_')
+        db_path = os.path.join(self.temp_dir.name, 'test_https_redirects.db')
+        self.app = create_isolated_test_app(db_path, FORCE_HTTPS_REDIRECTS=True)
         self.client = self.app.test_client()
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
 
     def test_public_http_get_redirects_to_https(self):
         response = self.client.get('/project/demo/', base_url='http://share.example.com')
