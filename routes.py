@@ -791,6 +791,163 @@ def delete_project_class(project_id, class_idx):
     db.session.commit()
     return jsonify({'message': 'Class deleted', 'classes': classes}), 200
 
+@api_bp.route('/projects/<int:project_id>/classes/merge', methods=['POST'])
+def merge_project_classes(project_id):
+    """Merge one or more classes into a single new class name.
+
+    Expects JSON body:
+        source_class_indices: list[int] – indices of classes to merge
+        new_class_name: str – the target class name after merging
+    """
+    project = Project.query.get_or_404(project_id)
+    data = request.get_json(silent=True) or {}
+    source_indices = data.get('source_class_indices')
+    new_name = (data.get('new_class_name') or '').strip()
+
+    if not source_indices or not isinstance(source_indices, list):
+        return jsonify({'error': 'source_class_indices is required (list of int)'}), 400
+    if not new_name:
+        return jsonify({'error': 'new_class_name is required'}), 400
+
+    classes = utils.get_classes(project)
+
+    # Validate indices
+    for idx in source_indices:
+        if not isinstance(idx, int) or idx < 0 or idx >= len(classes):
+            return jsonify({'error': f'Invalid class index: {idx}'}), 400
+
+    source_indices = sorted(set(source_indices))
+
+    # Check name conflict with non-selected classes
+    non_selected = [cls for i, cls in enumerate(classes) if i not in source_indices]
+    if new_name in non_selected:
+        return jsonify({'error': f'Class name "{new_name}" already exists in non-selected classes'}), 400
+
+    # The target index is the smallest among selected
+    target_idx = source_indices[0]
+    indices_to_remove = source_indices[1:]  # all except the target
+
+    # Build remap: source IDs → target_idx
+    remap = {idx: target_idx for idx in source_indices}
+    removed_classes = [classes[idx] for idx in indices_to_remove]
+
+    # Phase 1: Remap class IDs in label files (merge selected → target)
+    images = Image.query.filter_by(project_id=project.id).all()
+    updated_files = 0
+    updated_boxes = 0
+
+    for image in images:
+        label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+        if not os.path.exists(label_file):
+            continue
+
+        with open(label_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        file_changed = False
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) != 5:
+                continue
+            try:
+                cid = int(parts[0])
+                float(parts[1])
+                float(parts[2])
+                width = float(parts[3])
+                height = float(parts[4])
+                if width <= 0 or height <= 0:
+                    continue
+            except ValueError:
+                continue
+
+            if cid in remap and cid != target_idx:
+                parts[0] = str(target_idx)
+                file_changed = True
+                updated_boxes += 1
+            new_lines.append(' '.join(parts))
+
+        if file_changed:
+            with open(label_file, 'w', encoding='utf-8') as f:
+                if new_lines:
+                    f.write('\n'.join(new_lines) + '\n')
+                else:
+                    f.write('')
+            updated_files += 1
+
+    # Phase 2: Remove extra classes and compact IDs in labels
+    # Remove indices in reverse order so earlier indices stay valid
+    classes[target_idx] = new_name
+    for idx in reversed(indices_to_remove):
+        classes.pop(idx)
+
+    # Build compaction remap: old IDs → new IDs after removals
+    # We need to adjust IDs in label files for the removed gaps
+    old_to_new = {}
+    new_id = 0
+    for old_id in range(len(classes) + len(indices_to_remove)):
+        if old_id in indices_to_remove:
+            continue
+        if old_id in remap:
+            old_to_new[old_id] = old_to_new.get(target_idx, new_id)
+            if old_id == target_idx:
+                old_to_new[target_idx] = new_id
+                new_id += 1
+        else:
+            old_to_new[old_id] = new_id
+            new_id += 1
+
+    # Phase 3: Compact class IDs in label files
+    for image in images:
+        label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+        if not os.path.exists(label_file):
+            continue
+
+        with open(label_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        file_changed = False
+        for line in lines:
+            parts = line.strip().split()
+            if len(parts) != 5:
+                continue
+            try:
+                cid = int(parts[0])
+                float(parts[1])
+                float(parts[2])
+                width = float(parts[3])
+                height = float(parts[4])
+                if width <= 0 or height <= 0:
+                    continue
+            except ValueError:
+                continue
+
+            new_cid = old_to_new.get(cid, cid)
+            if new_cid != cid:
+                parts[0] = str(new_cid)
+                file_changed = True
+            new_lines.append(' '.join(parts))
+
+        if file_changed:
+            with open(label_file, 'w', encoding='utf-8') as f:
+                if new_lines:
+                    f.write('\n'.join(new_lines) + '\n')
+                else:
+                    f.write('')
+                    image.is_labeled = False
+
+    utils.save_classes(project, classes)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Classes merged successfully',
+        'classes': classes,
+        'updated_files': updated_files,
+        'updated_boxes': updated_boxes,
+        'removed_classes': removed_classes
+    }), 200
+
 # --- Export ---
 def run_clear_header_for_export(export_path):
     """Remove generated numeric prefixes from exported YOLO image/label pairs."""

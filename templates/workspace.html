@@ -78,6 +78,32 @@
                             </button>
                         </div>
                     </div>
+                    
+                    <!-- Class Conversion Button -->
+                    <div class="relative" id="mergeClassesContainer">
+                        <button id="mergeClassesBtn"
+                            class="text-primary hover:text-blue-500 rounded text-xs px-2 py-1 bg-surface border border-border transition-colors"
+                            title="Chuyển đổi class" onclick="currentWorkspace.openMergeClassesPanel()">
+                            <i class="fa-solid fa-right-left"></i>
+                        </button>
+                        <div id="mergeClassesPanel"
+                            class="absolute left-0 mt-1 hidden flex-col bg-panel border border-border rounded shadow-lg z-50 text-xs w-64 overflow-hidden p-3">
+                            <h4 class="font-bold mb-2">Chuyển đổi Class</h4>
+                            <p class="text-[10px] text-content-muted mb-2">Chọn các class cần gộp:</p>
+                            <div id="mergeClassesList" class="max-h-32 overflow-y-auto mb-3 space-y-1 bg-surface p-1 rounded border border-border">
+                                <!-- Checkboxes will be populated by JS -->
+                            </div>
+                            <div class="mb-3">
+                                <label class="block text-[10px] text-content-muted mb-1">Tên class mới:</label>
+                                <input type="text" id="mergeClassNewName" class="w-full bg-surface border border-border rounded px-2 py-1 text-xs text-content focus:outline-none focus:border-primary" placeholder="Nhập tên class mới">
+                            </div>
+                            <div class="flex justify-end gap-2">
+                                <button onclick="currentWorkspace.closeMergeClassesPanel()" class="px-2 py-1 rounded border border-border hover:bg-surface transition-colors">Hủy</button>
+                                <button onclick="currentWorkspace.executeMergeClasses()" class="px-2 py-1 rounded bg-primary text-white hover:bg-blue-600 transition-colors">Xác nhận</button>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <input type="file" id="imageUploadInput" class="hidden" multiple
                         accept="image/*,.txt,.yaml,.yml,.json" onchange="currentWorkspace.uploadImages(event)">
                     <input type="file" id="folderUploadInput" class="hidden" webkitdirectory directory multiple

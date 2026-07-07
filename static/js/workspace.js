@@ -2732,6 +2732,103 @@ files.download(onnx_path)
         }
     }
 
+    openMergeClassesPanel() {
+        const panel = document.getElementById('mergeClassesPanel');
+        const list = document.getElementById('mergeClassesList');
+        
+        // Populate checkboxes
+        if (!projectClasses || projectClasses.length === 0) {
+            list.innerHTML = '<div class="text-xs text-content-muted text-center py-2">Không có class nào</div>';
+        } else {
+            list.innerHTML = projectClasses.map((cls, idx) => `
+                <label class="flex items-center gap-2 cursor-pointer hover:bg-panel p-1 rounded transition-colors">
+                    <input type="checkbox" value="${idx}" class="merge-class-checkbox rounded border-border bg-surface text-primary focus:ring-primary w-3.5 h-3.5">
+                    <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background-color: ${editor.colors[idx % 20]}"></div>
+                    <span class="text-xs truncate" title="${cls}">${cls}</span>
+                </label>
+            `).join('');
+        }
+        
+        // Reset input
+        document.getElementById('mergeClassNewName').value = '';
+        
+        // Show panel
+        panel.classList.remove('hidden');
+        panel.classList.add('flex');
+    }
+
+    closeMergeClassesPanel() {
+        const panel = document.getElementById('mergeClassesPanel');
+        panel.classList.add('hidden');
+        panel.classList.remove('flex');
+    }
+
+    async executeMergeClasses() {
+        // Collect checked indices
+        const checkboxes = document.querySelectorAll('.merge-class-checkbox:checked');
+        if (checkboxes.length === 0) {
+            alert('Vui lòng chọn ít nhất 1 class để gộp.');
+            return;
+        }
+        
+        const sourceIndices = Array.from(checkboxes).map(cb => parseInt(cb.value));
+        const newName = document.getElementById('mergeClassNewName').value.trim();
+        
+        if (!newName) {
+            alert('Vui lòng nhập tên class mới.');
+            return;
+        }
+        
+        // Confirm execution if merging multiple classes
+        if (sourceIndices.length > 1) {
+            if (!confirm(`Bạn có chắc chắn muốn gộp ${sourceIndices.length} classes thành class "${newName}"?\nHành động này sẽ cập nhật tất cả file label và không thể hoàn tác.`)) {
+                return;
+            }
+        }
+        
+        try {
+            const res = await fetch(`/api/projects/${PROJECT_ID}/classes/merge`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    source_class_indices: sourceIndices,
+                    new_class_name: newName
+                })
+            });
+            const data = await res.json();
+            
+            if (!res.ok) throw new Error(data.error || 'Lỗi khi gộp classes');
+            
+            // Close panel and show success
+            this.closeMergeClassesPanel();
+            alert(`Đã gộp thành công!\n- Class đã gộp: ${data.removed_classes.length + 1}\n- File đã cập nhật: ${data.updated_files}\n- Box đã cập nhật: ${data.updated_boxes}`);
+            
+            // Refresh classes
+            projectClasses = data.classes;
+            this.renderClasses();
+            this.renderClassFilters();
+            
+            // Refresh the images list to reflect any removed labels
+            await loadImages(true);
+            
+            // Reload the active image if one is selected, so it reflects updated boxes
+            if (currentImage) {
+                const updatedImage = this.allImages.find(img => img.id === currentImage.id);
+                if (updatedImage) {
+                    this.selectImage(updatedImage);
+                } else {
+                    editor.clear();
+                }
+            }
+            
+        } catch (e) {
+            console.error(e);
+            alert('Failed to merge classes: ' + e.message);
+        }
+    }
+
     async uploadImages(event) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
