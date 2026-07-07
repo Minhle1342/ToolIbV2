@@ -1,13 +1,24 @@
 @echo off
-:: Đặt tiêu đề cho cửa sổ CMD
-title Khởi động Team YOLO Labeling Hub 🏷️
+setlocal
 
-:: Di chuyển tới thư mục chứa file batch này
+title Khoi dong Team YOLO Labeling Hub
 cd /d "%~dp0"
+set "CF_CONFIG=%~dp0config.yml"
 
-:: Khởi chạy Tunnel qua Localtunnel (npx) do Node.js đã được cài đặt
-echo [SYSTEM] Đang khởi động Tunnel...
-start "Localtunnel" cmd /k "title Localtunnel && npx localtunnel --port 5000 --local-https"
+echo ==========================================================
+echo              Khoi dong Team YOLO Labeling Hub
+echo ==========================================================
+echo.
 
-:: Khởi chạy PowerShell script bypass Execution Policy để chạy không bị chặn
+echo [INFO] Kiem tra Cloudflare Tunnel config...
+if exist "%CF_CONFIG%" (
+    echo [INFO] Cloudflare Tunnel dang dung config: "%CF_CONFIG%"
+) else (
+    echo [CANH BAO] Khong tim thay file config Cloudflare Tunnel: "%CF_CONFIG%"
+)
+
+echo [INFO] Dang khoi dong Tailwind CSS va Cloudflare Tunnel...
+start "YOLO_Tailwind_Tunnel" cmd /c "title YOLO_Tailwind_Tunnel && npm run dev -- --tunnel"
+
+echo.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0run.ps1"

@@ -1,0 +1,420 @@
+﻿diff --git a/static/js/workspace.js b/static/js/workspace.js
+index f4d7d9a..41707c1 100644
+--- a/static/js/workspace.js
++++ b/static/js/workspace.js
+@@ -39,11 +39,10 @@ class Workspace {
+                 editor.setMode('draw');
+             }
+             if (e.key.toLowerCase() === 'v') editor.setMode('select');
++            if (e.key.toLowerCase() === 'r') editor.setMode('auto_label_region');
+             if (e.key.toLowerCase() === 'f') this.toggleFlag();
+             if (e.key.toLowerCase() === 'l') this.toggleLockBox();
+             if (e.key.toLowerCase() === 'h') this.toggleImageVisibility();
+-            if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
+-
+             if (e.key.toLowerCase() === 'i') this.toggleIsolateMode();
+             if (e.key.toLowerCase() === 'a') editor.toggleStickyMove();
+ 
+@@ -174,7 +173,6 @@ class Workspace {
+ 
+     async selectImage(image) {
+         currentImage = image;
+-        document.getElementById('currentFileName').textContent = image.filename;
+ 
+         // Update Split Type Select
+         const select = document.getElementById('splitTypeSelect');
+@@ -194,15 +192,19 @@ class Workspace {
+ 
+         // Update Active Item in List
+         document.querySelectorAll('.image-item').forEach(el => {
+-            el.classList.remove('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
+-            el.classList.add('bg-surface', 'text-content-muted');
++            el.classList.remove('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold', 'bg-panel', 'border-l-2', 'border-primary', 'text-primary');
++            el.classList.add('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
+         });
+         const el = document.getElementById(`img-${image.id}`);
+         if (el) {
+-            el.classList.remove('bg-surface', 'text-content-muted');
+-            el.classList.add('bg-panel', 'border-l-2', 'border-primary', 'text-primary');
++            el.classList.remove('bg-surface', 'text-content-muted', 'border-l-0', 'border-transparent');
++            el.classList.add('bg-blue-600/30', 'border-l-4', 'border-blue-500', 'text-white', 'font-semibold');
+         }
+ 
++        // Show scroll-to-active button
++        const scrollBtn = document.getElementById('btnScrollToActive');
++        if (scrollBtn) scrollBtn.classList.remove('hidden');
++
+         // Update Flag Button
+         this.updateFlagButton();
+ 
+@@ -253,6 +255,14 @@ class Workspace {
+         });
+     }
+ 
++    scrollToActiveImage() {
++        if (!currentImage) return;
++        const el = document.getElementById(`img-${currentImage.id}`);
++        if (el) {
++            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
++        }
++    }
++
+     updateImageStats(img, boxCount) {
+         const magCanvas = document.getElementById('magnifierCanvas');
+         const magPlaceholder = document.getElementById('magPlaceholder');
+@@ -364,9 +374,9 @@ class Workspace {
+         if (typeof editor !== 'undefined') editor.toggleIsolateMode();
+     }
+ 
+-    toggleSequenceNumbers() {
++    setSequenceMode(mode) {
+         if (typeof editor !== 'undefined') {
+-            const active = editor.toggleSequenceNumbers();
++            const active = editor.setSequenceMode(mode);
+             const btn = document.getElementById('btnShowSequenceNumbers');
+             if (btn) {
+                 if (active) {
+@@ -383,6 +393,29 @@ class Workspace {
+         }
+     }
+ 
++    toggleBoxesVisibility() {
++        if (typeof editor !== 'undefined') {
++            const active = editor.toggleBoxesVisibility();
++            const btn = document.getElementById('btnHideBoxes');
++            if (btn) {
++                const icon = btn.querySelector('i');
++                if (!active) {
++                    btn.classList.add('text-red-500');
++                    btn.classList.remove('text-content-muted');
++                    if (icon) {
++                        icon.className = 'fa-solid fa-eye-slash text-lg';
++                    }
++                } else {
++                    btn.classList.remove('text-red-500');
++                    btn.classList.add('text-content-muted');
++                    if (icon) {
++                        icon.className = 'fa-solid fa-eye text-lg';
++                    }
++                }
++            }
++        }
++    }
++
+     async save(silent = false) {
+         if (!currentImage) return;
+ 
+@@ -503,6 +536,49 @@ class Workspace {
+         }
+     }
+ 
++    async autoLabelRegion(region) {
++        if (!currentImage) return;
++
++        const btn = document.getElementById('btnAutoLabelRegion');
++        let icon = null;
++        let originalClass = '';
++        if (btn) {
++            icon = btn.querySelector('i');
++            if (icon) {
++                originalClass = icon.className;
++                icon.className = 'fa-solid fa-spinner fa-spin text-lg';
++            }
++            btn.disabled = true;
++        }
++
++        try {
++            // Need to convert region to normalized coordinates relative to image
++            const normRegion = {
++                x: region.x / editor.imageWidth,
++                y: region.y / editor.imageHeight,
++                w: region.w / editor.imageWidth,
++                h: region.h / editor.imageHeight
++            };
++
++            const data = await API.autoLabel(currentImage.id, normRegion);
++            if (data.success) {
++                if (data.boxes.length > 0) {
++                    // Add the new boxes to the existing boxes
++                    data.boxes.forEach(box => {
++                        editor.addBoxToCanvas(box.class_id, box.x, box.y, box.w, box.h, true);
++                    });
++                    editor.saveState();
++                    if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
++                }
++            }
++        } catch (e) {
++            alert(e.message);
++        } finally {
++            if (icon) icon.className = originalClass;
++            if (btn) btn.disabled = false;
++        }
++    }
++
+     async autoLabelAll() {
+         if (!this.allImages) return;
+ 
+@@ -523,45 +599,69 @@ class Workspace {
+         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+         btn.disabled = true;
+ 
++        const progressContainer = document.getElementById('uploadProgressContainer');
++        const progressBar = document.getElementById('uploadProgressBar');
++        const progressText = document.getElementById('uploadProgressText');
++
++        if (progressContainer) {
++            progressContainer.classList.remove('hidden');
++            if (progressBar) progressBar.style.width = '0%';
++            if (progressText) progressText.innerText = `Auto Labeling... 0/${unlabeledImages.length}`;
++        }
++
+         let successCount = 0;
+         let failCount = 0;
++        let processedCount = 0;
+ 
+         try {
+             for (const img of unlabeledImages) {
+                 try {
+                     const data = await API.autoLabel(img.id);
+-                    if (data.success && data.boxes && data.boxes.length > 0) {
+-                        const saveData = {
+-                            image_id: img.id,
+-                            labels: data.boxes,
+-                            flag_status: img.flag_status || false
+-                        };
+-                        const saveResult = await API.saveLabel(saveData);
+-                        if (saveResult.success) {
+-                            successCount++;
+-                            img.classes = Array.from(new Set(data.boxes.map(b => b.class_id))).sort((a, b) => a - b);
+-                            img.is_labeled = true;
+-
+-                            const el = document.getElementById(`img-${img.id}`);
+-                            if (el) {
+-                                const checkIcon = el.querySelector('.fa-regular.fa-circle');
+-                                if (checkIcon) {
+-                                    checkIcon.className = 'fa-solid fa-check text-secondary';
++                    if (data.success || data.boxes) {
++                        if (data.boxes && data.boxes.length > 0) {
++                            const saveData = {
++                                image_id: img.id,
++                                labels: data.boxes,
++                                flag_status: img.flag_status || false
++                            };
++                            const saveResult = await API.saveLabel(saveData);
++                            if (saveResult.message || saveResult.success) {
++                                successCount++;
++                                img.classes = Array.from(new Set(data.boxes.map(b => b.class_id))).sort((a, b) => a - b);
++                                img.is_labeled = true;
++
++                                const el = document.getElementById(`img-${img.id}`);
++                                if (el) {
++                                    const checkIcon = el.querySelector('.fa-regular.fa-circle');
++                                    if (checkIcon) {
++                                        checkIcon.className = 'fa-solid fa-check text-secondary';
++                                    }
+                                 }
++                            } else {
++                                failCount++;
+                             }
+                         } else {
+-                            failCount++;
++                            // Inference successful but no objects found
++                            successCount++;
+                         }
+                     } else {
+-                        // Empty boxes or failed inference, optionally count as fail
++                        // Failed inference
++                        failCount++;
+                     }
+                 } catch (err) {
+                     console.error(`Failed to auto-label image ${img.id}:`, err);
+                     failCount++;
+                 }
++
++                processedCount++;
++                if (progressContainer) {
++                    const percentComplete = Math.round((processedCount / unlabeledImages.length) * 100);
++                    if (progressBar) progressBar.style.width = percentComplete + '%';
++                    if (progressText) progressText.innerText = `Auto Labeling... ${processedCount}/${unlabeledImages.length} (${percentComplete}%)`;
++                }
+             }
+ 
+-            alert(`Auto-labeled and saved ${successCount} images. ${failCount > 0 ? `Failed on ${failCount} images.` : ''}`);
++            alert(`Qu├í tr├¼nh g├ín nh├ún tß╗▒ ─æß╗Öng ho├án tß║Ñt.\nTh├ánh c├┤ng: ${successCount} ß║únh.\n${failCount > 0 ? `Thß║Ñt bß║íi: ${failCount} ß║únh.` : ''}`);
+ 
+             if (currentImage && unlabeledImages.find(img => img.id === currentImage.id)) {
+                 const updatedImg = this.allImages.find(img => img.id === currentImage.id);
+@@ -572,6 +672,9 @@ class Workspace {
+         } catch (e) {
+             alert("An error occurred during bulk auto-labeling: " + e.message);
+         } finally {
++            if (progressContainer) {
++                progressContainer.classList.add('hidden');
++            }
+             btn.innerHTML = originalHtml;
+             btn.disabled = false;
+         }
+@@ -985,6 +1088,40 @@ files.download(onnx_path)
+         const files = event.target.files;
+         if (!files || files.length === 0) return;
+ 
++        // Lß║Ñy danh s├ích t├¬n file ─æang c├│ trong dß╗▒ ├ín
++        const existingFilenames = new Set((this.allImages || []).map(img => img.filename));
++        const isFolderUpload = event.target.id === 'folderUploadInput';
++
++        const formData = new FormData();
++        let addedCount = 0;
++        let skippedCount = 0;
++
++        const duplicateSuffixRegex = /\(\d+\)\.[a-zA-Z0-9]+$/;
++
++        for (let i = 0; i < files.length; i++) {
++            const file = files[i];
++            
++            // Bß╗Å qua c├íc file c├│ ─æu├┤i (1), (2)... (─æ╞░ß╗úc coi l├á file tr├╣ng)
++            if (duplicateSuffixRegex.test(file.name)) {
++                skippedCount++;
++                continue;
++            }
++
++            // Nß║┐u l├á upload folder v├á file ─æ├ú tß╗ôn tß║íi (tr├╣ng t├¬n), th├¼ bß╗Å qua
++            if (isFolderUpload && existingFilenames.has(file.name)) {
++                skippedCount++;
++                continue;
++            }
++            formData.append('files', file);
++            addedCount++;
++        }
++
++        if (addedCount === 0) {
++            alert(`─É├ú bß╗Å qua ${skippedCount} file v├¼ ─æ├ú tß╗ôn tß║íi trong dß╗▒ ├ín. Kh├┤ng c├│ file mß╗¢i n├áo ─æß╗â tß║úi l├¬n.`);
++            event.target.value = ''; // reset input
++            return;
++        }
++
+         // Find the main upload button icon to show spinner
+         const btn = document.querySelector('button[title="Upload Images"]');
+         const originalHtml = btn ? btn.innerHTML : '';
+@@ -993,19 +1130,40 @@ files.download(onnx_path)
+             btn.disabled = true;
+         }
+ 
+-        const formData = new FormData();
+-        for (let i = 0; i < files.length; i++) {
+-            formData.append('files', files[i]);
++        const progressContainer = document.getElementById('uploadProgressContainer');
++        const progressBar = document.getElementById('uploadProgressBar');
++        const progressText = document.getElementById('uploadProgressText');
++        
++        if (progressContainer) {
++            progressContainer.classList.remove('hidden');
++            if (progressBar) progressBar.style.width = '0%';
++            if (progressText) progressText.innerText = 'Uploading... 0%';
+         }
+ 
+         try {
+-            const res = await fetch(`/api/projects/${PROJECT_ID}/upload`, {
+-                method: 'POST',
+-                body: formData
+-            });
++            await new Promise((resolve, reject) => {
++                const xhr = new XMLHttpRequest();
++                xhr.open('POST', `/api/projects/${PROJECT_ID}/upload`, true);
++                
++                xhr.upload.onprogress = (event) => {
++                    if (event.lengthComputable) {
++                        const percentComplete = Math.round((event.loaded / event.total) * 100);
++                        if (progressBar) progressBar.style.width = percentComplete + '%';
++                        if (progressText) progressText.innerText = `Uploading... ${percentComplete}%`;
++                    }
++                };
+ 
+-            if (!res.ok) throw new Error('Upload failed');
+-            const data = await res.json();
++                xhr.onload = async () => {
++                    if (xhr.status >= 200 && xhr.status < 300) {
++                        resolve(JSON.parse(xhr.responseText));
++                    } else {
++                        reject(new Error('Upload failed with status ' + xhr.status));
++                    }
++                };
++
++                xhr.onerror = () => reject(new Error('Upload failed due to network error'));
++                xhr.send(formData);
++            });
+ 
+             // alert(`Tß║úi l├¬n th├ánh c├┤ng ${data.count} file.`);
+             await loadImages(true);
+@@ -1017,6 +1175,9 @@ files.download(onnx_path)
+                 btn.innerHTML = originalHtml;
+                 btn.disabled = false;
+             }
++            if (progressContainer) {
++                progressContainer.classList.add('hidden');
++            }
+             event.target.value = ''; // reset input
+         }
+     }
+@@ -1214,6 +1375,11 @@ async function loadImages(fetchFromServer = true) {
+         currentWorkspace.allImages = images;
+     }
+ 
++    const totalImageCountEl = document.getElementById('totalImageCount');
++    if (totalImageCountEl) {
++        totalImageCountEl.innerText = `(${currentWorkspace.allImages ? currentWorkspace.allImages.length : 0})`;
++    }
++
+     // Read active class filters
+     const checkboxes = document.querySelectorAll('.class-filter-checkbox');
+     const selectedClasses = Array.from(checkboxes)
+@@ -1233,8 +1399,11 @@ async function loadImages(fetchFromServer = true) {
+     if (filteredImages.length === 0) {
+         container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">Kh├┤ng c├│ ß║únh n├áo khß╗¢p vß╗¢i bß╗Ö lß╗ìc nh├ún</div>';
+     } else {
+-        container.innerHTML = filteredImages.map(img => `
+-            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-colors bg-surface text-content-muted image-item" 
++        container.innerHTML = filteredImages.map(img => {
++            const isActive = typeof currentImage !== 'undefined' && currentImage && currentImage.id === img.id;
++            const activeClasses = isActive ? 'bg-blue-600/30 border-l-4 border-blue-500 text-white font-semibold' : 'bg-surface text-content-muted border-l-0 border-transparent';
++            return `
++            <div class="px-4 py-3 cursor-pointer border-b border-border flex justify-between items-center text-sm hover:bg-panel transition-all image-item ${activeClasses}" 
+                  id="img-${img.id}" 
+                  onclick="currentWorkspace.selectImage({id: ${img.id}, filename: '${img.filename}', flag_status: '${img.flag_status}', split_type: '${img.split_type}'})">
+                 <span class="truncate pr-2 flex-1" title="${img.filename}">${img.filename}</span>
+@@ -1243,7 +1412,8 @@ async function loadImages(fetchFromServer = true) {
+                     ${img.is_labeled ? '<i class="fa-solid fa-check text-secondary"></i>' : '<i class="fa-regular fa-circle text-content-muted"></i>'}
+                 </div>
+             </div>
+-        `).join('');
++            `;
++        }).join('');
+     }
+ 
+     currentWorkspace.imageList = filteredImages;
+@@ -1560,4 +1730,25 @@ function initSplitSlider() {
+     updateUI();
+ }
+ 
+-document.addEventListener('DOMContentLoaded', initSplitSlider);
++document.addEventListener('DOMContentLoaded', () => {
++    initSplitSlider();
++
++    const dropdownContainer = document.getElementById('uploadDropdownContainer');
++    const dropdownMenu = document.getElementById('uploadDropdownMenu');
++    let hideTimeout;
++
++    if (dropdownContainer && dropdownMenu) {
++        dropdownContainer.addEventListener('mouseenter', () => {
++            clearTimeout(hideTimeout);
++            dropdownMenu.classList.remove('hidden');
++            dropdownMenu.classList.add('flex');
++        });
++
++        dropdownContainer.addEventListener('mouseleave', () => {
++            hideTimeout = setTimeout(() => {
++                dropdownMenu.classList.add('hidden');
++                dropdownMenu.classList.remove('flex');
++            }, 1500); // 1.5s delay
++        });
++    }
++});

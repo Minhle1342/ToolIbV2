@@ -1,0 +1,14 @@
+# Cấu hình Cloudflare Tunnel
+# Vui lòng thay thế <TUNNEL_UUID> bằng UUID thực tế của bạn
+tunnel: 59f3071d-7ace-412c-b2b9-67cb8539d7a5
+credentials-file: C:\Users\HP\.cloudflared\59f3071d-7ace-412c-b2b9-67cb8539d7a5.json
+
+ingress:
+  - hostname: app.toolib.com
+    service: https://localhost:5000
+    originRequest:
+      noTLSVerify: true
+  - service: http_status:404
+
+warp-routing:
+  enabled: false

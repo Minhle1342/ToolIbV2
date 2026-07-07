@@ -111,48 +111,103 @@
         }
 
         function applyTheme(theme) {
-            const isPink = theme === 'pink';
+            if (window.rainbowFrame) {
+                cancelAnimationFrame(window.rainbowFrame);
+                window.rainbowFrame = null;
+            }
+
             const root = document.documentElement;
             const body = document.body;
-            const vars = isPink ? {
-                '--color-surface-val': '#fff0f5',
-                '--color-sidebar-val': '#ffe4e1',
-                '--color-panel-val': '#ffffff',
-                '--color-border-val': '#ffb6c1',
-                '--color-primary-val': '#ff69b4',
-                '--color-secondary-val': '#ff1493',
-                '--color-accent-val': '#ff6347',
-                '--color-text-val': '#4a4a4a',
-                '--color-text-muted-val': '#8b8b8b',
-                '--color-text-inv-val': '#ffffff',
-            } : {
-                '--color-surface-val': '#0d1117',
-                '--color-sidebar-val': '#1f2937',
-                '--color-panel-val': '#111827',
-                '--color-border-val': '#374151',
-                '--color-primary-val': '#3b82f6',
-                '--color-secondary-val': '#22c55e',
-                '--color-accent-val': '#eab308',
-                '--color-text-val': '#e5e7eb',
-                '--color-text-muted-val': '#9ca3af',
-                '--color-text-inv-val': '#ffffff',
-            };
+            
+            root.dataset.theme = theme;
+            body.dataset.theme = theme;
+            body.classList.toggle('pink-mode', theme === 'pink');
+            body.classList.toggle('rainbow-mode', theme === 'rainbow');
 
-            root.dataset.theme = isPink ? 'pink' : 'dark';
-            body.classList.toggle('pink-mode', isPink);
-            body.dataset.theme = isPink ? 'pink' : 'dark';
+            if (theme === 'rainbow') {
+                const baseVars = {
+                    '--color-surface-val': '#0d1117',
+                    '--color-sidebar-val': '#1f2937',
+                    '--color-panel-val': '#111827',
+                    '--color-text-val': '#e5e7eb',
+                    '--color-text-muted-val': '#9ca3af',
+                    '--color-text-inv-val': '#ffffff',
+                };
+                Object.entries(baseVars).forEach(([name, value]) => {
+                    root.style.setProperty(name, value);
+                    body.style.setProperty(name, value);
+                });
 
-            Object.entries(vars).forEach(([name, value]) => {
-                root.style.setProperty(name, value);
-                body.style.setProperty(name, value);
-            });
+                let hue = 0;
+                function cycle() {
+                    hue = (hue + 0.5) % 360;
+                    
+                    const primary = `hsl(${hue}, 85%, 60%)`;
+                    const secondary = `hsl(${(hue + 120) % 360}, 85%, 55%)`;
+                    const accent = `hsl(${(hue + 240) % 360}, 85%, 55%)`;
+                    const border = `hsla(${hue}, 60%, 40%, 0.4)`;
 
-            localStorage.setItem('theme', isPink ? 'pink' : 'dark');
+                    root.style.setProperty('--color-primary-val', primary);
+                    body.style.setProperty('--color-primary-val', primary);
+
+                    root.style.setProperty('--color-secondary-val', secondary);
+                    body.style.setProperty('--color-secondary-val', secondary);
+
+                    root.style.setProperty('--color-accent-val', accent);
+                    body.style.setProperty('--color-accent-val', accent);
+
+                    root.style.setProperty('--color-border-val', border);
+                    body.style.setProperty('--color-border-val', border);
+
+                    window.rainbowFrame = requestAnimationFrame(cycle);
+                }
+                cycle();
+            } else {
+                const isPink = theme === 'pink';
+                const vars = isPink ? {
+                    '--color-surface-val': '#fff0f5',
+                    '--color-sidebar-val': '#ffe4e1',
+                    '--color-panel-val': '#ffffff',
+                    '--color-border-val': '#ffb6c1',
+                    '--color-primary-val': '#ff69b4',
+                    '--color-secondary-val': '#ff1493',
+                    '--color-accent-val': '#ff6347',
+                    '--color-text-val': '#4a4a4a',
+                    '--color-text-muted-val': '#8b8b8b',
+                    '--color-text-inv-val': '#ffffff',
+                } : {
+                    '--color-surface-val': '#0d1117',
+                    '--color-sidebar-val': '#1f2937',
+                    '--color-panel-val': '#111827',
+                    '--color-border-val': '#374151',
+                    '--color-primary-val': '#3b82f6',
+                    '--color-secondary-val': '#22c55e',
+                    '--color-accent-val': '#eab308',
+                    '--color-text-val': '#e5e7eb',
+                    '--color-text-muted-val': '#9ca3af',
+                    '--color-text-inv-val': '#ffffff',
+                };
+
+                Object.entries(vars).forEach(([name, value]) => {
+                    root.style.setProperty(name, value);
+                    body.style.setProperty(name, value);
+                });
+            }
+
+            localStorage.setItem('theme', theme);
         }
 
         function toggleTheme() {
-            const isPink = localStorage.getItem('theme') !== 'pink';
-            applyTheme(isPink ? 'pink' : 'dark');
+            const currentTheme = localStorage.getItem('theme') || 'dark';
+            let nextTheme = 'dark';
+            if (currentTheme === 'dark') {
+                nextTheme = 'pink';
+            } else if (currentTheme === 'pink') {
+                nextTheme = 'rainbow';
+            } else {
+                nextTheme = 'dark';
+            }
+            applyTheme(nextTheme);
         }
 
         window.toggleTheme = toggleTheme;
@@ -171,7 +226,7 @@
         }
 
         // Theme
-        applyTheme(localStorage.getItem('theme') === 'pink' ? 'pink' : 'dark');
+        applyTheme(localStorage.getItem('theme') || 'dark');
 
         // Global Toast
         window.showToast = function(message, type = 'info') {

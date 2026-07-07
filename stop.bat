@@ -1,37 +1,45 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: Đặt tiêu đề cho cửa sổ CMD
-title Dừng Team YOLO Labeling Hub
+set "NO_PAUSE=0"
+if /I "%~1"=="--no-pause" set "NO_PAUSE=1"
+
+title Dung Team YOLO Labeling Hub
 
 echo ==========================================================
-echo               Dừng Team YOLO Labeling Hub
+echo               Dung Team YOLO Labeling Hub
 echo ==========================================================
 echo.
 
-:: Tắt tiến trình Cloudflare Tunnel (cloudflared.exe) nếu đang chạy
-echo [INFO] Đang dừng Cloudflare Tunnel...
-taskkill /IM cloudflared.exe /F >nul 2>&1
+echo [INFO] Dang dung Tailwind CSS va Cloudflare Tunnel...
+taskkill /fi "windowtitle eq YOLO_Tailwind_Tunnel" /t /f >nul 2>&1
+taskkill /f /im cloudflared.exe >nul 2>&1
+echo [OK] Da dung Tailwind CSS va Cloudflare Tunnel.
 
-:: Tìm PID của tiến trình đang lắng nghe trên cổng 5000
+echo [INFO] Dang tim tien trinh dang lang nghe tren cong 5000...
 set "FOUND=0"
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":5000" ^| findstr "LISTENING"') do (
     set "FOUND=1"
-    echo [INFO] Tìm thấy tiến trình PID: %%a đang chạy trên cổng 5000.
+    echo [INFO] Tim thay tien trinh PID %%a. Dang tat...
     taskkill /PID %%a /F >nul 2>&1
     if !errorlevel! == 0 (
-        echo [OK] Đã tắt tiến trình PID %%a thành công.
+        echo [OK] Da tat tien trinh PID %%a.
     ) else (
-        echo [LỖI] Không thể tắt tiến trình PID %%a. Hãy thử chạy với quyền Admin.
+        echo [CANH BAO] Khong the tat tien trinh PID %%a.
     )
 )
 
 if "!FOUND!"=="0" (
-    echo [INFO] Không tìm thấy tiến trình nào đang chạy trên cổng 5000.
+    echo [INFO] Khong tim thay tien trinh nao dang chay tren cong 5000.
+)
+
+if "%NO_PAUSE%"=="1" (
+    endlocal & exit /b 0
 )
 
 endlocal
+
 echo.
 echo ----------------------------------------------------------
-echo Nhấn phím bất kỳ để đóng cửa sổ này...
+echo Nhan phim bat ky de dong cua so nay...
 pause >nul

@@ -906,23 +906,12 @@ def auto_label(image_id):
             img_h, img_w = img.shape[:2]
             
             for i, box in enumerate(result['boxes']):
-                # Convert normalized center coords to pixel coords
-                cx, cy, bw, bh = box['x'], box['y'], box['w'], box['h']
-                xmin = int((cx - bw / 2) * img_w)
-                ymin = int((cy - bh / 2) * img_h)
-                xmax = int((cx + bw / 2) * img_w)
-                ymax = int((cy + bh / 2) * img_h)
-                
-                # Clip to image boundaries
-                xmin = max(0, xmin)
-                ymin = max(0, ymin)
-                xmax = min(img_w, xmax)
-                ymax = min(img_h, ymax)
-                
-                if xmin >= xmax or ymin >= ymax:
+                bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
+                crop = utils.crop_bgr_with_bounds(img, bounds)
+
+                if crop is None:
                     continue
-                
-                crop = img[ymin:ymax, xmin:xmax]
+
                 cls_result = classifier.predict(crop)
                 
                 if 'error' not in cls_result:
@@ -986,23 +975,13 @@ def classify_boxes():
     results = []
     
     for i, box in enumerate(boxes):
-        cx, cy, bw, bh = box['x'], box['y'], box['w'], box['h']
-        xmin = int((cx - bw / 2) * img_w)
-        ymin = int((cy - bh / 2) * img_h)
-        xmax = int((cx + bw / 2) * img_w)
-        ymax = int((cy + bh / 2) * img_h)
-        
-        # Clip to image boundaries
-        xmin = max(0, xmin)
-        ymin = max(0, ymin)
-        xmax = min(img_w, xmax)
-        ymax = min(img_h, ymax)
-        
-        if xmin >= xmax or ymin >= ymax:
+        bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
+        crop = utils.crop_bgr_with_bounds(img, bounds)
+
+        if crop is None:
             results.append({'error': 'Invalid bounds'})
             continue
-            
-        crop = img[ymin:ymax, xmin:xmax]
+
         cls_result = classifier.predict(crop)
         
         if 'error' not in cls_result:

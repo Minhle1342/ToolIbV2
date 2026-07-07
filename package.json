@@ -7,7 +7,7 @@
     "doc": "doc"
   },
   "scripts": {
-    "dev": "tailwindcss -i static/css/input.css -o static/css/output.css --watch",
+    "dev": "node dev.js",
     "build": "tailwindcss -i static/css/input.css -o static/css/output.css --minify",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

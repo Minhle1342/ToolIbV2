@@ -1978,12 +1978,30 @@ class Workspace {
                 if (data.boxes.length > 0) {
                     // Remove existing boxes whose center falls inside the drawn region
                     // to prevent duplicate bounding boxes
+                    const regionRight = region.x + region.w;
+                    const regionBottom = region.y + region.h;
                     const existingBoxes = editor.canvas.getObjects('rect');
                     const toRemove = existingBoxes.filter(box => {
-                        const boxCenterX = box.left + (box.width * box.scaleX) / 2;
-                        const boxCenterY = box.top + (box.height * box.scaleY) / 2;
-                        return boxCenterX >= region.x && boxCenterX <= region.x + region.w &&
-                            boxCenterY >= region.y && boxCenterY <= region.y + region.h;
+                        const boxWidth = box.width * box.scaleX;
+                        const boxHeight = box.height * box.scaleY;
+                        const boxLeft = box.left;
+                        const boxTop = box.top;
+                        const boxRight = boxLeft + boxWidth;
+                        const boxBottom = boxTop + boxHeight;
+                        const boxCenterX = boxLeft + (boxWidth / 2);
+                        const boxCenterY = boxTop + (boxHeight / 2);
+                        const centerInside = (
+                            boxCenterX >= region.x && boxCenterX <= regionRight &&
+                            boxCenterY >= region.y && boxCenterY <= regionBottom
+                        );
+
+                        const overlapWidth = Math.max(0, Math.min(boxRight, regionRight) - Math.max(boxLeft, region.x));
+                        const overlapHeight = Math.max(0, Math.min(boxBottom, regionBottom) - Math.max(boxTop, region.y));
+                        const overlapArea = overlapWidth * overlapHeight;
+                        const boxArea = boxWidth * boxHeight;
+                        const overlapRatio = boxArea > 0 ? (overlapArea / boxArea) : 0;
+
+                        return centerInside || overlapRatio >= 0.5;
                     });
                     toRemove.forEach(box => editor.canvas.remove(box));
 

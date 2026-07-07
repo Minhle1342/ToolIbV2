@@ -69,7 +69,7 @@ class YOLOInference:
         new_w = int(w * ratio)
         new_h = int(h * ratio)
         
-        img_resized = cv2.resize(img, (new_w, new_h))
+        img_resized = utils.resize_image_quality(img, (new_w, new_h))
         
         # Center the resized image on a padded canvas
         pad_w = (target_w - new_w) // 2
@@ -100,32 +100,17 @@ class YOLOInference:
         offset_y = 0
         
         if region:
-            r_x = float(region.get('x', 0))
-            r_y = float(region.get('y', 0))
-            r_w = float(region.get('w', 1.0))
-            r_h = float(region.get('h', 1.0))
-            
-            # Treat as normalized if values are <= 1.0 (since normalized coords are 0.0-1.0)
-            if r_x <= 1.0 and r_y <= 1.0 and r_w <= 1.0 and r_h <= 1.0:
-                rx = int(max(0, r_x * full_w))
-                ry = int(max(0, r_y * full_h))
-                rw = int(r_w * full_w)
-                rh = int(r_h * full_h)
-            else:
-                rx = int(max(0, r_x))
-                ry = int(max(0, r_y))
-                rw = int(r_w)
-                rh = int(r_h)
-            
-            rx = min(rx, full_w - 1)
-            ry = min(ry, full_h - 1)
-            rw = min(rw, full_w - rx)
-            rh = min(rh, full_h - ry)
-            
-            if rw > 0 and rh > 0:
-                img = img[ry:ry+rh, rx:rx+rw]
-                offset_x = rx
-                offset_y = ry
+            region_bounds = utils.region_to_pixel_bounds(region, full_w, full_h)
+            if region_bounds is None:
+                return {'error': 'Invalid region bounds'}
+
+            rx1, ry1, rx2, ry2 = region_bounds
+            img = utils.crop_bgr_with_bounds(img, region_bounds)
+            if img is None:
+                return {'error': 'Invalid region crop'}
+
+            offset_x = rx1
+            offset_y = ry1
 
         # 1. Preprocess (letterbox)
         try:
@@ -210,14 +195,19 @@ class YOLOInference:
         if len(indices) > 0:
             for i in indices.flatten():
                 x, y, w, h = boxes[i]
-                
-                # Convert Top-Left Absolute to Center Normalized
-                # x, y, w, h are currently in pixels relative to orig_w, orig_h (cropped region)
-                
-                abs_x = x + offset_x
-                abs_y = y + offset_y
-                abs_w = w
-                abs_h = h
+
+                x1 = np.clip(x, 0, orig_w)
+                y1 = np.clip(y, 0, orig_h)
+                x2 = np.clip(x + w, 0, orig_w)
+                y2 = np.clip(y + h, 0, orig_h)
+
+                if x2 <= x1 or y2 <= y1:
+                    continue
+
+                abs_x = x1 + offset_x
+                abs_y = y1 + offset_y
+                abs_w = x2 - x1
+                abs_h = y2 - y1
                 
                 cx = (abs_x + abs_w / 2) / full_w
                 cy = (abs_y + abs_h / 2) / full_h
@@ -421,6 +411,48 @@ class ClassificationInference:
             print(f"[Classifier] Loaded model: {self.model_path} (input: {self.input_size}x{self.input_size})")
         except Exception as e:
             print(f"[Classifier] Error loading model: {e}")
+
+    def _square_pad(self, img):
+        h, w = img.shape[:2]
+        side = max(h, w)
+        pad_top = (side - h) // 2
+        pad_bottom = side - h - pad_top
+        pad_left = (side - w) // 2
+        pad_right = side - w - pad_left
+        return cv2.copyMakeBorder(
+            img,
+            pad_top,
+            pad_bottom,
+            pad_left,
+            pad_right,
+            borderType=cv2.BORDER_REPLICATE
+        )
+
+    def _enhance_crop(self, crop_bgr):
+        working = crop_bgr.copy()
+        h, w = working.shape[:2]
+        min_dim = min(h, w)
+
+        if min_dim < 48:
+            scale = min(3.0, max(1.0, 96.0 / max(1.0, float(min_dim))))
+            target_w = max(1, int(round(w * scale)))
+            target_h = max(1, int(round(h * scale)))
+            working = utils.resize_image_quality(working, (target_w, target_h))
+
+        if min_dim < 96:
+            working = cv2.fastNlMeansDenoisingColored(working, None, 3, 3, 7, 21)
+
+        lab = cv2.cvtColor(working, cv2.COLOR_BGR2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_channel = clahe.apply(l_channel)
+        working = cv2.cvtColor(cv2.merge((l_channel, a_channel, b_channel)), cv2.COLOR_LAB2BGR)
+
+        blur = cv2.GaussianBlur(working, (0, 0), sigmaX=1.0, sigmaY=1.0)
+        working = cv2.addWeighted(working, 1.12, blur, -0.12, 0)
+
+        working = self._square_pad(working)
+        return utils.resize_image_quality(working, (self.input_size, self.input_size))
     
     def predict(self, crop_bgr):
         """Classify a cropped BGR image (numpy array).
@@ -433,9 +465,11 @@ class ClassificationInference:
         """
         if self.session is None:
             return {'error': 'Classifier model not loaded'}
+
+        if crop_bgr is None or crop_bgr.size == 0:
+            return {'error': 'Invalid crop'}
         
-        # Resize
-        img = cv2.resize(crop_bgr, (self.input_size, self.input_size))
+        img = self._enhance_crop(crop_bgr)
         
         # BGR -> RGB, float32, normalize to 0-1
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)

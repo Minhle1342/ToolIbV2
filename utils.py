@@ -2,6 +2,7 @@ import os
 import glob
 import shutil
 import json
+import math
 import yaml
 import random
 from sqlalchemy import or_
@@ -95,6 +96,113 @@ def imread_with_exif(image_path, flags=None):
         pass  # No EXIF or PIL not available — use image as-is
 
     return img
+
+
+def resize_image_quality(img, target_size):
+    """
+    Resize with interpolation tuned for image quality:
+    - downscale: INTER_AREA
+    - upscale: INTER_CUBIC
+    """
+    if img is None:
+        return None
+
+    target_w, target_h = target_size
+    src_h, src_w = img.shape[:2]
+    if src_w <= 0 or src_h <= 0 or target_w <= 0 or target_h <= 0:
+        return img
+
+    interpolation = cv2.INTER_CUBIC if target_w > src_w or target_h > src_h else cv2.INTER_AREA
+    return cv2.resize(img, (int(target_w), int(target_h)), interpolation=interpolation)
+
+
+def clip_pixel_bounds(xmin, ymin, xmax, ymax, img_w, img_h):
+    x1 = max(0, min(img_w, int(math.floor(xmin))))
+    y1 = max(0, min(img_h, int(math.floor(ymin))))
+    x2 = max(0, min(img_w, int(math.ceil(xmax))))
+    y2 = max(0, min(img_h, int(math.ceil(ymax))))
+
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    return (x1, y1, x2, y2)
+
+
+def region_to_pixel_bounds(region, img_w, img_h):
+    if not region:
+        return None
+
+    r_x = float(region.get('x', 0))
+    r_y = float(region.get('y', 0))
+    r_w = float(region.get('w', 0))
+    r_h = float(region.get('h', 0))
+
+    if r_w <= 0 or r_h <= 0:
+        return None
+
+    is_normalized = r_x <= 1.0 and r_y <= 1.0 and r_w <= 1.0 and r_h <= 1.0
+    if is_normalized:
+        left = r_x * img_w
+        top = r_y * img_h
+        width = r_w * img_w
+        height = r_h * img_h
+    else:
+        left = r_x
+        top = r_y
+        width = r_w
+        height = r_h
+
+    return clip_pixel_bounds(left, top, left + width, top + height, img_w, img_h)
+
+
+def yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.0, min_padding_px=0):
+    cx = float(box.get('x', 0))
+    cy = float(box.get('y', 0))
+    bw = float(box.get('w', 0))
+    bh = float(box.get('h', 0))
+
+    if bw <= 0 or bh <= 0:
+        return None
+
+    is_normalized = (
+        abs(cx) <= 1.0 and abs(cy) <= 1.0 and
+        abs(bw) <= 1.0 and abs(bh) <= 1.0
+    )
+
+    if is_normalized:
+        abs_cx = cx * img_w
+        abs_cy = cy * img_h
+        abs_w = bw * img_w
+        abs_h = bh * img_h
+    else:
+        abs_cx = cx
+        abs_cy = cy
+        abs_w = bw
+        abs_h = bh
+
+    padding = max(min_padding_px, max(abs_w, abs_h) * float(padding_ratio))
+    half_w = abs_w / 2.0
+    half_h = abs_h / 2.0
+
+    return clip_pixel_bounds(
+        abs_cx - half_w - padding,
+        abs_cy - half_h - padding,
+        abs_cx + half_w + padding,
+        abs_cy + half_h + padding,
+        img_w,
+        img_h
+    )
+
+
+def crop_bgr_with_bounds(img, bounds):
+    if img is None or bounds is None:
+        return None
+
+    x1, y1, x2, y2 = bounds
+    if x2 <= x1 or y2 <= y1:
+        return None
+
+    return img[y1:y2, x1:x2].copy()
 
 def scan_and_sync_images(project):
     """
