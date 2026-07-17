@@ -91,6 +91,36 @@ def run_backend_smoke_test():
             label_path = os.path.join(p.root_path, "img_1.txt")
             assert os.path.exists(label_path), "Label should exist in the same folder"
 
+            # Unlabeled images can be exported as negative/background samples when confirmed.
+            empty_label_path = os.path.join(p.root_path, "img_2.txt")
+            with open(empty_label_path, 'w', encoding='utf-8'):
+                pass
+
+            res_with_unlabeled = utils.export_dataset({
+                'project_ids': [p.id],
+                'include_unlabeled': True
+            }, 0.8)
+            assert res_with_unlabeled['status'] == 'success'
+            assert res_with_unlabeled['stats']['total'] == 5
+            assert res_with_unlabeled['stats']['unlabeled'] == 4
+
+            exported_label_count = 0
+            empty_exported_label_count = 0
+            for split_name in ('train', 'val', 'test'):
+                labels_dir = os.path.join(res_with_unlabeled['export_path'], 'labels', split_name)
+                if not os.path.isdir(labels_dir):
+                    continue
+                for filename in os.listdir(labels_dir):
+                    if not filename.endswith('.txt'):
+                        continue
+                    exported_label_count += 1
+                    label_path = os.path.join(labels_dir, filename)
+                    if os.path.getsize(label_path) == 0:
+                        empty_exported_label_count += 1
+
+            assert exported_label_count == 5
+            assert empty_exported_label_count == 4
+
             print("Backend Logic (including Export) Verified Successfully!")
             db.session.remove()
             db.engine.dispose()

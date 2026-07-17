@@ -995,6 +995,9 @@ def export_dataset():
     if 'include_untagged' in data:
         criteria['include_untagged'] = data['include_untagged']
 
+    if 'include_unlabeled' in data:
+        criteria['include_unlabeled'] = bool(data['include_unlabeled'])
+
     if 'tagged_split_assignments' in data:
         criteria['tagged_split_assignments'] = data['tagged_split_assignments']
         

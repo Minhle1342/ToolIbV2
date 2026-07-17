@@ -21,6 +21,7 @@ class Workspace {
         this.activeTagFilterIds = [];
         this.tagFilterDraftIds = [];
         this.lastStandardViewFilter = '';
+        this.exportImages = [];
     }
 
     setupImageListDelegation() {
@@ -2174,12 +2175,59 @@ class Workspace {
         await this.save(true);
     }
 
-    openExportModal() {
+    async openExportModal() {
+        document.getElementById('exportModal').classList.remove('hidden');
         if (typeof window.updateSplitCounts === 'function') {
             window.updateSplitCounts();
         }
-        document.getElementById('exportModal').classList.remove('hidden');
-        this.onExportScopeChange();
+        await Promise.all([
+            this.refreshExportImages(),
+            this.onExportScopeChange()
+        ]);
+        if (typeof window.updateSplitCounts === 'function') {
+            window.updateSplitCounts();
+        }
+    }
+
+    async refreshExportImages() {
+        const images = await API.getImages({ project_id: PROJECT_ID });
+        if (!Array.isArray(images)) {
+            throw new Error('Unable to scan project images for export.');
+        }
+        this.exportImages = images;
+        return images;
+    }
+
+    getExportImagesForCurrentSettings(images = this.exportImages) {
+        const sourceImages = Array.isArray(images) ? images : [];
+        const scope = document.getElementById('exportScope')?.value || 'project';
+        const excludeFlagged = document.getElementById('exportExcludeFlagged')?.checked;
+        const exportModeEl = document.querySelector('input[name="exportMode"]:checked');
+        const exportMode = exportModeEl ? exportModeEl.value : 'all';
+        let filteredImages = [...sourceImages];
+
+        if (excludeFlagged) {
+            filteredImages = filteredImages.filter(img => img.flag_status !== 'Flagged');
+        }
+
+        if (scope === 'tags') {
+            const checkedTags = Array.from(document.querySelectorAll('input[name="exportTags"]:checked'))
+                .map(el => parseInt(el.value, 10));
+            if (checkedTags.length === 0) return [];
+            filteredImages = filteredImages.filter(img =>
+                Array.isArray(img.tags) && img.tags.some(tag => checkedTags.includes(parseInt(tag.id, 10)))
+            );
+        } else if (scope === 'current') {
+            filteredImages = currentImage
+                ? filteredImages.filter(img => String(img.id) === String(currentImage.id))
+                : [];
+        }
+
+        if (exportMode === 'tagged_only') {
+            filteredImages = filteredImages.filter(img => Array.isArray(img.tags) && img.tags.length > 0);
+        }
+
+        return filteredImages;
     }
 
     async onExportScopeChange() {
@@ -2242,12 +2290,6 @@ class Workspace {
             return;
         }
 
-        const splits = {
-            train: trainSplit / 100.0,
-            val: valSplit / 100.0,
-            test: testSplit / 100.0
-        };
-
         const yoloVersion = document.getElementById('exportFormat').value;
 
         const criteria = {};
@@ -2293,12 +2335,43 @@ class Workspace {
             criteria.has_any_tag = true;
         }
 
-        const btn = document.querySelector('#exportModal button:last-child');
+        const btn = document.getElementById('btnExecuteExport');
         const originalText = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning...';
         btn.disabled = true;
 
         try {
+            const scannedImages = await this.refreshExportImages();
+            const exportImages = this.getExportImagesForCurrentSettings(scannedImages);
+            const unlabeledImages = exportImages.filter(img => img.is_labeled !== true);
+            let includeUnlabeled = false;
+
+            if (unlabeledImages.length > 0) {
+                const previewLimit = 8;
+                const preview = unlabeledImages
+                    .slice(0, previewLimit)
+                    .map(img => `- ${img.filename}`)
+                    .join('\n');
+                const remaining = unlabeledImages.length - previewLimit;
+                const moreText = remaining > 0 ? `\n... và ${remaining} ảnh khác` : '';
+
+                includeUnlabeled = window.confirm(
+                    `Phát hiện ${unlabeledImages.length} ảnh không có nhãn hợp lệ ` +
+                    `(thiếu file .txt, file rỗng hoặc không có bounding box hợp lệ):\n\n` +
+                    `${preview}${moreText}\n\n` +
+                    'Nhấn OK để xuất các ảnh này như ảnh nền cho mô hình AI Vision học.\n' +
+                    'Nhấn Cancel để chỉ xuất các ảnh đã có nhãn.'
+                );
+
+                if (!includeUnlabeled && unlabeledImages.length === exportImages.length) {
+                    alert('Không có ảnh đã gán nhãn để xuất.');
+                    return;
+                }
+            }
+
+            criteria.include_unlabeled = includeUnlabeled;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Exporting...';
+
             const res = await fetch('/api/export', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -4032,33 +4105,11 @@ function initSplitSlider() {
 
         window.updateSplitCounts = function () {
             let total = 0;
-            if (currentWorkspace && currentWorkspace.allImages) {
-                const scopeEl = document.getElementById('exportScope');
-                const excludeFlagged = document.getElementById('exportExcludeFlagged')?.checked;
-
-                let filteredImages = currentWorkspace.allImages.filter(img => img.is_labeled === true);
-
-                if (excludeFlagged) {
-                    filteredImages = filteredImages.filter(img => img.flag_status !== 'Flagged');
-                }
-
-                if (scopeEl && scopeEl.value === 'tags') {
-                    const checkedTags = Array.from(document.querySelectorAll('input[name="exportTags"]:checked')).map(el => parseInt(el.value));
-                    if (checkedTags.length > 0) {
-                        filteredImages = filteredImages.filter(img => {
-                            if (!img.tags || !Array.isArray(img.tags)) return false;
-                            return img.tags.some(t => checkedTags.includes(t.id));
-                        });
-                        total = filteredImages.length;
-                    } else {
-                        total = 0;
-                    }
-                } else if (scopeEl && scopeEl.value === 'current') {
-                    // For current image only
-                    total = 1;
-                } else {
-                    total = filteredImages.length;
-                }
+            if (currentWorkspace) {
+                const sourceImages = currentWorkspace.exportImages.length > 0
+                    ? currentWorkspace.exportImages
+                    : (currentWorkspace.allImages || []);
+                total = currentWorkspace.getExportImagesForCurrentSettings(sourceImages).length;
             }
 
             const trainCount = Math.round(total * trainPct / 100);

@@ -476,20 +476,22 @@ def export_dataset(criteria, splits=None, format='yolo'):
     # 2. Gather Images based on Criteria
     target_images = []
     include_untagged = criteria.get('include_untagged', False)
+    include_unlabeled = criteria.get('include_unlabeled', False)
     
     if criteria.get('image_ids'):
         # Specific images (e.g. from selection)
         target_images = Image.query.filter(Image.id.in_(criteria['image_ids'])).all()
         
     elif criteria.get('view_id'):
-        # All images in a view (labeled or not? User usually wants labeled. Let's filter labeled=True by default)
-        target_images = Image.query.filter_by(view_id=criteria['view_id'], is_labeled=True).all()
+        query = Image.query.filter_by(view_id=criteria['view_id'])
+        if not include_unlabeled:
+            query = query.filter_by(is_labeled=True)
+        target_images = query.all()
         
     elif criteria.get('tags') and criteria.get('project_ids'):
-        query = Image.query.filter(
-            Image.project_id.in_(criteria['project_ids']),
-            Image.is_labeled == True
-        )
+        query = Image.query.filter(Image.project_id.in_(criteria['project_ids']))
+        if not include_unlabeled:
+            query = query.filter(Image.is_labeled == True)
         if include_untagged:
             query = query.filter(
                 or_(
@@ -503,10 +505,10 @@ def export_dataset(criteria, splits=None, format='yolo'):
         
     elif criteria.get('project_ids'):
         # Multiple projects
-        target_images = Image.query.filter(
-            Image.project_id.in_(criteria['project_ids']), 
-            Image.is_labeled==True
-        ).all()
+        query = Image.query.filter(Image.project_id.in_(criteria['project_ids']))
+        if not include_unlabeled:
+            query = query.filter(Image.is_labeled == True)
+        target_images = query.all()
         
     # Filter out flagged images if requested
     if criteria.get('exclude_flagged', False):
@@ -538,44 +540,45 @@ def export_dataset(criteria, splits=None, format='yolo'):
         src_img_path = os.path.join(project.root_path, img.filename)
         src_label_path = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
         
-        if os.path.exists(src_img_path) and os.path.exists(src_label_path):
+        if os.path.exists(src_img_path):
             # Check if label file has at least one bounding box and get classes
             has_boxes = False
             box_count = 0
             classes_in_image = set()
-            try:
-                with open(src_label_path, 'r') as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) == 5:
-                            try:
-                                class_id = int(parts[0])
-                                x = float(parts[1])
-                                y = float(parts[2])
-                                w = float(parts[3])
-                                h = float(parts[4])
-                                if w <= 0 or h <= 0:
-                                    continue
-                                classes_in_image.add(class_id)
-                                has_boxes = True
-                                box_count += 1
-                            except ValueError:
-                                pass
-            except Exception:
-                pass
+            if os.path.exists(src_label_path):
+                try:
+                    with open(src_label_path, 'r', encoding='utf-8') as f:
+                        for line in f:
+                            parts = line.strip().split()
+                            if len(parts) == 5:
+                                try:
+                                    class_id = int(parts[0])
+                                    x = float(parts[1])
+                                    y = float(parts[2])
+                                    w = float(parts[3])
+                                    h = float(parts[4])
+                                    if w <= 0 or h <= 0:
+                                        continue
+                                    classes_in_image.add(class_id)
+                                    has_boxes = True
+                                    box_count += 1
+                                except ValueError:
+                                    pass
+                except (OSError, UnicodeError):
+                    pass
 
-            if has_boxes:
+            if has_boxes or include_unlabeled:
                 all_images.append({
                     'image_obj': img,
                     'img_path': src_img_path,
-                    'label_path': src_label_path,
+                    'label_path': src_label_path if has_boxes else None,
                     'filename': f"{img.project_id}_{img.filename}", # Prefix to avoid collision
                     'box_count': box_count,
                     'classes': list(classes_in_image)
                 })
 
     if not all_images:
-        return {'status': 'error', 'message': 'No valid labeled images found.'}
+        return {'status': 'error', 'message': 'No valid images found.'}
 
     forced_assignments = criteria.get('tagged_split_assignments') or {}
     forced_ids_by_split = {
@@ -683,8 +686,17 @@ def export_dataset(criteria, splits=None, format='yolo'):
             item['image_obj'].split_type = split_name
             # Copy Image
             shutil.copy(item['img_path'], os.path.join(base_export_dir, paths['images'], item['filename']))
-            # Copy Label
-            shutil.copy(item['label_path'], os.path.join(base_export_dir, paths['labels'], os.path.splitext(item['filename'])[0] + '.txt'))
+            # Negative/background samples use an empty YOLO label file.
+            destination_label = os.path.join(
+                base_export_dir,
+                paths['labels'],
+                os.path.splitext(item['filename'])[0] + '.txt'
+            )
+            if item['label_path']:
+                shutil.copy(item['label_path'], destination_label)
+            else:
+                with open(destination_label, 'w', encoding='utf-8'):
+                    pass
 
     copy_files(train_set, 'train')
     copy_files(val_set, 'val')
@@ -756,6 +768,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
         'export_path': base_export_dir,
         'stats': {
             'total': len(all_images),
+            'unlabeled': sum(1 for item in all_images if not item['label_path']),
             'train': len(train_set),
             'val': len(val_set),
             'test': len(test_set)

@@ -1389,6 +1389,12 @@
                     </div>
                 </div>
 
+                <div class="text-xs text-content-muted bg-surface border border-border rounded px-3 py-2">
+                    <i class="fa-solid fa-circle-info text-primary mr-1"></i>
+                    Bộ đếm bao gồm tất cả ảnh trong phạm vi đã chọn. Khi xuất, hệ thống sẽ hỏi trước khi đưa ảnh
+                    chưa có nhãn vào bộ dữ liệu AI Vision.
+                </div>
+
                 <div class="relative w-full h-3 bg-surface rounded-full cursor-pointer select-none"
                     id="splitSliderContainer" style="border: 1px solid var(--border-color);">
                     <div class="absolute top-0 bottom-0 left-0 bg-purple-200 border-r border-purple-500 rounded-l-full"
@@ -1427,7 +1433,7 @@
                 <button type="button"
                     class="px-3 py-1.5 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
                     onclick="closeModal('exportModal')" data-i18n="cancel">Cancel</button>
-                <button type="button" onclick="currentWorkspace.executeExport()"
+                <button type="button" id="btnExecuteExport" onclick="currentWorkspace.executeExport()"
                     class="px-3 py-1.5 text-sm bg-secondary hover:bg-green-600 text-content-inv rounded transition-colors">
                     <i class="fa-solid fa-file-export"></i> <span data-i18n="btn_export">Export</span>
                 </button>
