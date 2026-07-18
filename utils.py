@@ -65,35 +65,47 @@ def persist_dataset_tags(project):
 
 def imread_with_exif(image_path, flags=None):
     """
-    Read an image with cv2 and apply EXIF orientation correction.
-    This ensures the image orientation matches what modern browsers display,
-    preventing bounding box drift for portrait/rotated photos.
+    Read an image with cv2 and apply EXIF orientation exactly once.
+
+    OpenCV normally applies EXIF orientation during ``imread``. Reading the
+    image that way and rotating it again from the EXIF tag causes portrait
+    images to be double-rotated, so inference coordinates no longer match the
+    browser canvas. Decode the stored pixels without automatic orientation and
+    then apply every EXIF orientation explicitly.
     """
-    if flags is not None:
-        img = cv2.imread(image_path, flags)
-    else:
-        img = cv2.imread(image_path)
+    if cv2 is None:
+        return None
+
+    read_flags = cv2.IMREAD_COLOR if flags is None else flags
+    if read_flags != cv2.IMREAD_UNCHANGED:
+        read_flags |= cv2.IMREAD_IGNORE_ORIENTATION
+
+    img = cv2.imread(image_path, read_flags)
 
     if img is None:
         return None
 
-    # Try to read EXIF orientation and rotate accordingly
     try:
         from PIL import Image as PILImage
-        pil_img = PILImage.open(image_path)
-        exif = pil_img.getexif()
-        orientation = exif.get(274)  # 274 = Orientation tag
+        with PILImage.open(image_path) as pil_img:
+            orientation = pil_img.getexif().get(274, 1)
 
-        if orientation == 3:       # 180 degrees
+        if orientation == 2:       # Mirrored horizontally
+            img = cv2.flip(img, 1)
+        elif orientation == 3:     # Rotated 180 degrees
             img = cv2.rotate(img, cv2.ROTATE_180)
-        elif orientation == 6:     # 90 degrees CW (portrait)
+        elif orientation == 4:     # Mirrored vertically
+            img = cv2.flip(img, 0)
+        elif orientation == 5:     # Mirrored across the top-left diagonal
+            img = cv2.transpose(img)
+        elif orientation == 6:     # Rotated 90 degrees clockwise
             img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
-        elif orientation == 8:     # 90 degrees CCW
+        elif orientation == 7:     # Mirrored across the top-right diagonal
+            img = cv2.flip(cv2.transpose(img), -1)
+        elif orientation == 8:     # Rotated 90 degrees counter-clockwise
             img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-        # orientation 1 = normal, no rotation needed
-        # other values (2,4,5,7) involve mirroring, very rare
-    except Exception:
-        pass  # No EXIF or PIL not available — use image as-is
+    except (OSError, ValueError, TypeError, ImportError):
+        pass  # Missing/invalid EXIF: keep the decoded pixel orientation.
 
     return img
 
