@@ -186,20 +186,21 @@ def get_projects():
 def create_project():
     data = request.json
     try:
+        dataset_root = str(utils.find_dataset_root(data['root_path']))
         new_project = Project(
             name=data['name'],
-            root_path=data['root_path']
+            root_path=dataset_root
         )
         db.session.add(new_project)
         db.session.commit()
-        
+
         # Tự động quét và đồng bộ ảnh từ thư mục ngay khi tạo project
         try:
             utils.scan_and_sync_images(new_project)
             utils.sync_dataset_tags(new_project)
         except Exception as scan_err:
             print(f"Error during auto-scanning: {scan_err}")
-            
+
         return jsonify(new_project.to_dict()), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -212,23 +213,25 @@ def update_project(project_id):
         path_changed = False
         if 'name' in data:
             project.name = data['name']
-        if 'root_path' in data and data['root_path'] != project.root_path:
-            project.root_path = data['root_path']
-            path_changed = True
-            
+        if 'root_path' in data:
+            new_root = str(utils.find_dataset_root(data['root_path']))
+            if new_root != project.root_path:
+                project.root_path = new_root
+                path_changed = True
+
         if path_changed:
             project.images.clear()
             project.views.clear()
-            
+
         db.session.commit()
-        
+
         if path_changed:
             try:
                 utils.scan_and_sync_images(project)
                 utils.sync_dataset_tags(project)
             except Exception as scan_err:
                 print(f"Error during auto-scanning in update: {scan_err}")
-                
+
         return jsonify(project.to_dict())
     except Exception as e:
         db.session.rollback()
@@ -362,15 +365,14 @@ def delete_image(image_id):
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
     try:
-        image_path = os.path.join(project.root_path, image.filename)
+        image_path = utils.resolve_image_path(project.root_path, image.filename)
         if os.path.exists(image_path):
             os.remove(image_path)
-            
-        name_no_ext = os.path.splitext(image.filename)[0]
-        label_path = os.path.join(project.root_path, f"{name_no_ext}.txt")
+
+        label_path = utils.resolve_label_path(project.root_path, image.filename)
         if os.path.exists(label_path):
             os.remove(label_path)
-            
+
         db.session.delete(image)
         db.session.commit()
         return jsonify({'message': 'Image deleted successfully'})
@@ -384,19 +386,18 @@ def batch_delete_images():
     image_ids = data.get('image_ids', [])
     if not image_ids:
         return jsonify({'message': 'No images specified'}), 200
-        
+
     deleted_count = 0
     try:
         images = Image.query.filter(Image.id.in_(image_ids)).all()
         for image in images:
             project = Project.query.get(image.project_id)
             if project:
-                image_path = os.path.join(project.root_path, image.filename)
+                image_path = utils.resolve_image_path(project.root_path, image.filename)
                 if os.path.exists(image_path):
                     os.remove(image_path)
-                    
-                name_no_ext = os.path.splitext(image.filename)[0]
-                label_path = os.path.join(project.root_path, f"{name_no_ext}.txt")
+
+                label_path = utils.resolve_label_path(project.root_path, image.filename)
                 if os.path.exists(label_path):
                     os.remove(label_path)
             db.session.delete(image)
@@ -430,10 +431,10 @@ def upload_folder():
     safe_project_name = safe_project_name.replace(' ', '_')
     if not safe_project_name:
         safe_project_name = 'default_project'
-        
+
     upload_dir = os.path.abspath(os.path.join('uploads', safe_project_name, 'images'))
     os.makedirs(upload_dir, exist_ok=True)
-    
+
     files = request.files.getlist('files')
     saved_count = 0
     for file in files:
@@ -444,7 +445,7 @@ def upload_folder():
                 dest_path = os.path.join(upload_dir, basename)
                 file.save(dest_path)
                 saved_count += 1
-                
+
     return jsonify({
         'status': 'success',
         'absolute_path': upload_dir,
@@ -456,7 +457,7 @@ def upload_project_images(project_id):
     project = Project.query.get_or_404(project_id)
     files = request.files.getlist('files')
     skip_sync = request.form.get('skip_sync', 'false').lower() == 'true'
-    
+
     saved_count = 0
     for file in files:
         if file.filename:
@@ -466,14 +467,14 @@ def upload_project_images(project_id):
                 dest_path = os.path.join(project.root_path, basename)
                 file.save(dest_path)
                 saved_count += 1
-                
+
     if saved_count > 0 and not skip_sync:
         try:
             utils.scan_and_sync_images(project)
             utils.sync_dataset_tags(project)
         except Exception as scan_err:
             print(f"Error during auto-scanning in upload: {scan_err}")
-            
+
     return jsonify({
         'status': 'success',
         'count': saved_count
@@ -485,11 +486,11 @@ def create_view():
     data = request.json
     view_name = data['name']
     project_id = data['project_id']
-    
+
     existing_view = View.query.filter_by(name=view_name, project_id=project_id).first()
     if existing_view:
         return jsonify(existing_view.to_dict()), 200
-        
+
     new_view = View(name=view_name, project_id=project_id)
     db.session.add(new_view)
     db.session.commit()
@@ -501,8 +502,8 @@ def assign_view():
     # data: { view_id, count, strategy='random'|'sequential', assign_mode='both'|'labeled'|'unlabeled' ... }
     data = request.json
     count = utils.assign_images_to_view(
-        data['view_id'], 
-        data.get('count', 0), 
+        data['view_id'],
+        data.get('count', 0),
         data.get('project_id'),
         data.get('assign_mode', 'both')
     )
@@ -518,7 +519,7 @@ def delete_view(view_id):
         images = Image.query.filter_by(view_id=view.id).all()
         for img in images:
             img.view_id = None
-        
+
         db.session.delete(view)
         db.session.commit()
         return jsonify({'message': 'View deleted successfully'})
@@ -534,7 +535,7 @@ def get_images():
     flag_status = request.args.get('flag_status')
     is_labeled = request.args.get('is_labeled')
     has_any_tag = request.args.get('has_any_tag')
-    
+
     query = Image.query
     if project_id:
         query = query.filter_by(project_id=project_id)
@@ -544,30 +545,30 @@ def get_images():
         query = query.filter_by(flag_status=flag_status)
     if has_any_tag is not None and has_any_tag.lower() in ('true', '1', 'yes'):
         query = query.filter(Image.tags.any())
-    
+
     is_reviewed = request.args.get('is_reviewed')
     if is_reviewed is not None:
         if is_reviewed.lower() == 'true':
             query = query.filter_by(is_reviewed=True)
         elif is_reviewed.lower() == 'false':
             query = query.filter_by(is_reviewed=False)
-    
+
     images = query.all()
     result = []
-    
+
     projects_cache = {}
     db_changed = False
-    
+
     for img in images:
         if img.project_id not in projects_cache:
             projects_cache[img.project_id] = Project.query.get(img.project_id)
         project = projects_cache[img.project_id]
-        
+
         has_coords = False
         classes = []
         boxes = []
         if project:
-            label_file = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
+            label_file = utils.resolve_label_path(project.root_path, img.filename)
             if os.path.exists(label_file):
                 try:
                     with open(label_file, 'r', encoding='utf-8') as f:
@@ -595,27 +596,27 @@ def get_images():
                                     pass
                 except Exception:
                     pass
-                    
+
         # Sync DB column
         if img.is_labeled != has_coords:
             img.is_labeled = has_coords
             db_changed = True
-            
+
         # Apply the is_labeled filter dynamically
         if is_labeled is not None:
             if is_labeled.lower() == 'true' and not has_coords:
                 continue
             elif is_labeled.lower() == 'false' and has_coords:
                 continue
-                
+
         d = img.to_dict()
         d['classes'] = sorted(list(set(classes)))
         d['boxes'] = boxes
         result.append(d)
-        
+
     if db_changed:
         db.session.commit()
-        
+
     return jsonify(result)
 
 @api_bp.route('/labels/<int:image_id>', methods=['GET'])
@@ -629,16 +630,16 @@ def batch_review():
     data = request.json
     image_ids = data.get('image_ids', [])
     is_reviewed = data.get('is_reviewed', True)
-    
+
     if not image_ids:
         return jsonify({'message': 'No images to update'}), 200
-        
+
     db.session.query(Image).filter(Image.id.in_(image_ids)).update(
         {Image.is_reviewed: is_reviewed},
         synchronize_session=False
     )
     db.session.commit()
-    
+
     return jsonify({'message': f'Successfully updated {len(image_ids)} images'})
 
 @api_bp.route('/save', methods=['POST'])
@@ -646,11 +647,13 @@ def save_label():
     data = request.json
     # data: { image_id, labels: [...], flag_status, save_time }
     image = Image.query.get_or_404(data['image_id'])
-    
+
     save_time = data.get('save_time', 0)
     project = Project.query.get(image.project_id)
-    label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
-    
+    label_file = utils.resolve_label_path(project.root_path, image.filename)
+    import os
+    os.makedirs(os.path.dirname(label_file), exist_ok=True)
+
     # Kiểm tra thời gian save mới nhất (check newest save time)
     if os.path.exists(label_file) and save_time > 0:
         file_mtime = os.path.getmtime(label_file) * 1000 # convert to ms
@@ -660,10 +663,10 @@ def save_label():
     # Clear tọa độ của bounding box trước đó (clear previous bounding box coordinates)
     if os.path.exists(label_file):
         open(label_file, 'w').close()
-        
+
     # Gọi đến hàm save() để lưu tọa độ của bounding box mới nhất
     saved_count = utils.save_yolo_label(image, data['labels'])
-    
+
     image.is_labeled = saved_count > 0
     if 'flag_status' in data:
         image.flag_status = data['flag_status']
@@ -671,7 +674,7 @@ def save_label():
         image.split_type = data['split_type']
     if 'is_reviewed' in data:
         image.is_reviewed = data['is_reviewed']
-    
+
     db.session.commit()
     return jsonify({
         'message': 'Saved successfully',
@@ -684,22 +687,23 @@ def serve_image(image_id):
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
     # Check if absolute path
-    return flask.send_from_directory(project.root_path, image.filename)
+    real_img_path = utils.resolve_image_path(project.root_path, image.filename)
+    return flask.send_file(real_img_path)
 
 @api_bp.route('/projects/<int:project_id>/classes', methods=['GET', 'POST'])
 def handle_project_classes(project_id):
     project = Project.query.get_or_404(project_id)
     classes = utils.get_classes(project)
-    
+
     if request.method == 'POST':
         data = request.json
         new_class_name = data.get('name')
         if not new_class_name:
             return jsonify({'error': 'Class name is required'}), 400
-        
+
         if new_class_name in classes:
             return jsonify({'error': 'Class already exists', 'class_id': classes.index(new_class_name)}), 400
-        
+
         classes.append(new_class_name)
         utils.save_classes(project, classes)
         return jsonify({'message': 'Class added', 'class_id': len(classes) - 1, 'classes': classes}), 201
@@ -710,29 +714,29 @@ def handle_project_classes(project_id):
 def get_class_examples(project_id):
     project = Project.query.get_or_404(project_id)
     classes = utils.get_classes(project)
-    
+
     labeled_images = Image.query.filter_by(project_id=project_id, is_labeled=True).all()
     examples = {}
-    
+
     for img in labeled_images:
         labels = utils.read_yolo_label(img)
         for label in labels:
             cid = str(label['class_id'])
             if cid not in examples:
                 examples[cid] = []
-            
+
             if len(examples[cid]) < 10:
                 examples[cid].append({
                     'filename': img.filename,
                     'image_id': img.id,
                     'bbox': [label['x'], label['y'], label['w'], label['h']]
                 })
-            
+
         # Optimization: break if all classes have at least 10 examples
         all_full = len(examples) == len(classes) and all(len(v) == 10 for v in examples.values())
         if all_full:
             break
-            
+
     return jsonify({
         'classes': classes,
         'examples': examples
@@ -743,21 +747,21 @@ def delete_project_class(project_id, class_idx):
     import os
     project = Project.query.get_or_404(project_id)
     classes = utils.get_classes(project)
-    
+
     if class_idx < 0 or class_idx >= len(classes):
         return jsonify({'error': 'Invalid class index'}), 400
-    
+
     classes.pop(class_idx)
     utils.save_classes(project, classes)
-    
+
     # Update all label files in the project to remove boxes with deleted class and shift indexes
     images = Image.query.filter_by(project_id=project.id).all()
     for image in images:
-        label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+        label_file = utils.resolve_label_path(project.root_path, image.filename)
         if os.path.exists(label_file):
             with open(label_file, 'r') as f:
                 lines = f.readlines()
-            
+
             new_lines = []
             for line in lines:
                 parts = line.strip().split()
@@ -779,7 +783,7 @@ def delete_project_class(project_id, class_idx):
                     cid -= 1 # Shift index down
                 parts[0] = str(cid)
                 new_lines.append(' '.join(parts))
-            
+
             with open(label_file, 'w') as f:
                 if new_lines:
                     f.write('\n'.join(new_lines) + '\n')
@@ -837,7 +841,7 @@ def merge_project_classes(project_id):
     updated_boxes = 0
 
     for image in images:
-        label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+        label_file = utils.resolve_label_path(project.root_path, image.filename)
         if not os.path.exists(label_file):
             continue
 
@@ -899,7 +903,7 @@ def merge_project_classes(project_id):
 
     # Phase 3: Compact class IDs in label files
     for image in images:
-        label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+        label_file = utils.resolve_label_path(project.root_path, image.filename)
         if not os.path.exists(label_file):
             continue
 
@@ -982,13 +986,13 @@ def export_dataset():
         criteria['view_id'] = data['view_id']
     if 'image_ids' in data:
         criteria['image_ids'] = data['image_ids']
-    
+
     if 'tags' in data:
         criteria['tags'] = data['tags']
-        
+
     if 'exclude_flagged' in data:
         criteria['exclude_flagged'] = data['exclude_flagged']
-        
+
     if 'has_any_tag' in data:
         criteria['has_any_tag'] = data['has_any_tag']
 
@@ -1000,13 +1004,13 @@ def export_dataset():
 
     if 'tagged_split_assignments' in data:
         criteria['tagged_split_assignments'] = data['tagged_split_assignments']
-        
+
     # Default to 'yolo' if not specified
     export_fmt = data.get('format', 'yolo')
-    
+
     # Get splits or default
     splits = data.get('splits', {'train': 80, 'val': 20, 'test': 0})
-        
+
     try:
         result = utils.export_dataset(criteria, splits=splits, format=export_fmt)
         status_code = 200 if result.get('status') == 'success' else 400
@@ -1035,14 +1039,14 @@ def export_dataset():
 def auto_label(image_id):
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
-    
+
     # Construct full image path
-    image_path = os.path.join(project.root_path, image.filename)
-    
+    image_path = utils.resolve_image_path(project.root_path, image.filename)
+
     engine = get_inference_engine()
     if not engine:
         return jsonify({'error': 'No active AI model found or model file missing.'}), 400
-    
+
     region = None
     if request.is_json:
         data = request.get_json()
@@ -1050,10 +1054,10 @@ def auto_label(image_id):
             region = data['region']
 
     result = engine.predict(image_path, region=region)
-    
+
     if 'error' in result:
         return jsonify(result), 400
-    
+
     # --- Classifier re-labeling ---
     # If a classifier is active, crop each detected box and re-classify
     classifier = get_classifier_engine()
@@ -1064,7 +1068,7 @@ def auto_label(image_id):
         img = utils.imread_with_exif(image_path)
         if img is not None:
             img_h, img_w = img.shape[:2]
-            
+
             for i, box in enumerate(result['boxes']):
                 bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
                 crop = utils.crop_bgr_with_bounds(img, bounds)
@@ -1073,7 +1077,7 @@ def auto_label(image_id):
                     continue
 
                 cls_result = classifier.predict(crop)
-                
+
                 if 'error' not in cls_result:
                     old_class_id = box['class_id']
                     predicted_name = cls_result.get('class_name')
@@ -1088,7 +1092,7 @@ def auto_label(image_id):
                             project_classes.append(predicted_name)
                             utils.save_classes(project, project_classes)
                             project_class_id = len(project_classes) - 1
-                    
+
                     box['class_id'] = project_class_id
                     box['cls_confidence'] = cls_result['confidence']
                     box['cls_class_name'] = predicted_name
@@ -1100,7 +1104,7 @@ def auto_label(image_id):
         import sys
         sys.stderr.write(f"[AutoLabel] No Classifier active - using YOLO classes only.\n")
         sys.stderr.flush()
-        
+
     return jsonify(result)
 
 @api_bp.route('/classify-boxes', methods=['POST'])
@@ -1108,32 +1112,32 @@ def classify_boxes():
     """Classify specific bounding boxes on an image using the active Classifier model."""
     import cv2
     import sys
-    
+
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
-        
+
     image_id = data.get('image_id')
     boxes = data.get('boxes')  # list of {x, y, w, h} (YOLO format)
-    
+
     if not image_id or not boxes:
         return jsonify({'error': 'image_id and boxes are required'}), 400
-        
+
     classifier = get_classifier_engine()
     if not classifier:
         return jsonify({'error': 'Không có mô hình Classifier nào đang active.'}), 400
-        
+
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
-    image_path = os.path.join(project.root_path, image.filename)
-    
+    image_path = utils.resolve_image_path(project.root_path, image.filename)
+
     img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
-        
+
     img_h, img_w = img.shape[:2]
     results = []
-    
+
     for i, box in enumerate(boxes):
         bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
         crop = utils.crop_bgr_with_bounds(img, bounds)
@@ -1143,7 +1147,7 @@ def classify_boxes():
             continue
 
         cls_result = classifier.predict(crop)
-        
+
         if 'error' not in cls_result:
             predicted_name = cls_result.get('class_name')
             project_classes = utils.get_classes(project)
@@ -1157,11 +1161,11 @@ def classify_boxes():
                     project_classes.append(predicted_name)
                     utils.save_classes(project, project_classes)
                     project_class_id = len(project_classes) - 1
-            
+
             cls_result['class_id'] = project_class_id
-            
+
         results.append(cls_result)
-        
+
     return jsonify({'success': True, 'results': results})
 
 # ============================================================
@@ -1747,7 +1751,7 @@ def run_collect_project_crops_job(app, job_id, project_id, reset_project=True):
 
             for image_index, image in enumerate(images, start=1):
                 update_crop_job(job_id, current_image=image.filename, message=f'Cropping {image.filename}')
-                image_path = os.path.join(project.root_path, image.filename)
+                image_path = utils.resolve_image_path(project.root_path, image.filename)
                 img = utils.imread_with_exif(image_path)
                 if img is None:
                     skipped += 1
@@ -1814,55 +1818,55 @@ def collect_crop():
     """Crop a bounding box region from an image and save it for classifier retraining."""
     import cv2
     from datetime import datetime as dt
-    
+
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
-    
+
     image_id = data.get('image_id')
     box = data.get('box')  # {x, y, w, h} in YOLO normalized format
     class_name = data.get('class_name', '').strip()
-    
+
     if not image_id or not box or not class_name:
         return jsonify({'error': 'image_id, box, and class_name are required'}), 400
-    
+
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
-    image_path = os.path.join(project.root_path, image.filename)
-    
+    image_path = utils.resolve_image_path(project.root_path, image.filename)
+
     img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
-    
+
     img_h, img_w = img.shape[:2]
-    
+
     # Convert YOLO normalized to pixel coords
     cx, cy, bw, bh = float(box['x']), float(box['y']), float(box['w']), float(box['h'])
     xmin = int(max(0, (cx - bw / 2) * img_w))
     ymin = int(max(0, (cy - bh / 2) * img_h))
     xmax = int(min(img_w, (cx + bw / 2) * img_w))
     ymax = int(min(img_h, (cy + bh / 2) * img_h))
-    
+
     if xmin >= xmax or ymin >= ymax:
         return jsonify({'error': 'Invalid bounding box dimensions'}), 400
-    
+
     crop = img[ymin:ymax, xmin:xmax]
-    
+
     # Save to classification_crops/<class_name>/
     class_dir = os.path.join(CROPS_DIR, class_name)
     os.makedirs(class_dir, exist_ok=True)
-    
+
     timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
     # Use image filename stem + timestamp for uniqueness
     img_stem = os.path.splitext(image.filename)[0].replace('/', '_').replace('\\', '_')
     crop_filename = f"crop_{img_stem}_{timestamp}_{len(os.listdir(class_dir)):04d}.jpg"
     crop_path = os.path.join(class_dir, crop_filename)
-    
+
     cv2.imwrite(crop_path, crop)
-    
+
     # Count total crops for this class
     total_class = len([f for f in os.listdir(class_dir) if f.endswith(('.jpg', '.png', '.jpeg'))])
-    
+
     return jsonify({
         'success': True,
         'class_name': class_name,
@@ -1875,54 +1879,54 @@ def collect_crop_batch():
     """Crop all bounding boxes from an image and save them for classifier retraining."""
     import cv2
     from datetime import datetime as dt
-    
+
     data = request.json
     if not data:
         return jsonify({'error': 'No data provided'}), 400
-    
+
     image_id = data.get('image_id')
     boxes = data.get('boxes')  # [{class_name, x, y, w, h}, ...]
-    
+
     if not image_id or not boxes:
         return jsonify({'error': 'image_id and boxes are required'}), 400
-    
+
     image = Image.query.get_or_404(image_id)
     project = Project.query.get(image.project_id)
-    image_path = os.path.join(project.root_path, image.filename)
-    
+    image_path = utils.resolve_image_path(project.root_path, image.filename)
+
     img = utils.imread_with_exif(image_path)
     if img is None:
         return jsonify({'error': f'Could not load image: {image_path}'}), 400
-    
+
     img_h, img_w = img.shape[:2]
     timestamp = dt.now().strftime('%Y%m%d_%H%M%S')
     img_stem = os.path.splitext(image.filename)[0].replace('/', '_').replace('\\', '_')
-    
+
     collected = 0
     for i, box in enumerate(boxes):
         class_name = box.get('class_name', '').strip()
         if not class_name:
             continue
-        
+
         cx, cy, bw, bh = float(box['x']), float(box['y']), float(box['w']), float(box['h'])
         xmin = int(max(0, (cx - bw / 2) * img_w))
         ymin = int(max(0, (cy - bh / 2) * img_h))
         xmax = int(min(img_w, (cx + bw / 2) * img_w))
         ymax = int(min(img_h, (cy + bh / 2) * img_h))
-        
+
         if xmin >= xmax or ymin >= ymax:
             continue
-        
+
         crop = img[ymin:ymax, xmin:xmax]
-        
+
         class_dir = os.path.join(CROPS_DIR, class_name)
         os.makedirs(class_dir, exist_ok=True)
-        
+
         count = len(os.listdir(class_dir))
         crop_filename = f"crop_{img_stem}_{timestamp}_{count:04d}_box{i}.jpg"
         cv2.imwrite(os.path.join(class_dir, crop_filename), crop)
         collected += 1
-    
+
     return jsonify({
         'success': True,
         'collected': collected,
@@ -1985,7 +1989,7 @@ def collect_crops_stats():
         class_name = record['class_name']
         stats[class_name] = stats.get(class_name, 0) + 1
         total += 1
-    
+
     return jsonify({
         'stats': stats,
         'total': total,
@@ -2013,7 +2017,7 @@ def collect_crops_export():
     records = list(iter_collected_crop_records() or [])
     if not records:
         return jsonify({'error': 'No crops collected yet'}), 400
-    
+
     data = request.json or {}
     val_ratio = float(data.get('val_ratio', 0.2))
     val_ratio = max(0.0, min(0.8, val_ratio))
@@ -2195,12 +2199,12 @@ def get_progress():
     for p in projects:
         p_data = p.to_dict()
         p_data['views'] = []
-        
+
         total_images = Image.query.filter_by(project_id=p.id).count()
         labeled_images = Image.query.filter_by(project_id=p.id, is_labeled=True).count()
         p_data['total_images'] = total_images
         p_data['labeled_images'] = labeled_images
-        
+
         # Unassigned progress
         unassigned_total = Image.query.filter_by(project_id=p.id, view_id=None).count()
         unassigned_labeled = Image.query.filter_by(project_id=p.id, view_id=None, is_labeled=True).count()
@@ -2208,7 +2212,7 @@ def get_progress():
             'total_images': unassigned_total,
             'labeled_images': unassigned_labeled
         }
-        
+
         views = View.query.filter_by(project_id=p.id).all()
         for v in views:
             v_dict = v.to_dict()
@@ -2222,29 +2226,29 @@ def get_progress():
             v_dict['labeled_images'] = v_labeled
             v_dict['tagged_images'] = v_tagged
             p_data['views'].append(v_dict)
-            
+
         res.append(p_data)
     return jsonify(res)
 
 @api_bp.route('/projects/<int:project_id>/assign-stats', methods=['GET'])
 def get_project_assign_stats(project_id):
     project = Project.query.get_or_404(project_id)
-    
+
     # Labeled (With Bounding Box)
     labeled_total = Image.query.filter_by(project_id=project.id, is_labeled=True).count()
     unassigned_labeled = Image.query.filter_by(project_id=project.id, view_id=None, is_labeled=True).count()
     assigned_labeled = labeled_total - unassigned_labeled
-    
+
     # Unlabeled (Without Bounding Box)
     unlabeled_total = Image.query.filter_by(project_id=project.id, is_labeled=False).count()
     unassigned_unlabeled = Image.query.filter_by(project_id=project.id, view_id=None, is_labeled=False).count()
     assigned_unlabeled = unlabeled_total - unassigned_unlabeled
-    
+
     # Total
     total_images = labeled_total + unlabeled_total
     unassigned_total = unassigned_labeled + unassigned_unlabeled
     assigned_total = assigned_labeled + assigned_unlabeled
-    
+
     return jsonify({
         'all': {'assigned': assigned_total, 'unassigned': unassigned_total},
         'labeled': {'assigned': assigned_labeled, 'unassigned': unassigned_labeled},
@@ -2257,7 +2261,7 @@ def get_model_files():
     models_dir = os.path.join(os.getcwd(), 'models')
     if not os.path.exists(models_dir):
         return jsonify([])
-    
+
     files = [f for f in os.listdir(models_dir) if f.endswith('.onnx')]
     return jsonify(files)
 
@@ -2276,7 +2280,7 @@ def get_models():
                     name = 'YOLO' + name[4:]
                 else:
                     name = name.capitalize()
-                
+
                 new_model = AIModel(
                     name=name,
                     filename=filename,
@@ -2285,14 +2289,14 @@ def get_models():
                 )
                 db.session.add(new_model)
                 db_changed = True
-        
+
         if db_changed:
             try:
                 db.session.commit()
             except Exception as e:
                 db.session.rollback()
                 print(f"Error auto-syncing models: {e}")
-        
+
         # Ensure at least one model is active if models exist
         if AIModel.query.count() > 0:
             active_exists = AIModel.query.filter_by(is_active=True).first()
@@ -2320,38 +2324,38 @@ def add_model():
         name = request.form.get('name', '').strip()
         description = request.form.get('description', '').strip()
         model_type = request.form.get('model_type', 'detection').strip()
-        
+
         if 'file' not in request.files:
             return jsonify({'error': 'Không tìm thấy file model tải lên.'}), 400
-            
+
         file = request.files['file']
         if file.filename == '':
             return jsonify({'error': 'Vui lòng chọn file .onnx.'}), 400
-            
+
         if not file.filename.endswith('.onnx'):
             return jsonify({'error': 'Định dạng file không hợp lệ. Chỉ chấp nhận file .onnx.'}), 400
-            
+
         filename = secure_filename(file.filename)
         if not filename:
             filename = file.filename
-            
+
         if not name:
             return jsonify({'error': 'Tên hiển thị không được để trống.'}), 400
-            
+
         if AIModel.query.filter_by(filename=filename).first():
             return jsonify({'error': 'File model này đã tồn tại trong danh sách. Vui lòng chọn file khác hoặc sửa model hiện tại.'}), 400
-            
+
         models_dir = os.path.join(os.getcwd(), 'models')
         os.makedirs(models_dir, exist_ok=True)
         file_path = os.path.join(models_dir, filename)
         file.save(file_path)
-        
+
         # Also save class_mapping.json if uploaded (for classification models)
         mapping_file = request.files.get('mapping_file')
         if mapping_file and mapping_file.filename:
             mapping_path = os.path.join(models_dir, 'class_mapping.json')
             mapping_file.save(mapping_path)
-        
+
         new_model = AIModel(
             name=name,
             description=description,
@@ -2386,7 +2390,7 @@ def update_model(model_id):
             file_uploaded = request.files.get('file')
             filename_val = None
             model_type = request.form.get('model_type', '').strip()
-            
+
             # Save class_mapping.json if uploaded
             mapping_file = request.files.get('mapping_file')
             if mapping_file and mapping_file.filename:
@@ -2394,42 +2398,42 @@ def update_model(model_id):
                 os.makedirs(models_dir, exist_ok=True)
                 mapping_path = os.path.join(models_dir, 'class_mapping.json')
                 mapping_file.save(mapping_path)
-            
+
         if name:
             m.name = name
         if description is not None:
             m.description = description
         if model_type:
             m.model_type = model_type
-            
+
         if file_uploaded:
             if not file_uploaded.filename.endswith('.onnx'):
                 return jsonify({'error': 'Định dạng file không hợp lệ. Chỉ chấp nhận file .onnx.'}), 400
-                
+
             filename = secure_filename(file_uploaded.filename)
             if not filename:
                 filename = file_uploaded.filename
-                
+
             # Check uniqueness excluding self
             existing = AIModel.query.filter(AIModel.filename == filename, AIModel.id != model_id).first()
             if existing:
                 return jsonify({'error': 'File model này đã được gán cho một model khác trong danh sách.'}), 400
-                
+
             models_dir = os.path.join(os.getcwd(), 'models')
             os.makedirs(models_dir, exist_ok=True)
             file_path = os.path.join(models_dir, filename)
             file_uploaded.save(file_path)
-            
+
             m.filename = filename
         elif filename_val:
             existing = AIModel.query.filter(AIModel.filename == filename_val, AIModel.id != model_id).first()
             if existing:
                 return jsonify({'error': 'File model này đã được gán cho một model khác trong danh sách.'}), 400
             m.filename = filename_val
-            
+
         if not m.name or not m.filename:
             return jsonify({'error': 'Tên hiển thị và Tên File không được để trống.'}), 400
-            
+
         db.session.commit()
         return jsonify(m.to_dict())
     except Exception as e:
@@ -2499,7 +2503,7 @@ def activate_model(model_id):
 def test_models():
     if 'image' not in request.files:
         return jsonify({'error': 'No image uploaded'}), 400
-        
+
     image_file = request.files['image']
     model_ids = request.form.get('model_ids') # comma separated
     conf_threshold = request.form.get('conf_threshold', default=0.25, type=float)
@@ -2509,13 +2513,13 @@ def test_models():
 
     conf_threshold = min(max(conf_threshold, 0.0), 1.0)
     iou_threshold = min(max(iou_threshold, 0.0), 1.0)
-        
+
     import tempfile
     import uuid
     temp_dir = tempfile.gettempdir()
     temp_path = os.path.join(temp_dir, f"{uuid.uuid4().hex}_{image_file.filename}")
     image_file.save(temp_path)
-    
+
     results = {}
     try:
         for mid in model_ids.split(','):
@@ -2534,27 +2538,27 @@ def test_models():
                             iou_threshold=iou_threshold
                         )
                         duration_ms = (time.time() - start_time) * 1000
-                        
+
                         if pred.get('success') and 'boxes' in pred:
                             import cv2
                             img = utils.imread_with_exif(temp_path)
                             img_h, img_w = img.shape[:2]
-                            
+
                             predictions = []
                             for box in pred['boxes']:
                                 cx = box['x']
                                 cy = box['y']
                                 bw = box['w']
                                 bh = box['h']
-                                
+
                                 x_min = int((cx - bw / 2) * img_w)
                                 y_min = int((cy - bh / 2) * img_h)
                                 x_max = int((cx + bw / 2) * img_w)
                                 y_max = int((cy + bh / 2) * img_h)
-                                
+
                                 class_id = box['class_id']
                                 class_name = engine.class_names.get(class_id, f"Class {class_id}")
-                                
+
                                 predictions.append({
                                     'bbox': [x_min, y_min, x_max, y_max],
                                     'class_name': class_name,
@@ -2572,7 +2576,7 @@ def test_models():
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
-            
+
     return jsonify(results)
 
 # --- Tags ---
@@ -2594,11 +2598,11 @@ def create_tag(project_id):
     color = data.get('color', '#3b82f6')
     if not name:
         return jsonify({'error': 'Name is required'}), 400
-    
+
     existing = Tag.query.filter_by(project_id=project_id, name=name).first()
     if existing:
         return jsonify({'error': 'Tag already exists'}), 400
-        
+
     tag = Tag(name=name, project_id=project_id, color=color)
     db.session.add(tag)
     db.session.commit()
@@ -2617,7 +2621,7 @@ def update_tag(tag_id):
         tag.name = data['name']
     if 'color' in data:
         tag.color = data['color']
-        
+
     db.session.commit()
     utils.persist_dataset_tags(project)
     return jsonify(tag.to_dict())
@@ -2641,12 +2645,12 @@ def set_image_tags(image_id):
     project = Project.query.get_or_404(image.project_id)
     data = request.json
     tag_ids = data.get('tag_ids', [])
-    
+
     tags = Tag.query.filter(Tag.id.in_(tag_ids), Tag.project_id == image.project_id).all()
     image.tags = tags
     db.session.commit()
     utils.persist_dataset_tags(project)
-    
+
     return jsonify({'message': 'Tags updated', 'tags': [t.to_dict() for t in image.tags]})
 
 @api_bp.route('/projects/<int:project_id>/images_paginated', methods=['GET'])
@@ -2654,14 +2658,14 @@ def get_images_paginated(project_id):
     Project.query.get_or_404(project_id)
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 50, type=int)
-    
+
     if limit > 200:
         limit = 200
-        
+
     query = Image.query.filter_by(project_id=project_id)
     total = query.count()
     images = query.offset((page - 1) * limit).limit(limit).all()
-    
+
     return jsonify({
         'total': total,
         'page': page,
@@ -2676,14 +2680,14 @@ def bulk_assign_tags(project_id):
     image_ids = data.get('image_ids', []) # Can be "all" or list of ids
     tag_ids = data.get('tag_ids', [])
     action = data.get('action', 'assign') # assign, unassign, set
-    
+
     tags = Tag.query.filter(Tag.id.in_(tag_ids), Tag.project_id == project_id).all()
-    
+
     if image_ids == 'all':
         images = Image.query.filter_by(project_id=project_id).all()
     else:
         images = Image.query.filter(Image.id.in_(image_ids), Image.project_id == project_id).all()
-        
+
     for image in images:
         if action == 'set':
             image.tags = list(tags)
@@ -2695,7 +2699,7 @@ def bulk_assign_tags(project_id):
             for t in tags:
                 if t in image.tags:
                     image.tags.remove(t)
-                    
+
     db.session.commit()
     utils.persist_dataset_tags(project)
     return jsonify({'message': f'Bulk tags updated for {len(images)} images', 'success': True})
@@ -2708,11 +2712,11 @@ def backup_project(project_id):
     project = Project.query.get_or_404(project_id)
     backup_dir = os.path.join(os.getcwd(), 'project_backup')
     os.makedirs(backup_dir, exist_ok=True)
-    
+
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     backup_filename = f"backup_{project.id}_{project.name}_{timestamp}.zip"
     backup_path = os.path.join(backup_dir, backup_filename)
-    
+
     try:
         if os.path.exists(project.root_path):
             with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -2731,10 +2735,10 @@ def backup_project(project_id):
 def get_project_backups(project_id):
     project = Project.query.get_or_404(project_id)
     backup_dir = os.path.join(os.getcwd(), 'project_backup')
-    
+
     if not os.path.exists(backup_dir):
         return jsonify([])
-        
+
     backups = []
     prefix = f"backup_{project.id}_"
     for file in os.listdir(backup_dir):
@@ -2747,7 +2751,7 @@ def get_project_backups(project_id):
                 'size': size,
                 'created_at': created_at
             })
-            
+
     # Sort by created_at descending
     backups.sort(key=lambda x: x['created_at'], reverse=True)
     return jsonify(backups)
@@ -2758,29 +2762,29 @@ def restore_project(project_id):
     project = Project.query.get_or_404(project_id)
     data = request.json
     filename = data.get('filename')
-    
+
     if not filename:
         return jsonify({'error': 'Filename is required'}), 400
-        
+
     backup_path = os.path.join(os.getcwd(), 'project_backup', filename)
-    
+
     if not os.path.exists(backup_path):
         return jsonify({'error': 'Backup file not found'}), 404
-        
+
     try:
         if os.path.exists(project.root_path):
             shutil.rmtree(project.root_path)
         os.makedirs(project.root_path, exist_ok=True)
-        
+
         with zipfile.ZipFile(backup_path, 'r') as zipf:
             zipf.extractall(project.root_path)
-            
+
         try:
             utils.scan_and_sync_images(project)
             utils.sync_dataset_tags(project)
         except Exception as scan_err:
             print(f"Error during auto-scanning in restore: {scan_err}")
-            
+
         return jsonify({'message': 'Restore successful'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2794,7 +2798,7 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
         raise ValueError("Merged project name is required.")
     if not root_path or not root_path.strip():
         raise ValueError("Destination folder path is required.")
-    
+
     allowed_policies = {'rename', 'skip', 'overwrite'}
     if collision_policy not in allowed_policies:
         raise ValueError(f"Invalid collision policy: {collision_policy}")
@@ -2825,10 +2829,11 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
     all_source_images = Image.query.filter(Image.project_id.in_(project_ids)).all()
     all_source_images.sort(key=lambda img: (project_order.get(img.project_id, 999), img.id))
 
-    # Group images by lowercase filename to identify collisions
+    # Group images by lowercase basename to identify collisions
     by_name = {}
     for img in all_source_images:
-        norm_name = img.filename.lower()
+        import pathlib
+        norm_name = pathlib.Path(img.filename).name.lower()
         if norm_name not in by_name:
             by_name[norm_name] = []
         by_name[norm_name].append(img)
@@ -2840,7 +2845,7 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
     duplicate_groups = []
     missing_files = []
     warnings = []
-    
+
     planned_dest_names = set()
 
     def get_unique_dest_name(filename, project_id, planned_set):
@@ -2857,7 +2862,7 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
         # First check duplicate groups
         if len(img_list) > 1:
             duplicate_groups.append({
-                'filename': img_list[0].filename,
+                'filename': norm_name,
                 'occurrences': [
                     {
                         'project_id': img.project_id,
@@ -2868,31 +2873,34 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
                 ]
             })
 
+        import pathlib
         # Process each image / collision
         if len(img_list) == 1:
             img = img_list[0]
             src_project = Project.query.get(img.project_id)
-            src_path = os.path.join(src_project.root_path, img.filename)
+            src_path = utils.resolve_image_path(src_project.root_path, img.filename)
             if not os.path.exists(src_path):
                 missing_files.append({
                     'project_id': img.project_id,
                     'project_name': src_project.name,
                     'filename': img.filename
                 })
+
+            dest_fn = f"{img.project_id}_{img.id}_{pathlib.Path(img.filename).name}"
             plans.append({
                 'action': 'copy',
                 'image': img,
-                'dest_filename': img.filename,
+                'dest_filename': dest_fn,
                 'source_path': src_path,
                 'project_id': img.project_id
             })
-            planned_dest_names.add(img.filename.lower())
+            planned_dest_names.add(dest_fn.lower())
         else:
             first_img = img_list[0]
             # Collect missing files for all duplicates
             for img in img_list:
                 src_proj = Project.query.get(img.project_id)
-                src_p = os.path.join(src_proj.root_path, img.filename)
+                src_p = utils.resolve_image_path(src_proj.root_path, img.filename)
                 if not os.path.exists(src_p):
                     missing_files.append({
                         'project_id': img.project_id,
@@ -2901,27 +2909,17 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
                     })
 
             if collision_policy == 'rename':
-                # First one copied with original name
-                src_proj = Project.query.get(first_img.project_id)
-                plans.append({
-                    'action': 'copy',
-                    'image': first_img,
-                    'dest_filename': first_img.filename,
-                    'source_path': os.path.join(src_proj.root_path, first_img.filename),
-                    'project_id': first_img.project_id
-                })
-                planned_dest_names.add(first_img.filename.lower())
-
-                # Subsequent ones renamed
-                for img in img_list[1:]:
+                # All ones copied with unique names (which they natively have now)
+                for img in img_list:
                     src_proj = Project.query.get(img.project_id)
-                    dest_fn = get_unique_dest_name(img.filename, img.project_id, planned_dest_names)
-                    renamed_file_count += 1
+                    dest_fn = f"{img.project_id}_{img.id}_{pathlib.Path(img.filename).name}"
+                    if img != first_img:
+                        renamed_file_count += 1
                     plans.append({
                         'action': 'copy',
                         'image': img,
                         'dest_filename': dest_fn,
-                        'source_path': os.path.join(src_proj.root_path, img.filename),
+                        'source_path': utils.resolve_image_path(src_proj.root_path, img.filename),
                         'project_id': img.project_id
                     })
                     planned_dest_names.add(dest_fn.lower())
@@ -2929,14 +2927,15 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
             elif collision_policy == 'skip':
                 # First one copied
                 src_proj = Project.query.get(first_img.project_id)
+                dest_fn = f"{first_img.project_id}_{first_img.id}_{pathlib.Path(first_img.filename).name}"
                 plans.append({
                     'action': 'copy',
                     'image': first_img,
-                    'dest_filename': first_img.filename,
-                    'source_path': os.path.join(src_proj.root_path, first_img.filename),
+                    'dest_filename': dest_fn,
+                    'source_path': utils.resolve_image_path(src_proj.root_path, first_img.filename),
                     'project_id': first_img.project_id
                 })
-                planned_dest_names.add(first_img.filename.lower())
+                planned_dest_names.add(dest_fn.lower())
 
                 # Others skipped
                 for img in img_list[1:]:
@@ -2959,14 +2958,15 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
                 # Last one copied
                 last_img = img_list[-1]
                 src_proj = Project.query.get(last_img.project_id)
+                dest_fn = f"{last_img.project_id}_{last_img.id}_{pathlib.Path(last_img.filename).name}"
                 plans.append({
                     'action': 'copy',
                     'image': last_img,
-                    'dest_filename': last_img.filename,
-                    'source_path': os.path.join(src_proj.root_path, last_img.filename),
+                    'dest_filename': dest_fn,
+                    'source_path': utils.resolve_image_path(src_proj.root_path, last_img.filename),
                     'project_id': last_img.project_id
                 })
-                planned_dest_names.add(last_img.filename.lower())
+                planned_dest_names.add(dest_fn.lower())
 
     # Warnings
     if os.path.exists(root_path):
@@ -2975,7 +2975,7 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
                 warnings.append("Thư mục đích đã tồn tại và không trống. Các file trùng có thể bị ghi đè.")
         except Exception:
             pass
-            
+
     # Calculate final image count
     final_image_count = sum(1 for p in plans if p['action'] == 'copy')
     total_images = len(all_source_images)
@@ -3086,20 +3086,23 @@ def merge_projects():
         for p_item in plan['plans']:
             if p_item['action'] != 'copy':
                 continue
-            
+
             img = p_item['image']
             dest_fn = p_item['dest_filename']
             source_img_path = p_item['source_path']
-            dest_img_path = os.path.join(dest_path, dest_fn)
+            dest_img_path = utils.resolve_image_path(dest_path, dest_fn)
 
             # Copy Image File
             if os.path.exists(source_img_path):
+                import pathlib
+                pathlib.Path(dest_img_path).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(source_img_path, dest_img_path)
                 copied_files.append(dest_img_path)
-            
+
             # Copy and remap label file
-            source_lbl_path = os.path.splitext(source_img_path)[0] + '.txt'
-            dest_lbl_path = os.path.splitext(dest_img_path)[0] + '.txt'
+            src_proj = Project.query.get(p_item['project_id'])
+            source_lbl_path = utils.resolve_label_path(src_proj.root_path, img.filename)
+            dest_lbl_path = utils.resolve_label_path(dest_path, dest_fn)
             is_labeled = False
 
             if os.path.exists(source_lbl_path):
@@ -3116,7 +3119,7 @@ def merge_projects():
                                 h = float(parts[4])
                                 if w <= 0 or h <= 0:
                                     continue
-                                
+
                                 new_class_id = plan['class_map'][img.project_id].get(class_id)
                                 if new_class_id is not None:
                                     labels.append({
@@ -3129,6 +3132,8 @@ def merge_projects():
                             except ValueError:
                                 pass
                 if labels:
+                    import pathlib
+                    pathlib.Path(dest_lbl_path).parent.mkdir(parents=True, exist_ok=True)
                     with open(dest_lbl_path, 'w', encoding='utf-8') as f:
                         for lbl in labels:
                             f.write(f"{lbl['class_id']} {lbl['x']} {lbl['y']} {lbl['w']} {lbl['h']}\n")
@@ -3145,7 +3150,7 @@ def merge_projects():
                 split_type=img.split_type
             )
             db.session.add(new_img)
-            
+
             # Associate tags
             for tag in img.tags:
                 new_img.tags.append(new_tags_by_name[tag.name])

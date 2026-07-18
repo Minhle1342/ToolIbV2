@@ -19,8 +19,8 @@ class DummyDB:
     session = Session()
 
 import utils
-utils.db = DummyDB()
-
-p = DummyProject(r"D:\TestcoYaml")
-count = utils.scan_and_sync_images(p)
-print("Added count:", count)
+if __name__ == "__main__":
+    utils.db = DummyDB()
+    p = DummyProject(r"D:\TestcoYaml")
+    count = utils.scan_and_sync_images(p)
+    print("Added count:", count)

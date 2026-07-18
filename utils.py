@@ -18,6 +18,59 @@ except ImportError:
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp'}
 
+import pathlib
+
+def find_dataset_root(selected_path):
+    path = pathlib.Path(selected_path).resolve()
+    for current in [path] + list(path.parents):
+        if (current / 'data.yaml').exists() or (current / 'data.yml').exists():
+            images_dir = current / 'images'
+            try:
+                path.relative_to(images_dir)
+                return current
+            except ValueError:
+                pass
+            if path == current:
+                return current
+    return path
+
+def safe_resolve_under_root(root, relative_path):
+    root_path = pathlib.Path(root).resolve()
+    rel_path = pathlib.Path(relative_path)
+    if rel_path.is_absolute():
+        raise ValueError(f"Absolute paths are not allowed: {relative_path}")
+    candidate = (root_path / rel_path).resolve()
+    try:
+        candidate.relative_to(root_path)
+    except ValueError:
+        raise ValueError(f"Path traversal detected: {relative_path}")
+    return candidate
+
+def resolve_image_path(project_root, image_filename):
+    return str(safe_resolve_under_root(project_root, image_filename))
+
+def resolve_label_path(project_root, image_filename):
+    root_path = pathlib.Path(project_root).resolve()
+    rel_path = pathlib.Path(image_filename)
+    if rel_path.is_absolute():
+        raise ValueError(f"Absolute paths not allowed: {image_filename}")
+    parts = list(rel_path.parts)
+    try:
+        idx = next(i for i, part in enumerate(parts) if part.lower() == 'images')
+        parts[idx] = 'labels'
+        parts[-1] = rel_path.stem + '.txt'
+        candidate_rel = pathlib.Path(*parts)
+        candidate = (root_path / candidate_rel).resolve()
+        candidate.relative_to(root_path)
+        return str(candidate)
+    except StopIteration:
+        pass
+    candidate_rel = rel_path.with_suffix('.txt')
+    candidate = (root_path / candidate_rel).resolve()
+    candidate.relative_to(root_path)
+    return str(candidate)
+
+
 
 def get_dataset_tags_path(project):
     return os.path.join(project.root_path, 'dataset_tags.json')
@@ -204,84 +257,179 @@ def crop_bgr_with_bounds(img, bounds):
 
     return img[y1:y2, x1:x2].copy()
 
-def scan_and_sync_images(project):
-    """
-    Scans project.root_path for images.
-    Adds new images to DB.
-    Checks for existing corresponding .txt label files and sets is_labeled=True.
-    Returns number of new images added.
-    """
-    if not os.path.exists(project.root_path):
-        return 0
+def check_label_coords(label_file):
+    if not os.path.exists(label_file):
+        return False
+    try:
+        with open(label_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                parts = line.strip().split()
+                if len(parts) == 5:
+                    try:
+                        int(parts[0])
+                        float(parts[1])
+                        float(parts[2])
+                        width = float(parts[3])
+                        height = float(parts[4])
+                        if width > 0 and height > 0:
+                            return True
+                    except ValueError:
+                        pass
+    except Exception:
+        pass
+    return False
 
-    # Auto-generate or overwrite classes.txt from data.yaml if it exists
-    classes_file = os.path.join(project.root_path, 'classes.txt')
+def scan_and_sync_images(project):
+    scan_root = pathlib.Path(project.root_path)
+
+    # 0. Check data.yaml for classes
+    import yaml
     for yaml_name in ['data.yaml', 'data.yml']:
-        yaml_path = os.path.join(project.root_path, yaml_name)
-        if os.path.exists(yaml_path):
+        yaml_path = scan_root / yaml_name
+        if yaml_path.exists():
             try:
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     data = yaml.safe_load(f)
-                    if data and 'names' in data:
-                        names = data['names']
-                        if isinstance(names, dict):
-                            names = [str(names[k]) for k in sorted(names.keys())]
-                        elif isinstance(names, list):
-                            names = [str(n) for n in names]
-                        with open(classes_file, 'w', encoding='utf-8') as cf:
-                            cf.write('\n'.join(names))
+                if data and 'names' in data:
+                    names = data['names']
+                    if isinstance(names, dict):
+                        classes = [names[k] for k in sorted(names.keys())]
+                    elif isinstance(names, list):
+                        classes = names
+                    else:
+                        classes = None
+                    if classes:
+                        save_classes(project, classes)
                         break
             except Exception as e:
-                print(f"Error parsing {yaml_name}: {e}")
+                print(f"Error reading {yaml_name}: {e}")
+    images_subdir = scan_root / 'images'
+    start_dir = images_subdir if images_subdir.is_dir() else scan_root
 
-    db_images_by_filename = {img.filename: img for img in project.images}
-    existing_images = set(db_images_by_filename.keys())
-    new_images_count = 0
-    
-    # Scan folder
-    for root, dirs, files in os.walk(project.root_path):
+    # 1. Collect all valid files and their relative paths
+    found_files = {} # relative_path -> full_path
+    basename_map = {} # basename -> list of relative_paths (sorted deterministically)
+
+    for root, dirs, files in os.walk(str(start_dir)):
         for file in files:
             ext = os.path.splitext(file)[1].lower()
             if ext in ALLOWED_EXTENSIONS:
-                label_file = os.path.join(root, os.path.splitext(file)[0] + '.txt')
-                
-                # Check if file has coordinate data
-                has_coords = False
-                if os.path.exists(label_file):
-                    try:
-                        with open(label_file, 'r', encoding='utf-8') as lf:
-                            for line in lf:
-                                parts = line.strip().split()
-                                if len(parts) == 5:
-                                    try:
-                                        int(parts[0])
-                                        float(parts[1])
-                                        float(parts[2])
-                                        width = float(parts[3])
-                                        height = float(parts[4])
-                                        if width <= 0 or height <= 0:
-                                            continue
-                                        has_coords = True
-                                        break
-                                    except ValueError:
-                                        pass
-                    except Exception:
-                        pass
-                
-                if file not in existing_images:
-                    new_image = Image(
-                        filename=file,
-                        project_id=project.id,
-                        is_labeled=has_coords
-                    )
-                    db.session.add(new_image)
-                    new_images_count += 1
+                full_path = pathlib.Path(root) / file
+                rel_path = full_path.relative_to(scan_root).as_posix()
+
+                found_files[rel_path] = full_path
+                basename = full_path.name
+                if basename not in basename_map:
+                    basename_map[basename] = []
+                basename_map[basename].append(rel_path)
+
+    for lst in basename_map.values():
+        lst.sort() # Deterministic order for multiple candidates
+
+    new_images_count = 0
+    try:
+        # 2. Reconcile existing records safely
+        existing_records = Image.query.filter_by(project_id=project.id).all()
+
+        # Build set of modern relative paths already in DB (for partial migration handling)
+        db_relative_paths = {img.filename for img in existing_records if '/' in img.filename or '\\' in img.filename}
+        handled_relative_paths = set(db_relative_paths)
+
+        for img in existing_records:
+            rel_path_str = img.filename
+
+            # Khởi tạo giá trị is_labeled dựa trên thực tế
+            current_label_path = resolve_label_path(str(scan_root), rel_path_str)
+            img.is_labeled = check_label_coords(current_label_path)
+
+            # Legacy record check (no slashes)
+            if '/' not in rel_path_str and '\\' not in rel_path_str:
+                basename = rel_path_str
+
+                if (scan_root / basename).is_file():
+                    # Flat legacy: File still at root -> keep it
+                    handled_relative_paths.add(basename)
+                    continue
+
+                candidates = basename_map.get(basename, [])
+                if not candidates:
+                    continue # File missing entirely, do not delete metadata
+
+                # We have candidate relative paths.
+                # Avoid UniqueConstraint if the relative path was already added in a partial migration.
+                primary_candidate = None
+                unhandled_candidates = []
+                for cand in candidates:
+                    if cand not in db_relative_paths:
+                        if primary_candidate is None:
+                            primary_candidate = cand
+                        else:
+                            unhandled_candidates.append(cand)
+
+                if primary_candidate is not None:
+                    # Update legacy record in-place to preserve metadata
+                    img.filename = primary_candidate
+                    img.is_labeled = check_label_coords(resolve_label_path(str(scan_root), primary_candidate))
+                    handled_relative_paths.add(primary_candidate)
+
+                    # Clone to remaining unhandled candidates
+                    for extra_cand in unhandled_candidates:
+                        cloned_img = Image(
+                            filename=extra_cand,
+                            project_id=img.project_id,
+                            view_id=img.view_id,
+                            is_reviewed=img.is_reviewed,
+                            flag_status=img.flag_status,
+                            split_type=img.split_type,
+                            is_labeled=check_label_coords(resolve_label_path(str(scan_root), extra_cand))
+                        )
+                        cloned_img.tags = list(img.tags) # Clone Many-to-Many
+                        db.session.add(cloned_img)
+                        handled_relative_paths.add(extra_cand)
+                        new_images_count += 1
                 else:
-                    img_obj = db_images_by_filename[file]
-                    if img_obj.is_labeled != has_coords:
-                        img_obj.is_labeled = has_coords
-    
-    db.session.commit()
+                    # Legacy basename exists but all its relative candidates ALREADY exist in DB
+                    # (Partial migration edge case). The legacy record is obsolete duplicate.
+                    # Merge metadata to the first candidate before deleting
+                    if candidates:
+                        target_cand = candidates[0]
+                        target_img = next((r for r in existing_records if r.filename == target_cand), None)
+                        if target_img:
+                            # Union tags
+                            for tag in img.tags:
+                                if tag not in target_img.tags:
+                                    target_img.tags.append(tag)
+                            # OR is_reviewed
+                            target_img.is_reviewed = target_img.is_reviewed or img.is_reviewed
+                            # Copy view_id if empty
+                            if target_img.view_id is None:
+                                target_img.view_id = img.view_id
+                            # Prefer legacy flag_status if target is Normal
+                            if target_img.flag_status == 'Normal' and img.flag_status != 'Normal':
+                                target_img.flag_status = img.flag_status
+                            # Keep split_type
+                            if not target_img.split_type and img.split_type:
+                                target_img.split_type = img.split_type
+                    db.session.delete(img)
+
+        # 3. Add brand new records not in legacy or DB
+        for rel_path in found_files:
+            if rel_path not in handled_relative_paths:
+                label_file = resolve_label_path(str(scan_root), rel_path)
+                new_image = Image(
+                    filename=rel_path,
+                    project_id=project.id,
+                    is_labeled=check_label_coords(label_file)
+                )
+                db.session.add(new_image)
+                handled_relative_paths.add(rel_path)
+                new_images_count += 1
+
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        raise e
+
     return new_images_count
 
 def sync_dataset_tags(project):
@@ -295,16 +443,16 @@ def sync_dataset_tags(project):
     try:
         with open(tags_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            
+
         project_tags = data.get('project_tags', [])
         images_data = data.get('images', {})
-        
+
         # Ensure tags exist
         tag_map = {}
         existing_tags = Tag.query.filter_by(project_id=project.id).all()
         for t in existing_tags:
             tag_map[t.name] = t
-            
+
         for pt in project_tags:
             name = pt.get('name')
             color = pt.get('color', '#3B82F6')
@@ -312,25 +460,25 @@ def sync_dataset_tags(project):
                 new_tag = Tag(name=name, color=color, project_id=project.id)
                 db.session.add(new_tag)
                 tag_map[name] = new_tag
-                
+
         db.session.commit()
-        
+
         # Assign tags to images
         db_images = Image.query.filter_by(project_id=project.id).all()
         img_dict = {img.filename: img for img in db_images}
-        
+
         for filename, tag_names in images_data.items():
             if filename in img_dict:
                 img = img_dict[filename]
                 current_tags = set(t.name for t in img.tags)
-                
+
                 for t_name in tag_names:
                     if t_name in tag_map and t_name not in current_tags:
                         img.tags.append(tag_map[t_name])
                         current_tags.add(t_name)
-                        
+
         db.session.commit()
-        
+
     except Exception as e:
         print(f"Error syncing dataset tags: {e}")
 
@@ -345,17 +493,17 @@ def assign_images_to_view(view_id, count, project_id, assign_mode='both'):
         return 0
 
     query = Image.query.filter_by(project_id=project_id, view_id=None)
-    
+
     if assign_mode == 'labeled':
         query = query.filter_by(is_labeled=True)
     elif assign_mode == 'unlabeled':
         query = query.filter_by(is_labeled=False)
 
     unassigned_images = query.limit(count).all()
-    
+
     for img in unassigned_images:
         img.view_id = view_id
-    
+
     db.session.commit()
     return len(unassigned_images)
 
@@ -365,8 +513,8 @@ def read_yolo_label(image):
     Returns list of parsed label objects.
     """
     project = Project.query.get(image.project_id)
-    label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
-    
+    label_file = resolve_label_path(project.root_path, image.filename)
+
     labels = []
     if os.path.exists(label_file):
         with open(label_file, 'r') as f:
@@ -398,8 +546,9 @@ def save_yolo_label(image, labels):
     labels: list of dicts: {'class_id', 'x', 'y', 'w', 'h'}
     """
     project = Project.query.get(image.project_id)
-    label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
-    
+    label_file = resolve_label_path(project.root_path, image.filename)
+    os.makedirs(os.path.dirname(label_file), exist_ok=True)
+
     saved_count = 0
     with open(label_file, 'w') as f:
         for label in labels:
@@ -440,16 +589,16 @@ def export_dataset(criteria, splits=None, format='yolo'):
             'val': 100 - train_pct,
             'test': 0
         }
-        
+
     # 1. Prepare Export Directory
     base_export_dir = os.path.abspath("exported_dataset")
     if os.path.exists(base_export_dir):
         shutil.rmtree(base_export_dir)
-    
+
     # Define paths based on format
     # structure map: split_name -> { 'images': rel_path, 'labels': rel_path }
     dirs_map = {}
-    
+
     if format == 'split':
         # Structure: train/images, train/labels
         dirs_map = {
@@ -472,22 +621,22 @@ def export_dataset(criteria, splits=None, format='yolo'):
             os.makedirs(os.path.join(base_export_dir, dirs_map[split]['labels']))
 
     all_images = []
-    
+
     # 2. Gather Images based on Criteria
     target_images = []
     include_untagged = criteria.get('include_untagged', False)
     include_unlabeled = criteria.get('include_unlabeled', False)
-    
+
     if criteria.get('image_ids'):
         # Specific images (e.g. from selection)
         target_images = Image.query.filter(Image.id.in_(criteria['image_ids'])).all()
-        
+
     elif criteria.get('view_id'):
         query = Image.query.filter_by(view_id=criteria['view_id'])
         if not include_unlabeled:
             query = query.filter_by(is_labeled=True)
         target_images = query.all()
-        
+
     elif criteria.get('tags') and criteria.get('project_ids'):
         query = Image.query.filter(Image.project_id.in_(criteria['project_ids']))
         if not include_unlabeled:
@@ -502,28 +651,28 @@ def export_dataset(criteria, splits=None, format='yolo'):
         else:
             query = query.filter(Image.tags.any(Tag.id.in_(criteria['tags'])))
         target_images = query.all()
-        
+
     elif criteria.get('project_ids'):
         # Multiple projects
         query = Image.query.filter(Image.project_id.in_(criteria['project_ids']))
         if not include_unlabeled:
             query = query.filter(Image.is_labeled == True)
         target_images = query.all()
-        
+
     # Filter out flagged images if requested
     if criteria.get('exclude_flagged', False):
          target_images = [img for img in target_images if img.flag_status != 'Flagged']
-         
+
     if criteria.get('has_any_tag', False):
          target_images = [img for img in target_images if len(img.tags) > 0]
-         
+
     if not target_images:
          return {'status': 'error', 'message': 'No images found matching criteria.'}
 
     # 3. Process Images
     # We need projects to resolve paths. Cache them.
     projects_cache = {}
-    
+
     class_names = []
     # Attempt to get classes from the first project available
     first_img = target_images[0]
@@ -534,12 +683,12 @@ def export_dataset(criteria, splits=None, format='yolo'):
     for img in target_images:
         if img.project_id not in projects_cache:
             projects_cache[img.project_id] = Project.query.get(img.project_id)
-        
+
         project = projects_cache[img.project_id]
-        
-        src_img_path = os.path.join(project.root_path, img.filename)
-        src_label_path = os.path.join(project.root_path, os.path.splitext(img.filename)[0] + '.txt')
-        
+
+        src_img_path = resolve_image_path(project.root_path, img.filename)
+        src_label_path = resolve_label_path(project.root_path, img.filename)
+
         if os.path.exists(src_img_path):
             # Check if label file has at least one bounding box and get classes
             has_boxes = False
@@ -568,11 +717,15 @@ def export_dataset(criteria, splits=None, format='yolo'):
                     pass
 
             if has_boxes or include_unlabeled:
+                import pathlib
+                flat_name = pathlib.Path(img.filename).name
+                export_filename = f"{img.project_id}_{img.id}_{flat_name}"
                 all_images.append({
                     'image_obj': img,
                     'img_path': src_img_path,
                     'label_path': src_label_path if has_boxes else None,
-                    'filename': f"{img.project_id}_{img.filename}", # Prefix to avoid collision
+                    'filename': export_filename,
+
                     'box_count': box_count,
                     'classes': list(classes_in_image)
                 })
@@ -623,7 +776,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
         total_images = len(all_images)
         train_pct = splits.get('train', 0) / 100.0
         val_pct = splits.get('val', 0) / 100.0
-        
+
         train_count = round(total_images * train_pct)
         val_count = round(total_images * val_pct)
         test_count = total_images - train_count - val_count
@@ -633,7 +786,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
         for img_data in all_images:
             for c in img_data['classes']:
                 class_counts[c] = class_counts.get(c, 0) + 1
-                
+
         for img_data in all_images:
             rarest_class = None
             min_count = float('inf')
@@ -642,38 +795,38 @@ def export_dataset(criteria, splits=None, format='yolo'):
                     min_count = class_counts[c]
                     rarest_class = c
             img_data['rarest_class'] = rarest_class
-            
+
         class_groups = {}
         for img_data in all_images:
             rc = img_data['rarest_class']
             if rc not in class_groups:
                 class_groups[rc] = []
             class_groups[rc].append(img_data)
-            
+
         train_set, val_set, test_set = [], [], []
-        
+
         for c, group in class_groups.items():
             random.shuffle(group)
             group_size = len(group)
             g_train = round(group_size * train_pct)
             g_val = round(group_size * val_pct)
             g_val = min(g_val, group_size - g_train)
-            
+
             train_set.extend(group[:g_train])
             val_set.extend(group[g_train:g_train + g_val])
             test_set.extend(group[g_train + g_val:])
-            
+
         # Rebalance to meet exact targets
         sets = [train_set, val_set, test_set]
         targets = [train_count, val_count, test_count]
-        
+
         for i in range(3):
             while len(sets[i]) > targets[i]:
                 for j in range(3):
                     if len(sets[j]) < targets[j]:
                         sets[j].append(sets[i].pop())
                         break
-                        
+
         random.shuffle(train_set)
         random.shuffle(val_set)
         random.shuffle(test_set)
@@ -701,27 +854,27 @@ def export_dataset(criteria, splits=None, format='yolo'):
     copy_files(train_set, 'train')
     copy_files(val_set, 'val')
     copy_files(test_set, 'test')
-    
+
     db.session.commit()
 
     # Generate data.yaml
     # Update paths in yaml to be relative to the yaml file location (base_export_dir)
     # YOLO expects paths relative to the dataset root or absolute. Relative is safer for portability.
-    
+
     # Ensure forward slashes for cross-platform compatibility in YAML
     yaml_content = {
         'path': '.', # Root relative to data.yaml
         'nc': len(class_names),
         'names': class_names
     }
-    
+
     if splits.get('train', 0) > 0:
         yaml_content['train'] = dirs_map['train']['images'].replace(os.sep, '/')
     if splits.get('val', 0) > 0:
         yaml_content['val'] = dirs_map['val']['images'].replace(os.sep, '/')
     if splits.get('test', 0) > 0:
         yaml_content['test'] = dirs_map['test']['images'].replace(os.sep, '/')
-    
+
     yaml_path = os.path.join(base_export_dir, 'data.yaml')
     with open(yaml_path, 'w', encoding='utf-8') as f:
         yaml.dump(yaml_content, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
@@ -739,7 +892,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
             pass
 
     used_tags = {}
-    
+
     for split_set in [train_set, val_set, test_set]:
         for item in split_set:
             img = item['image_obj']
@@ -754,10 +907,10 @@ def export_dataset(criteria, splits=None, format='yolo'):
                         used_tags[tag.id] = {'name': tag.name, 'color': tag.color}
                 if tag_names:
                     tags_metadata['images'][exported_filename] = tag_names
-                
+
     for tag_data in used_tags.values():
         tags_metadata['project_tags'].append(tag_data)
-        
+
     if used_tags:
         tags_json_path = os.path.join(base_export_dir, 'dataset_tags.json')
         with open(tags_json_path, 'w', encoding='utf-8') as f:
@@ -782,12 +935,12 @@ def get_classes(project):
             classes = [line.strip() for line in f.readlines() if line.strip()]
             if classes:
                 return classes
-                
+
     # If missing or empty, find max class id from all label files
     max_id = -1
-    label_files = glob.glob(os.path.join(project.root_path, '*.txt'))
-    for lf in label_files:
-        if os.path.basename(lf) == 'classes.txt':
+    for img in project.images:
+        lf = resolve_label_path(project.root_path, img.filename)
+        if not os.path.exists(lf):
             continue
         try:
             with open(lf, 'r', encoding='utf-8') as f:
@@ -808,12 +961,12 @@ def get_classes(project):
                             pass
         except Exception:
             pass
-            
+
     if max_id >= 0:
         classes = [f'Class {i}' for i in range(max_id + 1)]
     else:
         classes = ['Class 0', 'Class 1', 'Class 2', 'Class 3', 'Class 4']
-    
+
     save_classes(project, classes)
     return classes
 
@@ -829,10 +982,10 @@ def save_classes(project, classes):
             try:
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     data = yaml.safe_load(f) or {}
-                
+
                 data['names'] = classes
                 data['nc'] = len(classes)
-                
+
                 with open(yaml_path, 'w', encoding='utf-8') as f:
                     yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
             except Exception as e:
@@ -844,7 +997,7 @@ def get_image_classes(image):
     Reads the unique class IDs present in the image's label file.
     """
     project = Project.query.get(image.project_id)
-    label_file = os.path.join(project.root_path, os.path.splitext(image.filename)[0] + '.txt')
+    label_file = resolve_label_path(project.root_path, image.filename)
     classes = set()
     if os.path.exists(label_file):
         try:

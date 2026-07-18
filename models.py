@@ -78,7 +78,7 @@ class Image(db.Model):
     __tablename__ = 'images'
     
     id = db.Column(db.Integer, primary_key=True)
-    filename = db.Column(db.String(200), nullable=False)
+    filename = db.Column(db.String(500), nullable=False)
     project_id = db.Column(db.Integer, db.ForeignKey('projects.id'), nullable=False)
     view_id = db.Column(db.Integer, db.ForeignKey('views.id'), nullable=True)
     is_labeled = db.Column(db.Boolean, default=False)
