@@ -17,9 +17,10 @@ import threading
 import time
 import uuid
 import zipfile
-from datetime import datetime
-from clear_header import validate_and_rename_yolo_dataset
-import utils
+try:
+    from clear_header import validate_and_rename_yolo_dataset
+except ModuleNotFoundError:
+    from scripts.clear_header import validate_and_rename_yolo_dataset
 from inference import YOLOInference, ClassificationInference
 
 # Initialize Inference Engines

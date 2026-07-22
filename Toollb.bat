@@ -3,6 +3,7 @@ setlocal
 
 title Khoi dong Team YOLO Labeling Hub
 cd /d "%~dp0"
+chcp 65001 > nul
 set "CF_CONFIG=%~dp0config.yml"
 
 echo ==========================================================
