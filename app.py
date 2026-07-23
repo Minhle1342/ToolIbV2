@@ -136,6 +136,10 @@ def create_app(config_overrides=None):
     @app.route('/classification-datasets')
     def classification_datasets_page():
         return render_template('classification_dataset_manager.html')
+
+    @app.route('/colab-manager')
+    def colab_manager_page():
+        return render_template('colab_manager.html')
     
     
     # Initialize SocketIO

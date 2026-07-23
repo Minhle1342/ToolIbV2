@@ -1,0 +1,1271 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="h-full flex flex-col flex-1 bg-slate-950 text-slate-100 overflow-hidden min-h-0" id="colabManagerApp">
+
+    <!-- HEADER / CRUD BAR -->
+    <header class="h-16 bg-slate-900 border-b border-slate-800 px-6 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-lg text-white font-bold shadow-lg">
+                <i class="fa-solid fa-code"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-base text-white flex items-center gap-2">
+                    Google Colab Code Generator & Manager
+                    <span class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">17 YOLO Versions (Comment Explanations v5.0)</span>
+                </h1>
+                <p class="text-xs text-slate-400">Chọn 17 Phiên Bản YOLO - Tinh chỉnh Preprocessing & Augmentation - Mã Colab chứa ghi chú tác dụng từng thông số</p>
+            </div>
+        </div>
+
+        <!-- Template Selector & Action Controls -->
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5">
+                <i class="fa-solid fa-bookmark text-slate-400 text-sm"></i>
+                <label for="templateSelect" class="text-xs text-slate-300">Template:</label>
+                <select id="templateSelect" onchange="loadSelectedTemplate()" class="bg-transparent text-sm font-medium text-amber-400 focus:outline-none cursor-pointer">
+                    <!-- Dynamic Options -->
+                </select>
+            </div>
+
+            <button onclick="createNewTemplatePrompt()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+                <i class="fa-solid fa-plus text-amber-400"></i> Tạo mới
+            </button>
+            <button onclick="saveCurrentTemplate()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-2 rounded-lg font-medium transition shadow-sm flex items-center gap-1.5">
+                <i class="fa-solid fa-floppy-disk"></i> Lưu cấu hình
+            </button>
+            <button onclick="deleteCurrentTemplate()" class="bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/50 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+                <i class="fa-solid fa-trash"></i> Xóa
+            </button>
+            <button onclick="resetToDefaults()" class="bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs px-3 py-2 rounded-lg transition" title="Reset thông số mặc định">
+                <i class="fa-solid fa-rotate-left"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- MAIN SPLIT CONTENT (2 COLUMNS) -->
+    <div class="flex-1 flex min-h-0 h-full overflow-hidden">
+        
+        <!-- LEFT COLUMN: PARAMETER CONTROLS (50% Width) -->
+        <div class="w-1/2 border-r border-slate-800 bg-slate-900/50 flex flex-col h-full min-h-0">
+            <div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-amber-400"></i> Bảng Tinh Chỉnh Thông Số
+                </span>
+                <span id="paramCountBadge" class="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
+                    ⚡ Mã Colab bên phải có ghi chú # tác dụng từng thông số
+                </span>
+            </div>
+
+            <!-- Scrollable Control Form -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-6">
+                
+                <!-- SECTION 1: SELECTION OF ALL 17 YOLO VERSIONS & CHECKPOINTS -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4 shadow-sm">
+                    <h3 class="text-sm font-semibold text-amber-400 flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> 1. Chọn Phiên Bản YOLO (17 Versions)</span>
+                        <span class="text-xs font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/60" id="yolo_badge">Ultralytics Ecosystem</span>
+                    </h3>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Dropdown 1: Họ Phiên Bản YOLO (17 Versions) -->
+                        <div class="col-span-2">
+                            <label class="text-xs text-slate-300 font-semibold mb-1.5 flex items-center justify-between">
+                                <span class="flex items-center gap-1.5">
+                                    <span>Họ Phiên Bản YOLO (YOLO Version Family)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-amber-400 hover:text-amber-300 transition-colors" title="Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span class="text-[10px] text-slate-400 font-normal">Tất cả 17 phiên bản lịch sử</span>
+                            </label>
+                            <select id="yolo_family" onchange="onYoloFamilyChange()" class="w-full bg-slate-950 border border-amber-500/40 text-sm rounded-lg p-2.5 text-amber-300 font-medium focus:border-amber-400 focus:outline-none">
+                                <optgroup label="⚡ Thế hệ mới nhất (2024 - 2026)">
+                                    <option value="yolo26" selected>YOLO26 (Ultralytics End-to-End NMS-Free - 2026)</option>
+                                    <option value="yolo12">YOLO12 (Attention-Centric Architecture - 2025)</option>
+                                    <option value="yolo11">YOLO11 (Ultralytics Recommended Production Baseline - 2024)</option>
+                                    <option value="yolov10">YOLOv10 (Tsinghua University Dual NMS-Free - 2024)</option>
+                                    <option value="yolov9">YOLOv9 (Programmable Gradient Info PGI - 2024)</option>
+                                    <option value="yolo_world">YOLO-World (Real-time Open-Vocabulary / Zero-Shot - 2024)</option>
+                                </optgroup>
+                                <optgroup label="🔥 Độc quyền & Phổ biến (2021 - 2023)">
+                                    <option value="yolov8">YOLOv8 (Ultralytics Multi-Task Detection/Seg/Pose - 2023)</option>
+                                    <option value="yolo_nas">YOLO-NAS (Deci AI Neural Architecture Search - 2023)</option>
+                                    <option value="yolov7">YOLOv7 (WongKinYiu Trainable Bag-of-Freebies - 2022)</option>
+                                    <option value="yolov6">YOLOv6 (Meituan RepVGG Industrial - 2022)</option>
+                                    <option value="yolox">YOLOX (Megvii Anchor-Free Decoupled Head - 2021)</option>
+                                    <option value="pp_yoloe">PP-YOLOE (Baidu PaddleDetection - 2022)</option>
+                                </optgroup>
+                                <optgroup label="🏛️ Lịch sử & Cổ điển (2015 - 2020)">
+                                    <option value="yolov5">YOLOv5 (Ultralytics PyTorch Benchmark Classic - 2020)</option>
+                                    <option value="yolov4">YOLOv4 (AlexeyAB CSPDarknet53 - 2020)</option>
+                                    <option value="yolov3">YOLOv3 (Joseph Redmon Darknet-53 Original - 2018)</option>
+                                    <option value="yolov2">YOLOv2 / YOLO9000 (Joseph Redmon Anchor Boxes - 2016)</option>
+                                    <option value="yolov1">YOLOv1 (Joseph Redmon First Single-Stage Detector - 2015)</option>
+                                </optgroup>
+                            </select>
+                        </div>
+
+                        <!-- Dropdown 2: Dynamic Checkpoint Weights -->
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>Mô Hình Trọng Số (Checkpoint)</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.
+                                    </span>
+                                </span>
+                            </label>
+                            <select id="model_version" onchange="renderCode('model_version')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                                <!-- Dynamically populated by JS based on yolo_family -->
+                            </select>
+                        </div>
+
+                        <!-- Task Type -->
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>Task Bài Toán</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).
+                                    </span>
+                                </span>
+                            </label>
+                            <select id="task_type" onchange="renderCode('task_type')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                                <option value="detect" selected>Object Detection (Nhận diện vật thể)</option>
+                                <option value="segment">Instance Segmentation (Phân vùng)</option>
+                                <option value="classify">Image Classification (Phân loại ảnh)</option>
+                                <option value="pose">Pose Estimation (Ước lượng tư thế)</option>
+                            </select>
+                        </div>
+
+                        <!-- Epochs & Batch -->
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>Số Epochs Huấn Luyện</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="epochs" value="100" min="1" max="1000" oninput="renderCode('epochs')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                        </div>
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>Batch Size</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.
+                                    </span>
+                                </span>
+                            </label>
+                            <input type="number" id="batch_size" value="16" min="1" max="128" oninput="renderCode('batch_size')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 2: PREPROCESSING PARAMETERS -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-cyan-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <i class="fa-solid fa-crop-simple"></i> 2. Thông Số Tiền Xử Lý (Preprocessing)
+                    </h3>
+                    
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Imgsz -->
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>Target Image Size (`imgsz`)</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-cyan-400 transition-colors" title="Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.
+                                    </span>
+                                </span>
+                            </label>
+                            <select id="imgsz" onchange="renderCode('imgsz')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-cyan-500 focus:outline-none">
+                                <option value="320">320 px (Fast)</option>
+                                <option value="416">416 px</option>
+                                <option value="512">512 px</option>
+                                <option value="640" selected>640 px (Standard)</option>
+                                <option value="1024">1024 px (High Res)</option>
+                            </select>
+                        </div>
+                        <!-- Bbox format -->
+                        <div>
+                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                                <span>BBox Format</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-cyan-400 transition-colors" title="Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).
+                                    </span>
+                                </span>
+                            </label>
+                            <select id="bbox_format" onchange="renderCode('bbox_format')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-cyan-500 focus:outline-none">
+                                <option value="yolo" selected>YOLO (x_center, y_center, w, h normalized)</option>
+                                <option value="coco">COCO (x_min, y_min, w, h)</option>
+                                <option value="pascal_voc">Pascal VOC (x_min, y_min, x_max, y_max)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Toggles for Preprocessing -->
+                    <div class="grid grid-cols-2 gap-3 pt-2">
+                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                            <input type="checkbox" id="letterbox" checked onchange="renderCode('letterbox')" class="w-4 h-4 accent-cyan-500 rounded">
+                            <span class="flex items-center gap-1.5">
+                                <span>Letterbox Padding</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể.
+                                    </span>
+                                </span>
+                            </span>
+                        </label>
+
+                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                            <input type="checkbox" id="auto_orient" checked onchange="renderCode('auto_orient')" class="w-4 h-4 accent-cyan-500 rounded">
+                            <span class="flex items-center gap-1.5">
+                                <span>Auto-Orient EXIF</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.
+                                    </span>
+                                </span>
+                            </span>
+                        </label>
+
+                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                            <input type="checkbox" id="grayscale" onchange="renderCode('grayscale')" class="w-4 h-4 accent-cyan-500 rounded">
+                            <span class="flex items-center gap-1.5">
+                                <span>Ảnh Xám (Grayscale)</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.
+                                    </span>
+                                </span>
+                            </span>
+                        </label>
+
+                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                            <input type="checkbox" id="histogram_eq" onchange="renderCode('histogram_eq')" class="w-4 h-4 accent-cyan-500 rounded">
+                            <span class="flex items-center gap-1.5">
+                                <span>CLAHE Equalization</span>
+                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Cân bằng biểu đồ độ sáng cục bộ. Tăng tương phản và làm nổi bật chi tiết ở vùng quá tối hoặc bị lóa sáng.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        Cân bằng biểu đồ độ sáng cục bộ. Tăng tương phản và làm nổi bật chi tiết ở vùng quá tối hoặc bị lóa sáng.
+                                    </span>
+                                </span>
+                            </span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- SECTION 3: GEOMETRIC AUGMENTATIONS -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-emerald-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <i class="fa-solid fa-shapes"></i> 3. Tăng Cường Hình Học (Geometric Augmentations)
+                    </h3>
+
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Rotation Angle (`degrees`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_degrees" class="text-emerald-400 font-mono font-bold">0.0°</span>
+                            </div>
+                            <input type="range" id="degrees" min="0" max="180" step="0.5" value="0.0" oninput="updateSlider('degrees', '°', 'degrees')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Translation (`translate`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau (Spatial Invariance).">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau (Spatial Invariance).
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_translate" class="text-emerald-400 font-mono font-bold">0.10</span>
+                            </div>
+                            <input type="range" id="translate" min="0" max="0.9" step="0.05" value="0.10" oninput="updateSlider('translate', '', 'translate')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Scaling Gain (`scale`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_scale" class="text-emerald-400 font-mono font-bold">0.50</span>
+                            </div>
+                            <input type="range" id="scale" min="0" max="0.9" step="0.05" value="0.50" oninput="updateSlider('scale', '', 'scale')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Shear Angle (`shear`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_shear" class="text-emerald-400 font-mono font-bold">0.0°</span>
+                            </div>
+                            <input type="range" id="shear" min="0" max="45" step="1" value="0" oninput="updateSlider('shear', '°', 'shear')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4 pt-2">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Horizontal Flip (`fliplr`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú của dữ liệu tự nhiên.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú của dữ liệu tự nhiên.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_fliplr" class="text-emerald-400 font-mono font-bold">0.50</span>
+                            </div>
+                            <input type="range" id="fliplr" min="0" max="1" step="0.05" value="0.50" oninput="updateSlider('fliplr', '', 'fliplr')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Vertical Flip (`flipud`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_flipud" class="text-emerald-400 font-mono font-bold">0.00</span>
+                            </div>
+                            <input type="range" id="flipud" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('flipud', '', 'flipud')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 4: HSV COLOR AUGMENTATIONS -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-purple-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <i class="fa-solid fa-palette"></i> 4. Tăng Cường Màu Sắc HSV (Color Space)
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>HSV Hue (`hsv_h`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu).">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu).
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_hsv_h" class="text-purple-400 font-mono font-bold">0.015</span>
+                            </div>
+                            <input type="range" id="hsv_h" min="0" max="0.5" step="0.005" value="0.015" oninput="updateSlider('hsv_h', '', 'hsv_h')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>HSV Saturation (`hsv_s`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_hsv_s" class="text-purple-400 font-mono font-bold">0.70</span>
+                            </div>
+                            <input type="range" id="hsv_s" min="0" max="1" step="0.05" value="0.70" oninput="updateSlider('hsv_s', '', 'hsv_s')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>HSV Value / Brightness (`hsv_v`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_hsv_v" class="text-purple-400 font-mono font-bold">0.40</span>
+                            </div>
+                            <input type="range" id="hsv_v" min="0" max="1" step="0.05" value="0.40" oninput="updateSlider('hsv_v', '', 'hsv_v')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 5: ADVANCED COMPOSITE AUGMENTATIONS -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> 5. Tăng Cường Nâng Cao (Mosaic, Mixup, Erasing)
+                    </h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Mosaic Augmentation (`mosaic`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_mosaic" class="text-rose-400 font-mono font-bold">1.00</span>
+                            </div>
+                            <input type="range" id="mosaic" min="0" max="1" step="0.05" value="1.00" oninput="updateSlider('mosaic', '', 'mosaic')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>MixUp Augmentation (`mixup`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_mixup" class="text-rose-400 font-mono font-bold">0.00</span>
+                            </div>
+                            <input type="range" id="mixup" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('mixup', '', 'mixup')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Copy-Paste Augmentation (`copy_paste`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho Instance Segmentation.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho Instance Segmentation.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_copy_paste" class="text-rose-400 font-mono font-bold">0.00</span>
+                            </div>
+                            <input type="range" id="copy_paste" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('copy_paste', '', 'copy_paste')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Random Erasing / Cutout (`erasing`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_erasing" class="text-rose-400 font-mono font-bold">0.40</span>
+                            </div>
+                            <input type="range" id="erasing" min="0" max="0.9" step="0.05" value="0.40" oninput="updateSlider('erasing', '', 'erasing')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION 6: ALBUMENTATIONS PIPELINE INTEGRATION -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-amber-300 flex items-center gap-2 border-b border-slate-800 pb-2">
+                        <i class="fa-solid fa-layer-group"></i> 6. Tích Hợp Albumentations Pipeline
+                    </h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>Blur Limit (`blur_limit`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-300 transition-colors" title="Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_blur_limit" class="text-amber-300 font-mono font-bold">0</span>
+                            </div>
+                            <input type="range" id="blur_limit" min="0" max="15" step="1" value="0" oninput="updateSlider('blur_limit', '', 'blur_limit')" class="w-full accent-amber-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                    <span>CLAHE Limit (`clahe_limit`)</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-300 transition-colors" title="Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).">
+                                        <i class="fa-solid fa-circle-question text-xs"></i>
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                            Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).
+                                        </span>
+                                    </span>
+                                </span>
+                                <span id="val_clahe_limit" class="text-amber-300 font-mono font-bold">0.0</span>
+                            </div>
+                            <input type="range" id="clahe_limit" min="0" max="8" step="0.5" value="0.0" oninput="updateSlider('clahe_limit', '', 'clahe_limit')" class="w-full accent-amber-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- RIGHT COLUMN: FULL-HEIGHT REAL-TIME COLAB CODE DISPLAY (50% Width) -->
+        <div class="w-1/2 bg-slate-950 flex flex-col flex-1 h-full min-h-0 min-w-0">
+            <!-- Header Bar with Copy, Font Size & Export Buttons -->
+            <div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+                <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-2">
+                    <i class="fa-brands fa-python"></i> Real-time Google Colab Script
+                </span>
+                <div class="flex items-center gap-2">
+                    <!-- Font Size Controls -->
+                    <div class="flex items-center border border-slate-700 bg-slate-950 rounded-md overflow-hidden mr-1">
+                        <button onclick="changeFontSize(-1)" class="px-2 py-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition text-xs font-bold" title="Giảm cỡ chữ (Font size)">
+                            A-
+                        </button>
+                        <span id="fontSizeDisplay" class="px-2 text-xs font-mono text-amber-300 border-x border-slate-800 font-semibold">15px</span>
+                        <button onclick="changeFontSize(1)" class="px-2 py-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition text-xs font-bold" title="Tăng cỡ chữ (Font size)">
+                            A+
+                        </button>
+                    </div>
+
+                    <button onclick="copyColabCode()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
+                        <i class="fa-regular fa-copy"></i> Sao chép Mã
+                    </button>
+                    <button onclick="exportPythonScript()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-download"></i> Xuất File (.py)
+                    </button>
+                    <button onclick="exportJupyterNotebook()" class="bg-teal-600 hover:bg-teal-500 text-white text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-code"></i> Xuất Notebook (.ipynb)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Full-Height Real-time Code View Container -->
+            <div id="codeViewContainer" class="flex-1 h-full min-h-0 overflow-y-auto p-6 bg-slate-950 text-slate-100 font-mono leading-relaxed selection:bg-amber-500 selection:text-slate-950">
+                <div id="colabCodeBlock" class="w-full min-h-full font-mono whitespace-pre-wrap leading-relaxed text-[15px]"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toastNotification" class="fixed bottom-5 right-5 bg-emerald-600 text-white text-xs font-medium px-4 py-3 rounded-lg shadow-xl border border-emerald-400 flex items-center gap-2 transform translate-y-20 opacity-0 transition-all duration-300 pointer-events-none z-50">
+        <i class="fa-solid fa-circle-check text-base"></i>
+        <span id="toastMessage">Đã sao chép mã thành công!</span>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        let currentFontSize = 15;
+
+        function changeFontSize(delta) {
+            currentFontSize = Math.min(Math.max(currentFontSize + delta, 12), 24);
+            document.getElementById('fontSizeDisplay').textContent = `${currentFontSize}px`;
+            document.getElementById('colabCodeBlock').style.fontSize = `${currentFontSize}px`;
+        }
+
+        const YOLO_CHECKPOINTS_MAP = {
+            "yolo26": [
+                { name: "YOLO26 Nano (yolo26n.pt)", val: "yolo26n.pt" },
+                { name: "YOLO26 Small (yolo26s.pt)", val: "yolo26s.pt" },
+                { name: "YOLO26 Medium (yolo26m.pt)", val: "yolo26m.pt" },
+                { name: "YOLO26 Large (yolo26l.pt)", val: "yolo26l.pt" },
+                { name: "YOLO26 Extra Large (yolo26x.pt)", val: "yolo26x.pt" }
+            ],
+            "yolo12": [
+                { name: "YOLO12 Nano (yolov12n.pt)", val: "yolov12n.pt" },
+                { name: "YOLO12 Small (yolov12s.pt)", val: "yolov12s.pt" },
+                { name: "YOLO12 Medium (yolov12m.pt)", val: "yolov12m.pt" },
+                { name: "YOLO12 Large (yolov12l.pt)", val: "yolov12l.pt" },
+                { name: "YOLO12 Extra Large (yolov12x.pt)", val: "yolov12x.pt" }
+            ],
+            "yolo11": [
+                { name: "YOLO11 Nano (yolo11n.pt)", val: "yolo11n.pt" },
+                { name: "YOLO11 Small (yolo11s.pt)", val: "yolo11s.pt" },
+                { name: "YOLO11 Medium (yolo11m.pt)", val: "yolo11m.pt" },
+                { name: "YOLO11 Large (yolo11l.pt)", val: "yolo11l.pt" },
+                { name: "YOLO11 Extra Large (yolo11x.pt)", val: "yolo11x.pt" }
+            ],
+            "yolov10": [
+                { name: "YOLOv10 Nano (yolov10n.pt)", val: "yolov10n.pt" },
+                { name: "YOLOv10 Small (yolov10s.pt)", val: "yolov10s.pt" },
+                { name: "YOLOv10 Medium (yolov10m.pt)", val: "yolov10m.pt" },
+                { name: "YOLOv10 Balanced (yolov10b.pt)", val: "yolov10b.pt" },
+                { name: "YOLOv10 Large (yolov10l.pt)", val: "yolov10l.pt" },
+                { name: "YOLOv10 Extra Large (yolov10x.pt)", val: "yolov10x.pt" }
+            ],
+            "yolov9": [
+                { name: "YOLOv9 Tiny (yolov9t.pt)", val: "yolov9t.pt" },
+                { name: "YOLOv9 Small (yolov9s.pt)", val: "yolov9s.pt" },
+                { name: "YOLOv9 Medium (yolov9m.pt)", val: "yolov9m.pt" },
+                { name: "YOLOv9 Compact (yolov9c.pt)", val: "yolov9c.pt" },
+                { name: "YOLOv9 Extended (yolov9e.pt)", val: "yolov9e.pt" }
+            ],
+            "yolo_world": [
+                { name: "YOLO-World Small (yolov8s-world.pt)", val: "yolov8s-world.pt" },
+                { name: "YOLO-World Medium (yolov8m-world.pt)", val: "yolov8m-world.pt" },
+                { name: "YOLO-World Large (yolov8l-world.pt)", val: "yolov8l-world.pt" },
+                { name: "YOLO-World Extra Large (yolov8x-world.pt)", val: "yolov8x-world.pt" }
+            ],
+            "yolov8": [
+                { name: "YOLOv8 Nano (yolov8n.pt)", val: "yolov8n.pt" },
+                { name: "YOLOv8 Small (yolov8s.pt)", val: "yolov8s.pt" },
+                { name: "YOLOv8 Medium (yolov8m.pt)", val: "yolov8m.pt" },
+                { name: "YOLOv8 Large (yolov8l.pt)", val: "yolov8l.pt" },
+                { name: "YOLOv8 Extra Large (yolov8x.pt)", val: "yolov8x.pt" }
+            ],
+            "yolo_nas": [
+                { name: "YOLO-NAS Small (yolo_nas_s)", val: "yolo_nas_s" },
+                { name: "YOLO-NAS Medium (yolo_nas_m)", val: "yolo_nas_m" },
+                { name: "YOLO-NAS Large (yolo_nas_l)", val: "yolo_nas_l" }
+            ],
+            "yolov7": [
+                { name: "YOLOv7 Tiny (yolov7-tiny.pt)", val: "yolov7-tiny.pt" },
+                { name: "YOLOv7 Standard (yolov7.pt)", val: "yolov7.pt" },
+                { name: "YOLOv7 Extra (yolov7x.pt)", val: "yolov7x.pt" },
+                { name: "YOLOv7 W6 (yolov7-w6.pt)", val: "yolov7-w6.pt" },
+                { name: "YOLOv7 E6 (yolov7-e6.pt)", val: "yolov7-e6.pt" }
+            ],
+            "yolov6": [
+                { name: "YOLOv6 Nano (yolov6n.pt)", val: "yolov6n.pt" },
+                { name: "YOLOv6 Small (yolov6s.pt)", val: "yolov6s.pt" },
+                { name: "YOLOv6 Medium (yolov6m.pt)", val: "yolov6m.pt" },
+                { name: "YOLOv6 Large (yolov6l.pt)", val: "yolov6l.pt" }
+            ],
+            "yolox": [
+                { name: "YOLOX Nano (yolox-nano)", val: "yolox-nano" },
+                { name: "YOLOX Tiny (yolox-tiny)", val: "yolox-tiny" },
+                { name: "YOLOX Small (yolox-s)", val: "yolox-s" },
+                { name: "YOLOX Medium (yolox-m)", val: "yolox-m" },
+                { name: "YOLOX Large (yolox-l)", val: "yolox-l" },
+                { name: "YOLOX X-Large (yolox-x)", val: "yolox-x" }
+            ],
+            "pp_yoloe": [
+                { name: "PP-YOLOE Small (ppyoloe_crn_s_80e)", val: "ppyoloe_crn_s_80e" },
+                { name: "PP-YOLOE Medium (ppyoloe_crn_m_80e)", val: "ppyoloe_crn_m_80e" },
+                { name: "PP-YOLOE Large (ppyoloe_crn_l_80e)", val: "ppyoloe_crn_l_80e" }
+            ],
+            "yolov5": [
+                { name: "YOLOv5 Nano (yolov5n.pt)", val: "yolov5n.pt" },
+                { name: "YOLOv5 Small (yolov5s.pt)", val: "yolov5s.pt" },
+                { name: "YOLOv5 Medium (yolov5m.pt)", val: "yolov5m.pt" },
+                { name: "YOLOv5 Large (yolov5l.pt)", val: "yolov5l.pt" },
+                { name: "YOLOv5 Extra Large (yolov5x.pt)", val: "yolov5x.pt" }
+            ],
+            "yolov4": [
+                { name: "YOLOv4 Tiny (yolov4-tiny.weights)", val: "yolov4-tiny" },
+                { name: "YOLOv4 Standard (yolov4.weights)", val: "yolov4" }
+            ],
+            "yolov3": [
+                { name: "YOLOv3 Tiny (yolov3-tiny.pt)", val: "yolov3-tiny.pt" },
+                { name: "YOLOv3 Standard (yolov3.pt)", val: "yolov3.pt" },
+                { name: "YOLOv3 SPP (yolov3-spp.pt)", val: "yolov3-spp.pt" }
+            ],
+            "yolov2": [
+                { name: "YOLOv2 Tiny (yolov2-tiny.cfg)", val: "yolov2-tiny" },
+                { name: "YOLOv2 9000 (yolo9000.cfg)", val: "yolo9000" }
+            ],
+            "yolov1": [
+                { name: "YOLOv1 Original (yolov1.cfg)", val: "yolov1" }
+            ]
+        };
+
+        const DEFAULT_PRESETS = {
+            "preset_yolo26_nextgen": {
+                name: "YOLO26 Next-Gen NMS-Free (Recommended 2026)",
+                yolo_family: "yolo26",
+                model_version: "yolo26s.pt",
+                task_type: "detect",
+                epochs: 100,
+                batch_size: 16,
+                imgsz: "640",
+                bbox_format: "yolo",
+                letterbox: true,
+                auto_orient: true,
+                grayscale: false,
+                histogram_eq: false,
+                degrees: 0.0,
+                translate: 0.10,
+                scale: 0.50,
+                shear: 0.0,
+                fliplr: 0.50,
+                flipud: 0.00,
+                hsv_h: 0.015,
+                hsv_s: 0.70,
+                hsv_v: 0.40,
+                mosaic: 1.00,
+                mixup: 0.00,
+                copy_paste: 0.00,
+                erasing: 0.40,
+                blur_limit: 0,
+                clahe_limit: 0.0
+            },
+            "preset_yolo11_prod": {
+                name: "Standard YOLO11 Default (Production Baseline)",
+                yolo_family: "yolo11",
+                model_version: "yolo11s.pt",
+                task_type: "detect",
+                epochs: 100,
+                batch_size: 16,
+                imgsz: "640",
+                bbox_format: "yolo",
+                letterbox: true,
+                auto_orient: true,
+                grayscale: false,
+                histogram_eq: false,
+                degrees: 0.0,
+                translate: 0.10,
+                scale: 0.50,
+                shear: 0.0,
+                fliplr: 0.50,
+                flipud: 0.00,
+                hsv_h: 0.015,
+                hsv_s: 0.70,
+                hsv_v: 0.40,
+                mosaic: 1.00,
+                mixup: 0.00,
+                copy_paste: 0.00,
+                erasing: 0.40,
+                blur_limit: 0,
+                clahe_limit: 0.0
+            },
+            "preset_high_aug": {
+                name: "High Augmentation (Anti-Overfit)",
+                yolo_family: "yolov8",
+                model_version: "yolov8m.pt",
+                task_type: "detect",
+                epochs: 200,
+                batch_size: 16,
+                imgsz: "640",
+                bbox_format: "yolo",
+                letterbox: true,
+                auto_orient: true,
+                grayscale: false,
+                histogram_eq: true,
+                degrees: 15.0,
+                translate: 0.20,
+                scale: 0.60,
+                shear: 5.0,
+                fliplr: 0.50,
+                flipud: 0.20,
+                hsv_h: 0.03,
+                hsv_s: 0.80,
+                hsv_v: 0.50,
+                mosaic: 1.00,
+                mixup: 0.15,
+                copy_paste: 0.30,
+                erasing: 0.50,
+                blur_limit: 7,
+                clahe_limit: 4.0
+            }
+        };
+
+        let currentTemplates = {};
+        let activeTemplateId = "preset_yolo26_nextgen";
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadTemplatesFromStorage();
+            populateTemplateDropdown();
+            loadTemplateToUI(activeTemplateId);
+        });
+
+        function loadTemplatesFromStorage() {
+            const stored = localStorage.getItem('colab_templates_v3');
+            if (stored) {
+                try {
+                    currentTemplates = JSON.parse(stored);
+                } catch (e) {
+                    currentTemplates = { ...DEFAULT_PRESETS };
+                }
+            } else {
+                currentTemplates = { ...DEFAULT_PRESETS };
+                localStorage.setItem('colab_templates_v3', JSON.stringify(currentTemplates));
+            }
+        }
+
+        function populateTemplateDropdown() {
+            const select = document.getElementById('templateSelect');
+            select.innerHTML = '';
+            for (const [id, tpl] of Object.entries(currentTemplates)) {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = tpl.name;
+                if (id === activeTemplateId) opt.selected = true;
+                select.appendChild(opt);
+            }
+        }
+
+        function onYoloFamilyChange() {
+            const family = document.getElementById('yolo_family').value;
+            populateCheckpointsDropdown(family);
+            renderCode('yolo_family');
+        }
+
+        function populateCheckpointsDropdown(family, selectVal = null) {
+            const select = document.getElementById('model_version');
+            select.innerHTML = '';
+            const list = YOLO_CHECKPOINTS_MAP[family] || YOLO_CHECKPOINTS_MAP["yolo26"];
+            list.forEach(item => {
+                const opt = document.createElement('option');
+                opt.value = item.val;
+                opt.textContent = item.name;
+                if (selectVal && item.val === selectVal) opt.selected = true;
+                select.appendChild(opt);
+            });
+            const badge = document.getElementById('yolo_badge');
+            if (["yolo26", "yolo12", "yolo11", "yolov10", "yolov9", "yolo_world", "yolov8", "yolov5", "yolov3"].includes(family)) {
+                badge.textContent = "Ultralytics Ecosystem";
+            } else if (family === "yolo_nas") {
+                badge.textContent = "SuperGradients Framework";
+            } else if (family === "yolov7") {
+                badge.textContent = "WongKinYiu Repository";
+            } else if (family === "yolox") {
+                badge.textContent = "Megvii YOLOX PyTorch";
+            } else if (family === "pp_yoloe") {
+                badge.textContent = "Baidu PaddleDetection";
+            } else {
+                badge.textContent = "Darknet C-Framework";
+            }
+        }
+
+        function loadSelectedTemplate() {
+            activeTemplateId = document.getElementById('templateSelect').value;
+            loadTemplateToUI(activeTemplateId);
+        }
+
+        function loadTemplateToUI(templateId) {
+            const tpl = currentTemplates[templateId];
+            if (!tpl) return;
+
+            const family = tpl.yolo_family || 'yolo26';
+            document.getElementById('yolo_family').value = family;
+            populateCheckpointsDropdown(family, tpl.model_version);
+
+            document.getElementById('task_type').value = tpl.task_type || 'detect';
+            document.getElementById('epochs').value = tpl.epochs || 100;
+            document.getElementById('batch_size').value = tpl.batch_size || 16;
+            document.getElementById('imgsz').value = tpl.imgsz || '640';
+            document.getElementById('bbox_format').value = tpl.bbox_format || 'yolo';
+
+            document.getElementById('letterbox').checked = !!tpl.letterbox;
+            document.getElementById('auto_orient').checked = !!tpl.auto_orient;
+            document.getElementById('grayscale').checked = !!tpl.grayscale;
+            document.getElementById('histogram_eq').checked = !!tpl.histogram_eq;
+
+            setSliderValue('degrees', tpl.degrees, '°');
+            setSliderValue('translate', tpl.translate);
+            setSliderValue('scale', tpl.scale);
+            setSliderValue('shear', tpl.shear, '°');
+            setSliderValue('fliplr', tpl.fliplr);
+            setSliderValue('flipud', tpl.flipud);
+            setSliderValue('hsv_h', tpl.hsv_h);
+            setSliderValue('hsv_s', tpl.hsv_s);
+            setSliderValue('hsv_v', tpl.hsv_v);
+            setSliderValue('mosaic', tpl.mosaic);
+            setSliderValue('mixup', tpl.mixup);
+            setSliderValue('copy_paste', tpl.copy_paste);
+            setSliderValue('erasing', tpl.erasing);
+            setSliderValue('blur_limit', tpl.blur_limit);
+            setSliderValue('clahe_limit', tpl.clahe_limit);
+
+            renderCode();
+        }
+
+        function setSliderValue(id, val, suffix = '') {
+            const slider = document.getElementById(id);
+            const badge = document.getElementById('val_' + id);
+            if (slider) slider.value = val;
+            if (badge) badge.textContent = Number(val).toFixed(id.includes('hsv') || id === 'degrees' || id === 'shear' ? 3 : 2) + suffix;
+        }
+
+        function updateSlider(id, suffix = '', activeKey = null) {
+            const slider = document.getElementById(id);
+            const badge = document.getElementById('val_' + id);
+            if (badge && slider) {
+                const val = Number(slider.value);
+                badge.textContent = val.toFixed(id === 'blur_limit' ? 0 : (id === 'degrees' || id === 'shear' ? 1 : 2)) + suffix;
+            }
+            renderCode(activeKey || id);
+        }
+
+        function createNewTemplatePrompt() {
+            const name = prompt("Nhập tên cho Template cấu hình mới:");
+            if (!name) return;
+            const newId = 'user_tpl_' + Date.now();
+            currentTemplates[newId] = getUIFormState(name);
+            activeTemplateId = newId;
+            localStorage.setItem('colab_templates_v3', JSON.stringify(currentTemplates));
+            populateTemplateDropdown();
+            showToast(`Đã tạo Template mới "${name}"`);
+        }
+
+        function saveCurrentTemplate() {
+            const currentTpl = currentTemplates[activeTemplateId];
+            const name = currentTpl ? currentTpl.name : "Custom Template";
+            currentTemplates[activeTemplateId] = getUIFormState(name);
+            localStorage.setItem('colab_templates_v3', JSON.stringify(currentTemplates));
+            showToast(`Đã lưu cấu hình "${name}" thành công!`);
+        }
+
+        function deleteCurrentTemplate() {
+            if (Object.keys(currentTemplates).length <= 1) {
+                alert("Bạn phải giữ lại ít nhất 1 Template!");
+                return;
+            }
+            if (confirm(`Bạn có chắc muốn xóa Template "${currentTemplates[activeTemplateId].name}"?`)) {
+                delete currentTemplates[activeTemplateId];
+                activeTemplateId = Object.keys(currentTemplates)[0];
+                localStorage.setItem('colab_templates_v3', JSON.stringify(currentTemplates));
+                populateTemplateDropdown();
+                loadTemplateToUI(activeTemplateId);
+                showToast("Đã xóa Template!");
+            }
+        }
+
+        function resetToDefaults() {
+            loadTemplateToUI(activeTemplateId);
+            showToast("Đã khôi phục tham số ban đầu của Template!");
+        }
+
+        function getUIFormState(name) {
+            return {
+                name: name,
+                yolo_family: document.getElementById('yolo_family').value,
+                model_version: document.getElementById('model_version').value,
+                task_type: document.getElementById('task_type').value,
+                epochs: parseInt(document.getElementById('epochs').value) || 100,
+                batch_size: parseInt(document.getElementById('batch_size').value) || 16,
+                imgsz: document.getElementById('imgsz').value,
+                bbox_format: document.getElementById('bbox_format').value,
+                letterbox: document.getElementById('letterbox').checked,
+                auto_orient: document.getElementById('auto_orient').checked,
+                grayscale: document.getElementById('grayscale').checked,
+                histogram_eq: document.getElementById('histogram_eq').checked,
+                degrees: parseFloat(document.getElementById('degrees').value),
+                translate: parseFloat(document.getElementById('translate').value),
+                scale: parseFloat(document.getElementById('scale').value),
+                shear: parseFloat(document.getElementById('shear').value),
+                fliplr: parseFloat(document.getElementById('fliplr').value),
+                flipud: parseFloat(document.getElementById('flipud').value),
+                hsv_h: parseFloat(document.getElementById('hsv_h').value),
+                hsv_s: parseFloat(document.getElementById('hsv_s').value),
+                hsv_v: parseFloat(document.getElementById('hsv_v').value),
+                mosaic: parseFloat(document.getElementById('mosaic').value),
+                mixup: parseFloat(document.getElementById('mixup').value),
+                copy_paste: parseFloat(document.getElementById('copy_paste').value),
+                erasing: parseFloat(document.getElementById('erasing').value),
+                blur_limit: parseInt(document.getElementById('blur_limit').value),
+                clahe_limit: parseFloat(document.getElementById('clahe_limit').value)
+            };
+        }
+
+        // -------------------------------------------------------------
+        // DYNAMIC REAL-TIME CODE GENERATOR WITH TOOLTIP COMMENT EXPLANATIONS
+        // -------------------------------------------------------------
+        function renderCode(activeKey = null) {
+            const st = getUIFormState("temp");
+            const family = st.yolo_family;
+            
+            // Helper to wrap value in animated glowing mark tag if it matches activeKey
+            function hl(key, value, extraText = "") {
+                if (key === activeKey) {
+                    return `<span id="param_active_hl" class="bg-amber-400 text-slate-950 font-extrabold px-2 py-0.5 rounded text-lg border-2 border-amber-300 shadow-2xl inline-block animate-pulse scale-110 transition-all duration-300 my-0.5">${value}</span>${extraText}`;
+                }
+                return `${value}${extraText}`;
+            }
+
+            // Helper for line-level glowing highlight
+            function hlLine(key, lineText) {
+                if (key === activeKey) {
+                    return `<div class="bg-amber-500/25 border-l-4 border-amber-400 pl-3 py-1 my-1 rounded-r shadow-lg font-semibold text-amber-200">${lineText}</div>`;
+                }
+                return lineText;
+            }
+
+            let albumentationsCode = "";
+            if (st.blur_limit > 0 || st.clahe_limit > 0 || st.grayscale || st.histogram_eq) {
+                albumentationsCode = `\n\n# -----------------------------------------------------------------------------\n# ALBUMENTATIONS PREPROCESSING PIPELINE\n# -----------------------------------------------------------------------------\nimport albumentations as A\n\ncustom_albumentations = [`;
+                if (st.grayscale) albumentationsCode += `\n    ${hlLine('grayscale', 'A.ToGray(p=1.0),                 # Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.')}`;
+                if (st.histogram_eq) albumentationsCode += `\n    ${hlLine('histogram_eq', `A.CLAHE(clip_limit=${hl('clahe_limit', st.clahe_limit || 4.0)}, p=0.5), # Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).`)}`;
+                if (st.blur_limit > 0) albumentationsCode += `\n    ${hlLine('blur_limit', `A.Blur(blur_limit=${hl('blur_limit', st.blur_limit)}, p=0.5),    # Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.`)}`;
+                albumentationsCode += `\n]`;
+            }
+
+            let codeHtml = "";
+
+            if (["yolo26", "yolo12", "yolo11", "yolov10", "yolov9", "yolo_world", "yolov8", "yolov5", "yolov3"].includes(family)) {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR ${hl('yolo_family', family.toUpperCase())} (ULTRALYTICS ECOSYSTEM)
+# Selected Model Checkpoint: ${hl('model_version', st.model_version)} # Kích thước trọng số (n=Nano, s=Small, m=Medium, l=Large, x=XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.
+# =============================================================================
+
+# 1. SETUP ENVIRONMENT & DEPENDENCIES
+!nvidia-smi
+!pip install -q ultralytics albumentations opencv-python roboflow
+
+import torch
+from ultralytics import YOLO
+print(f"CUDA Available: {torch.cuda.is_available()}")
+if torch.cuda.is_available():
+    print(f"Device Name: {torch.cuda.get_device_name(0)}")
+
+# 2. MOUNT GOOGLE DRIVE
+from google.colab import drive
+drive.mount('/content/drive')
+
+# 3. DEFINE DATASET PATH
+DATASET_YAML = "/content/drive/MyDrive/YOLO_Datasets/data.yaml"${albumentationsCode}
+
+# 4. INITIALIZE MODEL
+${hlLine('model_version', `model = YOLO("${hl('model_version', st.model_version)}") # Kích thước trọng số (n=Nano, s=Small, m=Medium, l=Large, x=XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.`)}
+
+# 5. START TRAINING WITH DYNAMIC HYPERPARAMETERS
+results = model.train(
+    data=DATASET_YAML,
+    ${hlLine('task_type', `task="${hl('task_type', st.task_type)}",                  # Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).`)}
+    ${hlLine('epochs', `epochs=${hl('epochs', st.epochs)},                     # Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting (chưa học hết), quá nhiều gây Overfitting (học vẹt).`)}
+    ${hlLine('batch_size', `batch=${hl('batch_size', st.batch_size)},                       # Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.`)}
+    ${hlLine('imgsz', `imgsz=${hl('imgsz', st.imgsz)},                      # Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.`)}
+    device=0,                       # Sử dụng GPU thứ 0 trên Google Colab để tăng tốc tính toán toán học.
+    workers=8,                      # Số lượng luồng nạp dữ liệu song song (Data Loading Threads).
+    exist_ok=True,                  # Ghi đè vào thư mục kết quả đã tồn tại mà không gây lỗi dừng chương trình.
+    name="colab_experiment_${st.model_version.replace('.pt','')}",
+
+    # --- TIỀN XỬ LÝ DỮ LIỆU (PREPROCESSING) ---
+    # BBox Format: ${hl('bbox_format', st.bbox_format)}           # Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).
+    # Letterbox: ${hl('letterbox', st.letterbox)}               # Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể khi resize.
+    # AutoOrient: ${hl('auto_orient', st.auto_orient)}              # Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.
+
+    # --- TĂNG CƯỜNG HÌNH HỌC (GEOMETRIC AUGMENTATIONS) ---
+    ${hlLine('degrees', `degrees=${hl('degrees', st.degrees)},                    # Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay ở các góc khác nhau.`)}
+    ${hlLine('translate', `translate=${hl('translate', st.translate)},                  # Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau trong khung hình (Spatial Invariance).`)}
+    ${hlLine('scale', `scale=${hl('scale', st.scale)},                      # Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).`)}
+    ${hlLine('shear', `shear=${hl('shear', st.shear)},                      # Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng hình học.`)}
+    ${hlLine('fliplr', `fliplr=${hl('fliplr', st.fliplr)},                     # Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú dữ liệu tự nhiên (xe, người, động vật).`)}
+    ${hlLine('flipud', `flipud=${hl('flipud', st.flipud)},                     # Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.`)}
+
+    # --- TĂNG CƯỜNG MÀU SẮC HSV (COLOR SPACE AUGMENTATIONS) ---
+    ${hlLine('hsv_h', `hsv_h=${hl('hsv_h', st.hsv_h)},                    # Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu da cam).`)}
+    ${hlLine('hsv_s', `hsv_s=${hl('hsv_s', st.hsv_s)},                      # Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.`)}
+    ${hlLine('hsv_v', `hsv_v=${hl('hsv_v', st.hsv_v)},                      # Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.`)}
+
+    # --- TĂNG CƯỜNG NÂNG CAO (ADVANCED COMPOSITE AUGMENTATIONS) ---
+    ${hlLine('mosaic', `mosaic=${hl('mosaic', st.mosaic)},                     # Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.`)}
+    ${hlLine('mixup', `mixup=${hl('mixup', st.mixup)},                      # Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting hiệu quả.`)}
+    ${hlLine('copy_paste', `copy_paste=${hl('copy_paste', st.copy_paste)},             # Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho bài toán Instance Segmentation.`)}
+    ${hlLine('erasing', `erasing=${hl('erasing', st.erasing)},                    # Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).`)}
+)
+
+# 6. EVALUATE & EXPORT
+metrics = model.val()
+model.export(format="onnx", dynamic=True)
+print("Training completed for ${st.model_version}!")
+`;
+            } else if (family === "yolo_nas") {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR YOLO-NAS (DECI AI / SUPER-GRADIENTS)
+# Selected Model: ${hl('model_version', st.model_version)} # Kích thước trọng số (Small, Medium, Large).
+# =============================================================================
+
+!nvidia-smi
+!pip install -q super-gradients albumentations roboflow
+
+from super_gradients.training import models, Trainer
+
+trainer = Trainer(experiment_name="yolo_nas_colab", ckpt_root_dir="/content/checkpoints")
+${hlLine('model_version', `model = models.get("${hl('model_version', st.model_version)}", pretrained_weights="coco")`)}
+
+train_params = {
+    ${hlLine('epochs', `"max_epochs": ${hl('epochs', st.epochs)}, # Số lần toàn bộ tập ảnh train đi qua mô hình.`)}
+    "lr_updates": [60, 80],
+    "lr_decay_factor": 0.1,
+    "initial_lr": 5e-4,
+    "train_metrics_list": [],
+    "valid_metrics_list": [],
+    "loss": "yolo_nas_loss"
+}
+print("Initialized YOLO-NAS Training Configuration")
+`;
+            } else if (family === "yolov7") {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR YOLOv7 (WONGKINYIU REPOSITORY)
+# Selected Weights: ${hl('model_version', st.model_version)} # Trọng số YOLOv7
+# =============================================================================
+
+!nvidia-smi
+!git clone https://github.com/WongKinYiu/yolov7
+%cd yolov7
+!pip install -q -r requirements.txt
+
+!python train.py --workers 8 --device 0 --batch-size ${hl('batch_size', st.batch_size)} --epochs ${hl('epochs', st.epochs)} \\
+    --data /content/data.yaml --img ${hl('imgsz', st.imgsz)} ${hl('imgsz', st.imgsz)} --weights ${hl('model_version', st.model_version)} \\
+    --name yolov7_colab_exp --hyp data/hyp.scratch.custom.yaml
+`;
+            } else if (family === "yolox") {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR YOLOX (MEGVII ANCHOR-FREE)
+# Selected Checkpoint: ${hl('model_version', st.model_version)}
+# =============================================================================
+
+!nvidia-smi
+!pip install -q yolox
+
+!python -m yolox.tools.train -n ${hl('model_version', st.model_version)} -b ${hl('batch_size', st.batch_size)} -d 1 --epochs ${hl('epochs', st.epochs)}
+`;
+            } else if (family === "pp_yoloe") {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR PP-YOLOE (BAIDU PADDLEDETECTION)
+# Selected Config: ${hl('model_version', st.model_version)}
+# =============================================================================
+
+!pip install -q paddlepaddle-gpu paddledet
+
+!python tools/train.py -c configs/ppyoloe/${hl('model_version', st.model_version)}.yml --eval
+`;
+            } else {
+                codeHtml = `# =============================================================================
+# GOOGLE COLAB TRAINING SCRIPT FOR DARKNET ${family.toUpperCase()} (ALEXEYAB / REDMON)
+# Selected Configuration: ${hl('model_version', st.model_version)}
+# =============================================================================
+
+!nvidia-smi
+!git clone https://github.com/AlexeyAB/darknet
+%cd darknet
+!sed -i 's/GPU=0/GPU=1/' Makefile
+!sed -i 's/CUDNN=0/CUDNN=1/' Makefile
+!make -j8
+
+!./darknet detector train data/obj.data cfg/${hl('model_version', st.model_version)}.cfg ${hl('model_version', st.model_version)}.weights -dont_show -map
+`;
+            }
+
+            const codeBlock = document.getElementById('colabCodeBlock');
+            codeBlock.innerHTML = codeHtml;
+
+            // Auto-scroll to highlighted active parameter element
+            if (activeKey) {
+                setTimeout(() => {
+                    const activeEl = document.getElementById('param_active_hl');
+                    if (activeEl) {
+                        activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }, 50);
+            }
+        }
+
+        // Clean plain text extractor without HTML tags for Copy & Exporting
+        function getRawCodeText() {
+            const codeBlock = document.getElementById('colabCodeBlock');
+            return codeBlock.innerText || codeBlock.textContent;
+        }
+
+        function copyColabCode() {
+            const codeText = getRawCodeText();
+            navigator.clipboard.writeText(codeText).then(() => {
+                showToast("Đã sao chép mã Colab sạch vào bộ nhớ tạm!");
+            }).catch(err => {
+                alert("Lỗi khi sao chép: " + err);
+            });
+        }
+
+        function exportPythonScript() {
+            const codeText = getRawCodeText();
+            const blob = new Blob([codeText], { type: "text/plain;charset=utf-8" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `train_${activeTemplateId}.py`;
+            link.click();
+            showToast("Đã tải xuống file Python script!");
+        }
+
+        function exportJupyterNotebook() {
+            const codeText = getRawCodeText();
+            const notebookJson = {
+                cells: [
+                    {
+                        cell_type: "markdown",
+                        metadata: {},
+                        source: [
+                            "# 🚀 Google Colab Model Training Notebook\n",
+                            "Generated automatically from YOLO Hub Manager (Supporting 17 YOLO Versions)."
+                        ]
+                    },
+                    {
+                        cell_type: "code",
+                        execution_count: null,
+                        metadata: {},
+                        outputs: [],
+                        source: codeText.split("\n").map(line => line + "\n")
+                    }
+                ],
+                metadata: {
+                    accelerator: "GPU",
+                    colab: { name: "YOLO_Training_Colab.ipynb", provision_default_tv3: true },
+                    language_info: { name: "python" }
+                },
+                nbformat: 4,
+                nbformat_minor: 0
+            };
+
+            const blob = new Blob([JSON.stringify(notebookJson, null, 2)], { type: "application/json;charset=utf-8" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `YOLO_Training_Colab_${activeTemplateId}.ipynb`;
+            link.click();
+            showToast("Đã xuất Jupyter Notebook (.ipynb) thành công!");
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toastNotification');
+            document.getElementById('toastMessage').textContent = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+</div>
+{% endblock %}
