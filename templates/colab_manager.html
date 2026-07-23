@@ -1,33 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="h-full flex flex-col flex-1 bg-slate-950 text-slate-100 overflow-hidden min-h-0" id="colabManagerApp">
+<div class="h-full flex flex-col flex-1 bg-surface text-content overflow-hidden min-h-0" id="colabManagerApp">
 
     <!-- HEADER / CRUD BAR -->
-    <header class="h-16 bg-slate-900 border-b border-slate-800 px-6 flex items-center justify-between shrink-0">
+    <header class="h-16 bg-panel border-b border-border px-6 flex items-center justify-between shrink-0">
         <div class="flex items-center gap-3">
             <div class="p-2 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-lg text-white font-bold shadow-lg">
                 <i class="fa-solid fa-code"></i>
             </div>
             <div>
-                <h1 class="font-bold text-base text-white flex items-center gap-2">
+                <h1 class="font-bold text-base text-content flex items-center gap-2">
                     Google Colab Code Generator & Manager
-                    <span class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">17 YOLO Versions (Comment Explanations v5.0)</span>
+                    <span class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">17 YOLO Versions (Theme Ready v6.0)</span>
                 </h1>
-                <p class="text-xs text-slate-400">Chọn 17 Phiên Bản YOLO - Tinh chỉnh Preprocessing & Augmentation - Mã Colab chứa ghi chú tác dụng từng thông số</p>
+                <p class="text-xs text-content-muted">Chọn 17 Phiên Bản YOLO - Tinh chỉnh Preprocessing & Augmentation - Mã Colab chứa ghi chú tác dụng từng thông số</p>
             </div>
         </div>
 
         <!-- Template Selector & Action Controls -->
         <div class="flex items-center gap-3">
-            <div class="flex items-center gap-2 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5">
-                <i class="fa-solid fa-bookmark text-slate-400 text-sm"></i>
-                <label for="templateSelect" class="text-xs text-slate-300">Template:</label>
+            <div class="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-1.5">
+                <i class="fa-solid fa-bookmark text-content-muted text-sm"></i>
+                <label for="templateSelect" class="text-xs text-content">Template:</label>
                 <select id="templateSelect" onchange="loadSelectedTemplate()" class="bg-transparent text-sm font-medium text-amber-400 focus:outline-none cursor-pointer">
                     <!-- Dynamic Options -->
                 </select>
             </div>
 
-            <button onclick="createNewTemplatePrompt()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
+            <button onclick="createNewTemplatePrompt()" class="bg-surface hover:bg-panel text-content border border-border text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
                 <i class="fa-solid fa-plus text-amber-400"></i> Tạo mới
             </button>
             <button onclick="saveCurrentTemplate()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-2 rounded-lg font-medium transition shadow-sm flex items-center gap-1.5">
@@ -36,7 +36,7 @@
             <button onclick="deleteCurrentTemplate()" class="bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/50 text-xs px-3 py-2 rounded-lg font-medium transition flex items-center gap-1.5">
                 <i class="fa-solid fa-trash"></i> Xóa
             </button>
-            <button onclick="resetToDefaults()" class="bg-slate-800 hover:bg-slate-700 text-slate-400 text-xs px-3 py-2 rounded-lg transition" title="Reset thông số mặc định">
+            <button onclick="resetToDefaults()" class="bg-surface hover:bg-panel text-content-muted text-xs px-3 py-2 rounded-lg border border-border transition" title="Reset thông số mặc định">
                 <i class="fa-solid fa-rotate-left"></i>
             </button>
         </div>
@@ -46,9 +46,9 @@
     <div class="flex-1 flex min-h-0 h-full overflow-hidden">
         
         <!-- LEFT COLUMN: PARAMETER CONTROLS (50% Width) -->
-        <div class="w-1/2 border-r border-slate-800 bg-slate-900/50 flex flex-col h-full min-h-0">
-            <div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
-                <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+        <div class="w-1/2 border-r border-border bg-surface/50 flex flex-col h-full min-h-0">
+            <div class="p-3 bg-panel border-b border-border flex items-center justify-between shrink-0">
+                <span class="text-xs font-semibold text-content uppercase tracking-wider flex items-center gap-2">
                     <i class="fa-solid fa-sliders text-amber-400"></i> Bảng Tinh Chỉnh Thông Số
                 </span>
                 <span id="paramCountBadge" class="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
@@ -60,8 +60,8 @@
             <div class="flex-1 overflow-y-auto p-4 space-y-6">
                 
                 <!-- SECTION 1: SELECTION OF ALL 17 YOLO VERSIONS & CHECKPOINTS -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4 shadow-sm">
-                    <h3 class="text-sm font-semibold text-amber-400 flex items-center justify-between border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
+                    <h3 class="text-sm font-semibold text-amber-400 flex items-center justify-between border-b border-border pb-2">
                         <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> 1. Chọn Phiên Bản YOLO (17 Versions)</span>
                         <span class="text-xs font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/60" id="yolo_badge">Ultralytics Ecosystem</span>
                     </h3>
@@ -69,19 +69,19 @@
                     <div class="grid grid-cols-2 gap-4">
                         <!-- Dropdown 1: Họ Phiên Bản YOLO (17 Versions) -->
                         <div class="col-span-2">
-                            <label class="text-xs text-slate-300 font-semibold mb-1.5 flex items-center justify-between">
+                            <label class="text-xs text-content font-semibold mb-1.5 flex items-center justify-between">
                                 <span class="flex items-center gap-1.5">
                                     <span>Họ Phiên Bản YOLO (YOLO Version Family)</span>
                                     <span class="group relative inline-flex items-center cursor-help text-amber-400 hover:text-amber-300 transition-colors" title="Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.
                                         </span>
                                     </span>
                                 </span>
-                                <span class="text-[10px] text-slate-400 font-normal">Tất cả 17 phiên bản lịch sử</span>
+                                <span class="text-[10px] text-content-muted font-normal">Tất cả 17 phiên bản lịch sử</span>
                             </label>
-                            <select id="yolo_family" onchange="onYoloFamilyChange()" class="w-full bg-slate-950 border border-amber-500/40 text-sm rounded-lg p-2.5 text-amber-300 font-medium focus:border-amber-400 focus:outline-none">
+                            <select id="yolo_family" onchange="onYoloFamilyChange()" class="w-full bg-surface border border-amber-500/40 text-sm rounded-lg p-2.5 text-amber-400 font-medium focus:border-amber-400 focus:outline-none">
                                 <optgroup label="⚡ Thế hệ mới nhất (2024 - 2026)">
                                     <option value="yolo26" selected>YOLO26 (Ultralytics End-to-End NMS-Free - 2026)</option>
                                     <option value="yolo12">YOLO12 (Attention-Centric Architecture - 2025)</option>
@@ -110,32 +110,32 @@
 
                         <!-- Dropdown 2: Dynamic Checkpoint Weights -->
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Mô Hình Trọng Số (Checkpoint)</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.
                                     </span>
                                 </span>
                             </label>
-                            <select id="model_version" onchange="renderCode('model_version')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                            <select id="model_version" onchange="renderCode('model_version')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
                                 <!-- Dynamically populated by JS based on yolo_family -->
                             </select>
                         </div>
 
                         <!-- Task Type -->
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Task Bài Toán</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).
                                     </span>
                                 </span>
                             </label>
-                            <select id="task_type" onchange="renderCode('task_type')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                            <select id="task_type" onchange="renderCode('task_type')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
                                 <option value="detect" selected>Object Detection (Nhận diện vật thể)</option>
                                 <option value="segment">Instance Segmentation (Phân vùng)</option>
                                 <option value="classify">Image Classification (Phân loại ảnh)</option>
@@ -145,51 +145,51 @@
 
                         <!-- Epochs & Batch -->
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Số Epochs Huấn Luyện</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.
                                     </span>
                                 </span>
                             </label>
-                            <input type="number" id="epochs" value="100" min="1" max="1000" oninput="renderCode('epochs')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                            <input type="number" id="epochs" value="100" min="1" max="1000" oninput="renderCode('epochs')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
                         </div>
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Batch Size</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-400 transition-colors" title="Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.
                                     </span>
                                 </span>
                             </label>
-                            <input type="number" id="batch_size" value="16" min="1" max="128" oninput="renderCode('batch_size')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-amber-500 focus:outline-none">
+                            <input type="number" id="batch_size" value="16" min="1" max="128" oninput="renderCode('batch_size')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
                         </div>
                     </div>
                 </div>
 
                 <!-- SECTION 2: PREPROCESSING PARAMETERS -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-cyan-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-cyan-400 flex items-center gap-2 border-b border-border pb-2">
                         <i class="fa-solid fa-crop-simple"></i> 2. Thông Số Tiền Xử Lý (Preprocessing)
                     </h3>
                     
                     <div class="grid grid-cols-2 gap-4">
                         <!-- Imgsz -->
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Target Image Size (`imgsz`)</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-cyan-400 transition-colors" title="Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Kích thước vuông ảnh được resize trước khi đưa vào mô hình (vd: 640x640). Ảnh lớn nhận diện vật thể nhỏ tốt hơn nhưng giảm FPS.
                                     </span>
                                 </span>
                             </label>
-                            <select id="imgsz" onchange="renderCode('imgsz')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-cyan-500 focus:outline-none">
+                            <select id="imgsz" onchange="renderCode('imgsz')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-cyan-500 focus:outline-none">
                                 <option value="320">320 px (Fast)</option>
                                 <option value="416">416 px</option>
                                 <option value="512">512 px</option>
@@ -199,16 +199,16 @@
                         </div>
                         <!-- Bbox format -->
                         <div>
-                            <label class="text-xs text-slate-400 font-medium flex items-center gap-1.5 mb-1">
+                            <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>BBox Format</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-cyan-400 transition-colors" title="Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Định dạng nhãn vật thể: YOLO (tâm x,y,w,h [0-1]), COCO (x_min,y_min,w,h), Pascal VOC (x_min,y_min,x_max,y_max).
                                     </span>
                                 </span>
                             </label>
-                            <select id="bbox_format" onchange="renderCode('bbox_format')" class="w-full bg-slate-950 border border-slate-700 text-sm rounded-lg p-2 text-slate-200 focus:border-cyan-500 focus:outline-none">
+                            <select id="bbox_format" onchange="renderCode('bbox_format')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-cyan-500 focus:outline-none">
                                 <option value="yolo" selected>YOLO (x_center, y_center, w, h normalized)</option>
                                 <option value="coco">COCO (x_min, y_min, w, h)</option>
                                 <option value="pascal_voc">Pascal VOC (x_min, y_min, x_max, y_max)</option>
@@ -218,52 +218,52 @@
 
                     <!-- Toggles for Preprocessing -->
                     <div class="grid grid-cols-2 gap-3 pt-2">
-                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                        <label class="flex items-center gap-2 text-xs text-content cursor-pointer bg-surface p-2.5 rounded-lg border border-border hover:border-cyan-500/50">
                             <input type="checkbox" id="letterbox" checked onchange="renderCode('letterbox')" class="w-4 h-4 accent-cyan-500 rounded">
                             <span class="flex items-center gap-1.5">
                                 <span>Letterbox Padding</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Thêm viền xám để giữ nguyên tỷ lệ khung hình gốc (Aspect Ratio), tránh làm méo dạng vật thể.
                                     </span>
                                 </span>
                             </span>
                         </label>
 
-                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                        <label class="flex items-center gap-2 text-xs text-content cursor-pointer bg-surface p-2.5 rounded-lg border border-border hover:border-cyan-500/50">
                             <input type="checkbox" id="auto_orient" checked onchange="renderCode('auto_orient')" class="w-4 h-4 accent-cyan-500 rounded">
                             <span class="flex items-center gap-1.5">
                                 <span>Auto-Orient EXIF</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Tự động xoay ảnh đúng chiều dựa vào thẻ metadata EXIF của camera trước khi huấn luyện.
                                     </span>
                                 </span>
                             </span>
                         </label>
 
-                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                        <label class="flex items-center gap-2 text-xs text-content cursor-pointer bg-surface p-2.5 rounded-lg border border-border hover:border-cyan-500/50">
                             <input type="checkbox" id="grayscale" onchange="renderCode('grayscale')" class="w-4 h-4 accent-cyan-500 rounded">
                             <span class="flex items-center gap-1.5">
                                 <span>Ảnh Xám (Grayscale)</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Chuyển ảnh RGB (3 kênh) thành ảnh xám (1 kênh). Giảm 66% dung lượng bộ nhớ đầu vào, triệt tiêu nhiễu màu sắc, thích hợp cho OCR, ảnh X-quang.
                                     </span>
                                 </span>
                             </span>
                         </label>
 
-                        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer bg-slate-950 p-2.5 rounded-lg border border-slate-800 hover:border-slate-700">
+                        <label class="flex items-center gap-2 text-xs text-content cursor-pointer bg-surface p-2.5 rounded-lg border border-border hover:border-cyan-500/50">
                             <input type="checkbox" id="histogram_eq" onchange="renderCode('histogram_eq')" class="w-4 h-4 accent-cyan-500 rounded">
                             <span class="flex items-center gap-1.5">
                                 <span>CLAHE Equalization</span>
-                                <span class="group relative inline-flex items-center cursor-help text-slate-500 hover:text-cyan-400 transition-colors" title="Cân bằng biểu đồ độ sáng cục bộ. Tăng tương phản và làm nổi bật chi tiết ở vùng quá tối hoặc bị lóa sáng.">
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-cyan-400 transition-colors" title="Cân bằng biểu đồ độ sáng cục bộ. Tăng tương phản và làm nổi bật chi tiết ở vùng quá tối hoặc bị lóa sáng.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
-                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                         Cân bằng biểu đồ độ sáng cục bộ. Tăng tương phản và làm nổi bật chi tiết ở vùng quá tối hoặc bị lóa sáng.
                                     </span>
                                 </span>
@@ -273,276 +273,276 @@
                 </div>
 
                 <!-- SECTION 3: GEOMETRIC AUGMENTATIONS -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-emerald-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-emerald-400 flex items-center gap-2 border-b border-border pb-2">
                         <i class="fa-solid fa-shapes"></i> 3. Tăng Cường Hình Học (Geometric Augmentations)
                     </h3>
 
                     <div class="space-y-3">
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Rotation Angle (`degrees`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Xoay ảnh ngẫu nhiên góc [-degrees, +degrees]. Giúp mô hình nhận diện vật thể nghiêng hoặc bị xoay.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_degrees" class="text-emerald-400 font-mono font-bold">0.0°</span>
                             </div>
-                            <input type="range" id="degrees" min="0" max="180" step="0.5" value="0.0" oninput="updateSlider('degrees', '°', 'degrees')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="degrees" min="0" max="180" step="0.5" value="0.0" oninput="updateSlider('degrees', '°', 'degrees')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Translation (`translate`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau (Spatial Invariance).">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau (Spatial Invariance).">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Dịch chuyển ảnh theo chiều ngang/dọc (tỷ lệ fraction). Giúp mô hình nhận diện vật thể nằm ở các vị trí khác nhau (Spatial Invariance).
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_translate" class="text-emerald-400 font-mono font-bold">0.10</span>
                             </div>
-                            <input type="range" id="translate" min="0" max="0.9" step="0.05" value="0.10" oninput="updateSlider('translate', '', 'translate')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="translate" min="0" max="0.9" step="0.05" value="0.10" oninput="updateSlider('translate', '', 'translate')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Scaling Gain (`scale`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Phóng to/thu nhỏ ảnh ngẫu nhiên theo tỷ lệ gain. Giúp mô hình học nhận diện vật thể ở khoảng cách xa (nhỏ) và gần (to).
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_scale" class="text-emerald-400 font-mono font-bold">0.50</span>
                             </div>
-                            <input type="range" id="scale" min="0" max="0.9" step="0.05" value="0.50" oninput="updateSlider('scale', '', 'scale')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="scale" min="0" max="0.9" step="0.05" value="0.50" oninput="updateSlider('scale', '', 'scale')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Shear Angle (`shear`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Kéo xiên/bóp méo góc ảnh theo độ. Giúp mô hình nhận diện vật thể khi nhìn từ các góc nghiêng biến dạng.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_shear" class="text-emerald-400 font-mono font-bold">0.0°</span>
                             </div>
-                            <input type="range" id="shear" min="0" max="45" step="1" value="0" oninput="updateSlider('shear', '°', 'shear')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="shear" min="0" max="45" step="1" value="0" oninput="updateSlider('shear', '°', 'shear')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-4 pt-2">
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Horizontal Flip (`fliplr`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú của dữ liệu tự nhiên.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú của dữ liệu tự nhiên.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Xác suất lật ảnh ngẫu nhiên theo chiều ngang (Trái <-> Phải). Tăng gấp đôi sự phong phú của dữ liệu tự nhiên.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_fliplr" class="text-emerald-400 font-mono font-bold">0.50</span>
                             </div>
-                            <input type="range" id="fliplr" min="0" max="1" step="0.05" value="0.50" oninput="updateSlider('fliplr', '', 'fliplr')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="fliplr" min="0" max="1" step="0.05" value="0.50" oninput="updateSlider('fliplr', '', 'fliplr')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Vertical Flip (`flipud`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-emerald-400 transition-colors" title="Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Xác suất lật ảnh ngẫu nhiên theo chiều dọc (Trên <-> Dưới). Thích hợp cho ảnh vệ tinh, flycam nhìn từ trên xuống, soi vi kính.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_flipud" class="text-emerald-400 font-mono font-bold">0.00</span>
                             </div>
-                            <input type="range" id="flipud" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('flipud', '', 'flipud')" class="w-full accent-emerald-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="flipud" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('flipud', '', 'flipud')" class="w-full accent-emerald-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
                     </div>
                 </div>
 
                 <!-- SECTION 4: HSV COLOR AUGMENTATIONS -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-purple-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-purple-400 flex items-center gap-2 border-b border-border pb-2">
                         <i class="fa-solid fa-palette"></i> 4. Tăng Cường Màu Sắc HSV (Color Space)
                     </h3>
                     <div class="space-y-3">
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>HSV Hue (`hsv_h`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu).">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-purple-400 transition-colors" title="Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu).">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Biến đổi sắc độ màu ngẫu nhiên không gian HSV. Tránh mô hình học vẹt theo màu sắc cố định (vd: biển báo bị phai màu).
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_hsv_h" class="text-purple-400 font-mono font-bold">0.015</span>
                             </div>
-                            <input type="range" id="hsv_h" min="0" max="0.5" step="0.005" value="0.015" oninput="updateSlider('hsv_h', '', 'hsv_h')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="hsv_h" min="0" max="0.5" step="0.005" value="0.015" oninput="updateSlider('hsv_h', '', 'hsv_h')" class="w-full accent-purple-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>HSV Saturation (`hsv_s`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-purple-400 transition-colors" title="Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Biến đổi độ bão hòa màu ngẫu nhiên (từ màu nhạt sang sặc sỡ). Giúp mô hình hoạt động tốt dưới trời nắng, mưa, sương mù.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_hsv_s" class="text-purple-400 font-mono font-bold">0.70</span>
                             </div>
-                            <input type="range" id="hsv_s" min="0" max="1" step="0.05" value="0.70" oninput="updateSlider('hsv_s', '', 'hsv_s')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="hsv_s" min="0" max="1" step="0.05" value="0.70" oninput="updateSlider('hsv_s', '', 'hsv_s')" class="w-full accent-purple-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>HSV Value / Brightness (`hsv_v`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-purple-400 transition-colors" title="Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-purple-400 transition-colors" title="Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Biến đổi độ sáng tối ngẫu nhiên trong kênh Value (HSV). Giúp mô hình nhận diện tốt cả ban ngày, ban đêm lẫn bóng râm.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_hsv_v" class="text-purple-400 font-mono font-bold">0.40</span>
                             </div>
-                            <input type="range" id="hsv_v" min="0" max="1" step="0.05" value="0.40" oninput="updateSlider('hsv_v', '', 'hsv_v')" class="w-full accent-purple-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="hsv_v" min="0" max="1" step="0.05" value="0.40" oninput="updateSlider('hsv_v', '', 'hsv_v')" class="w-full accent-purple-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
                     </div>
                 </div>
 
                 <!-- SECTION 5: ADVANCED COMPOSITE AUGMENTATIONS -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-rose-400 flex items-center gap-2 border-b border-border pb-2">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> 5. Tăng Cường Nâng Cao (Mosaic, Mixup, Erasing)
                     </h3>
                     <div class="space-y-3">
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Mosaic Augmentation (`mosaic`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-rose-400 transition-colors" title="Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Ghép 4 ảnh ngẫu nhiên thành 1 ảnh duy nhất. Giúp mô hình học nhận diện vật thể trong nhiều bối cảnh nhỏ, cải thiện mAP cho vật thể nhỏ.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_mosaic" class="text-rose-400 font-mono font-bold">1.00</span>
                             </div>
-                            <input type="range" id="mosaic" min="0" max="1" step="0.05" value="1.00" oninput="updateSlider('mosaic', '', 'mosaic')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="mosaic" min="0" max="1" step="0.05" value="1.00" oninput="updateSlider('mosaic', '', 'mosaic')" class="w-full accent-rose-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>MixUp Augmentation (`mixup`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-rose-400 transition-colors" title="Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Trộn 2 ảnh và nhãn của chúng theo tỷ lệ mờ đục (Alpha Blending). Tạo mẫu train mượt mà, chống hiện tượng Overfitting.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_mixup" class="text-rose-400 font-mono font-bold">0.00</span>
                             </div>
-                            <input type="range" id="mixup" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('mixup', '', 'mixup')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="mixup" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('mixup', '', 'mixup')" class="w-full accent-rose-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Copy-Paste Augmentation (`copy_paste`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho Instance Segmentation.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-rose-400 transition-colors" title="Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho Instance Segmentation.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Cắt vật thể phân vùng từ ảnh này dán sang vị trí ngẫu nhiên ở ảnh khác. Cực hiệu quả cho Instance Segmentation.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_copy_paste" class="text-rose-400 font-mono font-bold">0.00</span>
                             </div>
-                            <input type="range" id="copy_paste" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('copy_paste', '', 'copy_paste')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="copy_paste" min="0" max="1" step="0.05" value="0.00" oninput="updateSlider('copy_paste', '', 'copy_paste')" class="w-full accent-rose-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Random Erasing / Cutout (`erasing`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-rose-400 transition-colors" title="Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-rose-400 transition-colors" title="Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Che phủ các vùng hình chữ nhật ngẫu nhiên trên ảnh. Ép mô hình học nhận diện vật thể ngay cả khi bị che khuất một phần (Occlusion).
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_erasing" class="text-rose-400 font-mono font-bold">0.40</span>
                             </div>
-                            <input type="range" id="erasing" min="0" max="0.9" step="0.05" value="0.40" oninput="updateSlider('erasing', '', 'erasing')" class="w-full accent-rose-500 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="erasing" min="0" max="0.9" step="0.05" value="0.40" oninput="updateSlider('erasing', '', 'erasing')" class="w-full accent-rose-500 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
                     </div>
                 </div>
 
                 <!-- SECTION 6: ALBUMENTATIONS PIPELINE INTEGRATION -->
-                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4">
-                    <h3 class="text-sm font-semibold text-amber-300 flex items-center gap-2 border-b border-slate-800 pb-2">
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
+                    <h3 class="text-sm font-semibold text-amber-300 flex items-center gap-2 border-b border-border pb-2">
                         <i class="fa-solid fa-layer-group"></i> 6. Tích Hợp Albumentations Pipeline
                     </h3>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>Blur Limit (`blur_limit`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-300 transition-colors" title="Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-300 transition-colors" title="Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Làm mờ ảnh ngẫu nhiên bằng bộ lọc Gaussian Blur. Mô phỏng ảnh bị nhòe do rung camera hoặc vật thể di chuyển nhanh.
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_blur_limit" class="text-amber-300 font-mono font-bold">0</span>
                             </div>
-                            <input type="range" id="blur_limit" min="0" max="15" step="1" value="0" oninput="updateSlider('blur_limit', '', 'blur_limit')" class="w-full accent-amber-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="blur_limit" min="0" max="15" step="1" value="0" oninput="updateSlider('blur_limit', '', 'blur_limit')" class="w-full accent-amber-400 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
 
                         <div>
                             <div class="flex justify-between text-xs mb-1">
-                                <span class="text-slate-400 font-medium flex items-center gap-1.5">
+                                <span class="text-content-muted font-medium flex items-center gap-1.5">
                                     <span>CLAHE Limit (`clahe_limit`)</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-slate-400 hover:text-amber-300 transition-colors" title="Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).">
+                                    <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-300 transition-colors" title="Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
-                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-slate-800 border border-slate-700 p-2.5 text-[11px] font-normal leading-relaxed text-slate-200 shadow-2xl group-hover:block z-50">
+                                        <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-60 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
                                             Ngưỡng cắt tương phản (Clip Limit) cho thuật toán CLAHE. Khống chế mức tăng tương phản để tránh làm khuếch đại hạt nhiễu (noise).
                                         </span>
                                     </span>
                                 </span>
                                 <span id="val_clahe_limit" class="text-amber-300 font-mono font-bold">0.0</span>
                             </div>
-                            <input type="range" id="clahe_limit" min="0" max="8" step="0.5" value="0.0" oninput="updateSlider('clahe_limit', '', 'clahe_limit')" class="w-full accent-amber-400 bg-slate-950 rounded-lg h-1.5 cursor-pointer">
+                            <input type="range" id="clahe_limit" min="0" max="8" step="0.5" value="0.0" oninput="updateSlider('clahe_limit', '', 'clahe_limit')" class="w-full accent-amber-400 bg-surface rounded-lg h-1.5 cursor-pointer">
                         </div>
                     </div>
                 </div>
@@ -551,25 +551,25 @@
         </div>
 
         <!-- RIGHT COLUMN: FULL-HEIGHT REAL-TIME COLAB CODE DISPLAY (50% Width) -->
-        <div class="w-1/2 bg-slate-950 flex flex-col flex-1 h-full min-h-0 min-w-0">
+        <div class="w-1/2 bg-surface flex flex-col flex-1 h-full min-h-0 min-w-0">
             <!-- Header Bar with Copy, Font Size & Export Buttons -->
-            <div class="p-3 bg-slate-900 border-b border-slate-800 flex items-center justify-between shrink-0">
+            <div class="p-3 bg-panel border-b border-border flex items-center justify-between shrink-0">
                 <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-2">
                     <i class="fa-brands fa-python"></i> Real-time Google Colab Script
                 </span>
                 <div class="flex items-center gap-2">
                     <!-- Font Size Controls -->
-                    <div class="flex items-center border border-slate-700 bg-slate-950 rounded-md overflow-hidden mr-1">
-                        <button onclick="changeFontSize(-1)" class="px-2 py-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition text-xs font-bold" title="Giảm cỡ chữ (Font size)">
+                    <div class="flex items-center border border-border bg-surface rounded-md overflow-hidden mr-1">
+                        <button onclick="changeFontSize(-1)" class="px-2 py-1 text-content-muted hover:text-amber-400 hover:bg-panel transition text-xs font-bold" title="Giảm cỡ chữ (Font size)">
                             A-
                         </button>
-                        <span id="fontSizeDisplay" class="px-2 text-xs font-mono text-amber-300 border-x border-slate-800 font-semibold">15px</span>
-                        <button onclick="changeFontSize(1)" class="px-2 py-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition text-xs font-bold" title="Tăng cỡ chữ (Font size)">
+                        <span id="fontSizeDisplay" class="px-2 text-xs font-mono text-amber-400 border-x border-border font-semibold">15px</span>
+                        <button onclick="changeFontSize(1)" class="px-2 py-1 text-content-muted hover:text-amber-400 hover:bg-panel transition text-xs font-bold" title="Tăng cỡ chữ (Font size)">
                             A+
                         </button>
                     </div>
 
-                    <button onclick="copyColabCode()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
+                    <button onclick="copyColabCode()" class="bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/40 text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
                         <i class="fa-regular fa-copy"></i> Sao chép Mã
                     </button>
                     <button onclick="exportPythonScript()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-1.5 rounded-md font-medium transition flex items-center gap-1.5">
@@ -582,7 +582,7 @@
             </div>
 
             <!-- Full-Height Real-time Code View Container -->
-            <div id="codeViewContainer" class="flex-1 h-full min-h-0 overflow-y-auto p-6 bg-slate-950 text-slate-100 font-mono leading-relaxed selection:bg-amber-500 selection:text-slate-950">
+            <div id="codeViewContainer" class="flex-1 h-full min-h-0 overflow-y-auto p-6 bg-surface text-content font-mono leading-relaxed selection:bg-amber-500 selection:text-slate-950">
                 <div id="colabCodeBlock" class="w-full min-h-full font-mono whitespace-pre-wrap leading-relaxed text-[15px]"></div>
             </div>
         </div>
@@ -1018,7 +1018,7 @@
             // Helper for line-level glowing highlight
             function hlLine(key, lineText) {
                 if (key === activeKey) {
-                    return `<div class="bg-amber-500/25 border-l-4 border-amber-400 pl-3 py-1 my-1 rounded-r shadow-lg font-semibold text-amber-200">${lineText}</div>`;
+                    return `<div class="bg-amber-500/25 border-l-4 border-amber-400 pl-3 py-1 my-1 rounded-r shadow-lg font-semibold text-amber-300">${lineText}</div>`;
                 }
                 return lineText;
             }
