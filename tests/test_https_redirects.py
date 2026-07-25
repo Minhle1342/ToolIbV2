@@ -17,6 +17,10 @@ class HttpsRedirectTests(unittest.TestCase):
         self.client = self.app.test_client()
 
     def tearDown(self):
+        with self.app.app_context():
+            from models import db
+            db.session.remove()
+            db.engine.dispose()
         self.temp_dir.cleanup()
 
     def test_public_http_get_redirects_to_https(self):

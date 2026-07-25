@@ -72,6 +72,15 @@ def create_app(config_overrides=None):
     
     # Initialize DB
     db.init_app(app)
+    with app.app_context():
+        db.create_all()
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                conn.execute(text("ALTER TABLE ai_models ADD COLUMN model_type VARCHAR(50) DEFAULT 'detection'"))
+                conn.commit()
+        except Exception:
+            pass # Column already exists
     
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
@@ -177,9 +186,20 @@ def handle_join_project(data):
     
     if project_id:
         room = f"project_{project_id}"
+        sid = request.sid
+
+        # Purge any stale session with the same user_name in this project room
+        stale_sids = [
+            old_sid for old_sid, user in active_users.items()
+            if user.get('project_id') == project_id and user.get('user_name') == user_name and old_sid != sid
+        ]
+        for old_sid in stale_sids:
+            leave_room(room, sid=old_sid)
+            del active_users[old_sid]
+            emit('user_disconnected', {'sid': old_sid}, room=room)
+
         join_room(room)
         
-        sid = request.sid
         active_users[sid] = {
             'project_id': project_id,
             'user_name': user_name,

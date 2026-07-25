@@ -1775,6 +1775,15 @@
         sendMyState(undefined, undefined, undefined, boxId);
     };
 
+    // Disconnect socket cleanly when leaving page or closing tab
+    const handlePageUnload = () => {
+        if (socket && socket.connected) {
+            socket.disconnect();
+        }
+    };
+    window.addEventListener('beforeunload', handlePageUnload);
+    window.addEventListener('pagehide', handlePageUnload);
+
     // 8. Run on DOMContentLoaded
     document.addEventListener('DOMContentLoaded', () => {
         initUI();
