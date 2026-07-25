@@ -171,6 +171,30 @@
                     </div>
                 </div>
 
+                <!-- SECTION: EXPORT & STORAGE -->
+                <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
+                    <h3 class="text-sm font-semibold text-emerald-400 flex items-center justify-between border-b border-border pb-2">
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-hard-drive"></i> Lưu Trữ & Tự Động Copy (Drive Storage)</span>
+                        <span class="text-xs font-mono text-emerald-300 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60">Auto-Save Model</span>
+                    </h3>
+                    
+                    <div>
+                        <label class="text-xs text-content font-semibold mb-1.5 flex items-center justify-between">
+                            <span class="flex items-center gap-1.5">
+                                <span>Thư Mục Lưu Mô Hình trên Google Drive</span>
+                                <span class="group relative inline-flex items-center cursor-help text-emerald-400 hover:text-emerald-300 transition-colors" title="Đường dẫn thư mục trên Google Drive để tự động copy tệp trọng số (.pt, .onnx, .pth) sau khi huấn luyện xong.">
+                                    <i class="fa-solid fa-circle-question text-xs"></i>
+                                    <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
+                                        Đường dẫn thư mục trên Google Drive để tự động copy tệp trọng số (.pt, .onnx, .pth) sau khi huấn luyện xong.
+                                    </span>
+                                </span>
+                            </span>
+                            <span class="text-[10px] text-content-muted font-normal">Google Drive Path</span>
+                        </label>
+                        <input type="text" id="drive_save_dir" value="/content/drive/MyDrive/YOLO_Trained_Models" oninput="renderCode('drive_save_dir')" class="w-full bg-surface border border-emerald-500/40 text-sm rounded-lg p-2.5 text-emerald-400 font-mono focus:border-emerald-400 focus:outline-none placeholder:text-content-muted" placeholder="/content/drive/MyDrive/YOLO_Trained_Models">
+                    </div>
+                </div>
+
                 <!-- SECTION 2: PREPROCESSING PARAMETERS -->
                 <div class="bg-panel border border-border rounded-xl p-4 space-y-4">
                     <h3 class="text-sm font-semibold text-cyan-400 flex items-center gap-2 border-b border-border pb-2">
@@ -721,6 +745,7 @@
                 batch_size: 16,
                 imgsz: "640",
                 bbox_format: "yolo",
+                drive_save_dir: "/content/drive/MyDrive/YOLO_Trained_Models",
                 letterbox: true,
                 auto_orient: true,
                 grayscale: false,
@@ -750,6 +775,7 @@
                 batch_size: 16,
                 imgsz: "640",
                 bbox_format: "yolo",
+                drive_save_dir: "/content/drive/MyDrive/YOLO_Trained_Models",
                 letterbox: true,
                 auto_orient: true,
                 grayscale: false,
@@ -779,6 +805,7 @@
                 batch_size: 16,
                 imgsz: "640",
                 bbox_format: "yolo",
+                drive_save_dir: "/content/drive/MyDrive/YOLO_Trained_Models",
                 letterbox: true,
                 auto_orient: true,
                 grayscale: false,
@@ -861,7 +888,7 @@
             } else if (family === "yolov7") {
                 badge.textContent = "WongKinYiu Repository";
             } else if (family === "yolox") {
-                badge.textContent = "Megvii YOLOX PyTorch";
+                badge.textContent = "Megvii Anchor-Free";
             } else if (family === "pp_yoloe") {
                 badge.textContent = "Baidu PaddleDetection";
             } else {
@@ -887,6 +914,7 @@
             document.getElementById('batch_size').value = tpl.batch_size || 16;
             document.getElementById('imgsz').value = tpl.imgsz || '640';
             document.getElementById('bbox_format').value = tpl.bbox_format || 'yolo';
+            document.getElementById('drive_save_dir').value = tpl.drive_save_dir || "/content/drive/MyDrive/YOLO_Trained_Models";
 
             document.getElementById('letterbox').checked = !!tpl.letterbox;
             document.getElementById('auto_orient').checked = !!tpl.auto_orient;
@@ -978,6 +1006,7 @@
                 batch_size: parseInt(document.getElementById('batch_size').value) || 16,
                 imgsz: document.getElementById('imgsz').value,
                 bbox_format: document.getElementById('bbox_format').value,
+                drive_save_dir: document.getElementById('drive_save_dir').value || "/content/drive/MyDrive/YOLO_Trained_Models",
                 letterbox: document.getElementById('letterbox').checked,
                 auto_orient: document.getElementById('auto_orient').checked,
                 grayscale: document.getElementById('grayscale').checked,
@@ -1100,7 +1129,27 @@ results = model.train(
 # 6. EVALUATE & EXPORT
 metrics = model.val()
 model.export(format="onnx", dynamic=True)
-print("Training completed for ${st.model_version}!")
+print(f"Training completed for ${st.model_version}!")
+
+# 7. TỰ ĐỘNG LƯU MÔ HÌNH VỀ GOOGLE DRIVE
+import shutil
+import os
+
+${hlLine('drive_save_dir', `drive_save_dir = "${hl('drive_save_dir', st.drive_save_dir)}"`)} # Đường dẫn thư mục Google Drive để lưu tệp trọng số xuất ra.
+os.makedirs(drive_save_dir, exist_ok=True)
+
+# Copy file best.onnx và best.pt từ bộ nhớ tạm Colab sang Google Drive
+exp_name = f"colab_experiment_${st.model_version.replace('.pt','')}"
+onnx_path = f"runs/detect/{exp_name}/weights/best.onnx"
+pt_path = f"runs/detect/{exp_name}/weights/best.pt"
+
+if os.path.exists(onnx_path):
+    shutil.copy(onnx_path, os.path.join(drive_save_dir, f"{exp_name}_best.onnx"))
+    print(f"✅ Đã tự động lưu tệp ONNX về Google Drive tại: {drive_save_dir}/{exp_name}_best.onnx")
+
+if os.path.exists(pt_path):
+    shutil.copy(pt_path, os.path.join(drive_save_dir, f"{exp_name}_best.pt"))
+    print(f"✅ Đã tự động lưu tệp PyTorch (.pt) về Google Drive tại: {drive_save_dir}/{exp_name}_best.pt")
 `;
             } else if (family === "yolo_nas") {
                 codeHtml = `# =============================================================================
