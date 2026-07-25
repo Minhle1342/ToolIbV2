@@ -1,12 +1,22 @@
-# Dependencies and virtual environments
-node_modules/
+# Environment & Virtual Envs
 .venv/
 venv/
 env/
+ENV/
+env.bak/
+venv.bak/
 
-# Python caches and test/build output
+# Dependencies & Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Python caches, builds & test output
 __pycache__/
 *.py[cod]
+*$py.class
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -15,8 +25,9 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+*.egg
 
-# Local application state
+# Database & SQLite storage
 yolo_labeling.db
 *.db
 *.sqlite
@@ -25,26 +36,36 @@ yolo_labeling.db
 *.db-shm
 *.db-wal
 
-# Uploaded/generated datasets and exports
+# Uploaded/generated datasets, crops, project guides & exports
 uploads/
 exported_dataset/
 exports/
 classification_crops/
 project_backup/
+project_guides/
 test_data/
 
-# Model weights and generated ML artifacts
-models/
+# Model weights & AI artifacts
+models/*.onnx
+models/*.pt
+models/*.pth
+models/*.engine
+models/*.tflite
+models/*.mlpackage
+models/*.mlmodel
+models/*.weights
 *.onnx
 *.pt
 *.pth
 *.engine
 *.tflite
-*.mlpackage
-*.mlmodel
-*.weights
 
-# Secrets, certificates, and local env files
+# Cloudflare & Tunnel configuration
+config.yml
+*.cloudflared.json
+.cloudflared/
+
+# Secrets, SSL/TLS Certificates & Environment Files
 .env
 .env.*
 !.env.example
@@ -53,8 +74,11 @@ key.pem
 *.pem
 *.key
 *.crt
+*.pfx
+*credentials*.json
+*secret*.json
 
-# Archives and large generated files
+# Archives & compressed files
 *.zip
 *.rar
 *.7z
@@ -62,25 +86,37 @@ key.pem
 *.tar.gz
 *.tgz
 
-# Runtime logs and temporary files
+# Logs & temporary files
 *.log
 *.tmp
 *.temp
 tmp/
 temp/
 
-# Local tool metadata
+# IDE & Editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+.vs/
+
+# Local agent/tool metadata
 .agent/
 .agents/
 .specify/
 .vercel/
+.gemini/
 
 # Local cloned helper repos
 external/GitNexus/
 external/spec-kit/
 ToolIbV2/
 
-# OS/editor noise
+# OS Noise & Local Documentation
 .DS_Store
 Thumbs.db
 desktop.ini
