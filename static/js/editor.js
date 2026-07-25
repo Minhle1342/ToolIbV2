@@ -288,7 +288,7 @@ class Editor {
             cornerColor: 'white',
             cornerSize: 8,
             classId: classId,
-            collabId: collabId || (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random()*10000))),
+            collabId: collabId || (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random() * 10000))),
             lockRotation: true,
             hasRotatingPoint: false,
             visible: this.showBoxes,
@@ -490,15 +490,15 @@ class Editor {
         const cls = this.classes.find(c => c.id === obj.classId) || { color: '#00C2FF' };
         ctx.save();
         ctx.fillStyle = cls.color;
-        
+
         // Add a soft shadow so the dot stands out on both light and dark backgrounds
         ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
         ctx.shadowBlur = 4;
-        
+
         ctx.beginPath();
         ctx.arc(tW / 2, tH / 2, 4.5, 0, Math.PI * 2);
         ctx.fill();
-        
+
         // Optional: A subtle white outline for better contrast
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = '#ffffff';
@@ -553,11 +553,11 @@ class Editor {
                 this.lastPosY = evt.clientY;
                 return;
             }
-            
+
             // Allow selecting hidden boxes by clicking anywhere inside their bounding box or sweeping
             if (!this.showBoxes) {
                 const pointer = this.canvas.getPointer(opt.e);
-                
+
                 // Store drag start coordinates for sweep selection
                 if (this.currentMode === 'select') {
                     this.sweepStartX = pointer.x;
@@ -569,14 +569,14 @@ class Editor {
                 let minDistance = Infinity;
                 const zoom = this.canvas.getZoom();
                 const hitRadiusLogical = 10 / zoom; // 10 screen pixels tolerance
-                
+
                 rects.forEach(rect => {
                     const center = rect.getCenterPoint();
-                    
+
                     const dx = pointer.x - center.x;
                     const dy = pointer.y - center.y;
                     const distance = Math.sqrt(dx * dx + dy * dy);
-                    
+
                     if (distance <= hitRadiusLogical) {
                         if (distance < minDistance) {
                             minDistance = distance;
@@ -584,12 +584,12 @@ class Editor {
                         }
                     }
                 });
-                
+
                 if (clickedRect) {
                     this.setMode('select');
                     const activeObjects = this.canvas.getActiveObjects();
                     const isSelected = activeObjects.includes(clickedRect);
-                    
+
                     if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
                         const activeObj = this.canvas.getActiveObject();
                         if (activeObj) {
@@ -599,7 +599,7 @@ class Editor {
                             } else {
                                 currentObjects = [activeObj];
                             }
-                            
+
                             const index = currentObjects.indexOf(clickedRect);
                             if (index > -1) {
                                 currentObjects.splice(index, 1);
@@ -607,9 +607,9 @@ class Editor {
                                 currentObjects.push(clickedRect);
                                 clickedRect.set({ visible: true, evented: true, selectable: true });
                             }
-                            
+
                             this.canvas.discardActiveObject();
-                            
+
                             if (currentObjects.length === 1) {
                                 this.canvas.setActiveObject(currentObjects[0]);
                             } else if (currentObjects.length > 1) {
@@ -631,7 +631,7 @@ class Editor {
                             this.canvas.setActiveObject(clickedRect);
                         }
                     }
-                    
+
                     return;
                 }
 
@@ -680,7 +680,7 @@ class Editor {
                     strokeWidth: 1 / this.getZoom(),
                     selectable: false, // temporarily false
                     classId: this.currentMode === 'auto_label_region' ? null : this.currentClassId,
-                    collabId: (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random()*10000)))
+                    collabId: (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : ('box_' + Date.now() + '_' + Math.floor(Math.random() * 10000)))
                 });
                 this.canvas.add(this.rect);
             }
@@ -772,7 +772,7 @@ class Editor {
                         // Auto-select the new box
                         this.canvas.setActiveObject(this.rect);
                         this.onSelect({ selected: [this.rect] });
-                        
+
                         // Send real-time box creation
                         if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
                             const scaleX = this.rect.scaleX || 1;
@@ -801,16 +801,16 @@ class Editor {
                 const pointer = this.canvas.getPointer(opt.e);
                 const dx = Math.abs(pointer.x - this.sweepStartX);
                 const dy = Math.abs(pointer.y - this.sweepStartY);
-                
+
                 if (dx > 5 || dy > 5) {
                     const minX = Math.min(this.sweepStartX, pointer.x);
                     const maxX = Math.max(this.sweepStartX, pointer.x);
                     const minY = Math.min(this.sweepStartY, pointer.y);
                     const maxY = Math.max(this.sweepStartY, pointer.y);
-                    
+
                     const rects = this.canvas.getObjects('rect');
                     const selectedRects = [];
-                    
+
                     rects.forEach(rect => {
                         const center = rect.getCenterPoint();
                         if (center.x >= minX && center.x <= maxX && center.y >= minY && center.y <= maxY) {
@@ -818,11 +818,11 @@ class Editor {
                             selectedRects.push(rect);
                         }
                     });
-                    
+
                     if (selectedRects.length > 0) {
                         this.setMode('select');
                         const evt = opt.e;
-                        
+
                         let currentSelection = [];
                         if (evt.shiftKey || evt.ctrlKey || evt.metaKey) {
                             const activeObj = this.canvas.getActiveObject();
@@ -834,10 +834,10 @@ class Editor {
                                 }
                             }
                         }
-                        
+
                         // Combine and remove duplicates
                         const finalSelection = Array.from(new Set([...currentSelection, ...selectedRects]));
-                        
+
                         this.canvas.discardActiveObject();
                         if (finalSelection.length === 1) {
                             this.canvas.setActiveObject(finalSelection[0]);
@@ -847,7 +847,7 @@ class Editor {
                         }
                     }
                 }
-                
+
                 this.sweepStartX = undefined;
                 this.sweepStartY = undefined;
             }
@@ -870,7 +870,7 @@ class Editor {
                 const activeObj = this.canvas.getActiveObject();
                 if (activeObj) {
                     this.canvas.discardActiveObject();
-                    
+
                     if (!this.showBoxes) {
                         const rects = this.canvas.getObjects('rect');
                         rects.forEach(r => r.set({ visible: false, evented: false, selectable: false }));
@@ -880,7 +880,7 @@ class Editor {
                         window.updateMyActiveBox(null);
                     }
                 }
-                
+
                 // Reset zoom and pan to initial display
                 this.resetView();
                 this.canvas.requestRenderAll();
@@ -1198,7 +1198,7 @@ class Editor {
                     const pulse = animateDots ? (Math.sin(time / 200) + 1) / 2 : 0; // oscillates between 0 and 1
                     const pulseRadius = animateDots ? 4.5 + pulse * 6 : 4.5; // oscillates between 4.5 and 10.5
                     const pulseAlpha = animateDots ? (1 - pulse) * 0.8 : 0; // fades out as it expands
-                    
+
                     rects.forEach(rect => {
                         const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
                         const bound = this.getViewportRect(rect);
@@ -1208,7 +1208,7 @@ class Editor {
                         const overlapCount = rect.overlapCount || 0;
                         const baseColor = isOverlapping ? '#ff3b30' : cls.color;
                         const overlapBoost = Math.min(overlapCount, 4);
-                        
+
                         // Draw glowing outer ring
                         if (animateDots) {
                             ctx.save();
@@ -1520,11 +1520,11 @@ class Editor {
             magCanvas.addEventListener('mousedown', (e) => {
                 const activeObj = this.canvas.getActiveObject();
                 if (!activeObj || activeObj.type !== 'rect') return;
-                
+
                 isMagDragging = true;
                 magStartX = e.clientX;
                 magStartY = e.clientY;
-                
+
                 startBoxTop = activeObj.top;
                 startBoxLeft = activeObj.left;
                 startBoxWidth = activeObj.width * activeObj.scaleX;
@@ -1560,7 +1560,7 @@ class Editor {
                 const clickY = e.clientY - rect.top;
                 const isRight = clickX > rect.width / 2;
                 const isBottom = clickY > rect.height / 2;
-                
+
                 if ((isRight && isBottom) || (!isRight && !isBottom)) {
                     magCanvas.style.cursor = 'nwse-resize';
                 } else {
@@ -1570,7 +1570,7 @@ class Editor {
 
             window.addEventListener('mousemove', (e) => {
                 if (!isMagDragging) return;
-                
+
                 const activeObj = this.canvas.getActiveObject();
                 if (!activeObj || activeObj.type !== 'rect') {
                     isMagDragging = false;
@@ -1615,7 +1615,7 @@ class Editor {
                     }
                     newHeight = 5;
                 }
-                
+
                 // Enforce boundaries
                 if (newLeft < 0) {
                     newWidth += newLeft;
@@ -1640,12 +1640,12 @@ class Editor {
                     scaleX: 1,
                     scaleY: 1
                 });
-                
+
                 activeObj.setCoords();
                 this.canvas.requestRenderAll();
                 this.renderMagnifier(activeObj);
                 this.isDirty = true;
-                
+
                 // Keep the selection info panel updated
                 this.updateSelectionInfo(activeObj);
             });
@@ -1965,7 +1965,7 @@ class Editor {
             this.canvas.discardActiveObject();
             active.forEach(obj => {
                 this.canvas.remove(obj);
-                
+
                 // Emit event for real-time collaboration
                 if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
                     window.collabSocket.emit('box_deleted', {
@@ -2073,7 +2073,7 @@ class Editor {
 
                     // Add confidence tooltip/label if needed
                     obj.label = `${cls.name} (${(pred.confidence * 100).toFixed(1)}%)`;
-                    
+
                     if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
                         window.collabSocket.emit('box_updated', {
                             image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
@@ -2291,7 +2291,7 @@ class Editor {
                         stroke: cls.color,
                         classId: id
                     });
-                    
+
                     if (typeof window.collabSocket !== 'undefined' && window.collabSocket && window.collabSocket.connected) {
                         window.collabSocket.emit('box_updated', {
                             image_id: (typeof currentImage !== 'undefined' && currentImage) ? currentImage.id : null,
