@@ -146,6 +146,33 @@ class Editor {
     }
 
 
+    /**
+     * Clamp a bounding box rect so it stays entirely within the image boundaries.
+     * Adjusts left/top first, then limits scaleX/scaleY if the box still overflows.
+     */
+    _clampBoxToImage(obj) {
+        if (!obj || obj.type !== 'rect') return;
+        let left = obj.left;
+        let top = obj.top;
+        let scaleX = obj.scaleX;
+        let scaleY = obj.scaleY;
+
+        // Clamp top-left
+        if (left < 0) left = 0;
+        if (top < 0) top = 0;
+
+        // Clamp scale so bottom-right stays within image
+        if (left + obj.width * scaleX > this.imageWidth) {
+            scaleX = (this.imageWidth - left) / obj.width;
+        }
+        if (top + obj.height * scaleY > this.imageHeight) {
+            scaleY = (this.imageHeight - top) / obj.height;
+        }
+
+        obj.set({ left, top, scaleX, scaleY });
+        obj.setCoords();
+    }
+
     resizeCanvas() {
         const wrapper = document.getElementById('canvasWrapper');
         this.canvas.setWidth(wrapper.clientWidth);
@@ -626,6 +653,13 @@ class Editor {
 
                 this.isDrawing = true;
                 const pointer = this.canvas.getPointer(opt.e);
+
+                // Clamp draw origin to image bounds
+                if (pointer.x < 0) pointer.x = 0;
+                if (pointer.y < 0) pointer.y = 0;
+                if (pointer.x > this.imageWidth) pointer.x = this.imageWidth;
+                if (pointer.y > this.imageHeight) pointer.y = this.imageHeight;
+
                 this.origX = pointer.x;
                 this.origY = pointer.y;
 
@@ -1022,29 +1056,22 @@ class Editor {
         this.canvas.on('object:scaling', (e) => {
             if (e.target && e.target.type === 'rect') {
                 const obj = e.target;
-
-                // For scaling, simple clamp might distort if Aspect Ratio is locked or not. 
-                // Fabric usually keeps aspect ratio unless shift is pressed (or uniScale).
-                // But preventing scaling OUT of bounds is tricky because you have to change scaleX/Y.
-                // Easiest is to just clamp Top/Left if they moved, and if dimensions strictly exceed, limit scale?
-                // Let's at least clamp position. Validating Scale is complex.
-                // Users usually scale inside. If they scale out, we can try to clamp position.
-
-                let w = obj.width * obj.scaleX;
-                let h = obj.height * obj.scaleY;
                 let top = obj.top;
                 let left = obj.left;
+                let scaleX = obj.scaleX;
+                let scaleY = obj.scaleY;
 
-                // If the box is ALREADY too big for image, limit?
-                // Hard to perfect scaling constraints without complex math.
-                // At least ensure Top-Left and Bottom-Right don't drift uncontrollably out.
-                // We will just clamp selection box "moving" effect (top/left).
+                // Clamp top-left to image origin
+                if (top < 0) { top = 0; }
+                if (left < 0) { left = 0; }
 
-                if (top < 0) top = 0;
-                if (left < 0) left = 0;
-                // Don't force width/height constraint aggressively during scaling as it feels jittery
+                // Clamp bottom-right: limit scaleX/scaleY so the box doesn't exceed image edges
+                const maxW = this.imageWidth - left;
+                const maxH = this.imageHeight - top;
+                if (obj.width * scaleX > maxW) { scaleX = maxW / obj.width; }
+                if (obj.height * scaleY > maxH) { scaleY = maxH / obj.height; }
 
-                obj.set({ top, left });
+                obj.set({ top, left, scaleX, scaleY });
 
                 this.refreshOverlapHighlights();
                 this.renderMagnifier(obj);
@@ -1083,6 +1110,34 @@ class Editor {
         });
         this.canvas.on('object:modified', (e) => {
             if (this.bulkLoadingBoxes) return;
+
+            // Final boundary clamp: ensure no box sits outside image after any transform
+            if (e.target) {
+                if (e.target.type === 'rect') {
+                    this._clampBoxToImage(e.target);
+                } else if (e.target.type === 'activeSelection') {
+                    // For multi-select moves, shift the whole selection so all children fit
+                    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                    e.target.getObjects().forEach(c => {
+                        const m = c.calcTransformMatrix();
+                        const cLeft = m[4] - (c.width * c.scaleX) / 2;
+                        const cTop = m[5] - (c.height * c.scaleY) / 2;
+                        minX = Math.min(minX, cLeft);
+                        minY = Math.min(minY, cTop);
+                        maxX = Math.max(maxX, cLeft + c.width * c.scaleX);
+                        maxY = Math.max(maxY, cTop + c.height * c.scaleY);
+                    });
+                    let sLeft = e.target.left;
+                    let sTop = e.target.top;
+                    if (minX < 0) sLeft -= minX;
+                    if (minY < 0) sTop -= minY;
+                    if (maxX > this.imageWidth) sLeft -= (maxX - this.imageWidth);
+                    if (maxY > this.imageHeight) sTop -= (maxY - this.imageHeight);
+                    e.target.set({ left: sLeft, top: sTop });
+                    e.target.setCoords();
+                }
+            }
+
             if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection')) this.refreshOverlapHighlights();
             if (e.target && (e.target.type === 'rect' || e.target.type === 'activeSelection') && !this.historyProcessing) this.saveState();
             if (typeof updateClassListVisibility === 'function') updateClassListVisibility();
