@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, request, current_app
 # pyrefly: ignore [missing-import]
 import flask
 from models import db, Project, View, Image, AIModel, Tag
+import utils
 import os
 import re
 import shutil

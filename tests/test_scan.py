@@ -2,7 +2,7 @@ import os
 import sys
 
 # Thêm đường dẫn vào sys.path để có thể import từ app
-sys.path.insert(0, r"d:\Thuctap\ToolIb-main\ToolIb-main")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils import scan_and_sync_images
 

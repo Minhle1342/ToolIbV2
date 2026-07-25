@@ -1,6 +1,10 @@
 import unittest
 import os
+import sys
 import tempfile
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from test_helpers import create_isolated_test_app
 
