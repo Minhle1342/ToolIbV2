@@ -64,6 +64,66 @@ class Workspace {
         }
     }
 
+    getAutoLabelSettings() {
+        const conf = parseFloat(localStorage.getItem('autolabel_conf') || '0.25');
+        const iou = parseFloat(localStorage.getItem('autolabel_iou') || '0.45');
+        const ioh = parseFloat(localStorage.getItem('autolabel_ioh') || '0.50');
+        const overwrite = localStorage.getItem('autolabel_overwrite') === 'true';
+        return {
+            conf_threshold: isNaN(conf) ? 0.25 : conf,
+            iou_threshold: isNaN(iou) ? 0.45 : iou,
+            ioh_threshold: isNaN(ioh) ? 0.50 : ioh,
+            overwrite: overwrite
+        };
+    }
+
+    updateAutoLabelSettingsUI() {
+        const confInput = document.getElementById('inputAutoConf');
+        const iouInput = document.getElementById('inputAutoIoU');
+        const iohInput = document.getElementById('inputAutoIoH');
+        const confLbl = document.getElementById('lblAutoConf');
+        const iouLbl = document.getElementById('lblAutoIoU');
+        const iohLbl = document.getElementById('lblAutoIoH');
+
+        if (confInput && confLbl) confLbl.innerText = parseFloat(confInput.value).toFixed(2);
+        if (iouInput && iouLbl) iouLbl.innerText = parseFloat(iouInput.value).toFixed(2);
+        if (iohInput && iohLbl) iohLbl.innerText = parseFloat(iohInput.value).toFixed(2);
+
+        this.saveAutoLabelSettings();
+    }
+
+    saveAutoLabelSettings() {
+        const confInput = document.getElementById('inputAutoConf');
+        const iouInput = document.getElementById('inputAutoIoU');
+        const iohInput = document.getElementById('inputAutoIoH');
+        const overwriteInput = document.getElementById('inputAutoOverwrite');
+
+        if (confInput) localStorage.setItem('autolabel_conf', confInput.value);
+        if (iouInput) localStorage.setItem('autolabel_iou', iouInput.value);
+        if (iohInput) localStorage.setItem('autolabel_ioh', iohInput.value);
+        if (overwriteInput) localStorage.setItem('autolabel_overwrite', overwriteInput.checked ? 'true' : 'false');
+    }
+
+    initAutoLabelSettingsUI() {
+        const settings = this.getAutoLabelSettings();
+        const confInput = document.getElementById('inputAutoConf');
+        const iouInput = document.getElementById('inputAutoIoU');
+        const iohInput = document.getElementById('inputAutoIoH');
+        const overwriteInput = document.getElementById('inputAutoOverwrite');
+        const confLbl = document.getElementById('lblAutoConf');
+        const iouLbl = document.getElementById('lblAutoIoU');
+        const iohLbl = document.getElementById('lblAutoIoH');
+
+        if (confInput) confInput.value = settings.conf_threshold;
+        if (iouInput) iouInput.value = settings.iou_threshold;
+        if (iohInput) iohInput.value = settings.ioh_threshold;
+        if (overwriteInput) overwriteInput.checked = settings.overwrite;
+
+        if (confLbl) confLbl.innerText = settings.conf_threshold.toFixed(2);
+        if (iouLbl) iouLbl.innerText = settings.iou_threshold.toFixed(2);
+        if (iohLbl) iohLbl.innerText = settings.ioh_threshold.toFixed(2);
+    }
+
     async init() {
         // 1. Get Project Details (for classes)
 
@@ -72,6 +132,7 @@ class Workspace {
         this.setupImageSearchAutocomplete();
         await loadImages();
         this.updateSelectionUI();
+        this.initAutoLabelSettingsUI();
 
         // Auto-select ACTIVE_FILENAME if set
         if (typeof ACTIVE_FILENAME !== 'undefined' && ACTIVE_FILENAME && currentWorkspace.allImages) {
@@ -1724,7 +1785,8 @@ class Workspace {
         }
 
         try {
-            const data = await API.autoLabel(currentImage.id);
+            const settings = this.getAutoLabelSettings();
+            const data = await API.autoLabel(currentImage.id, null, settings);
             if (data.success) {
                 if (data.boxes.length > 0) {
                     editor.loadBoxes(data.boxes);
@@ -1974,7 +2036,8 @@ class Workspace {
                 h: region.h / editor.imageHeight
             };
 
-            const data = await API.autoLabel(currentImage.id, normRegion);
+            const settings = this.getAutoLabelSettings();
+            const data = await API.autoLabel(currentImage.id, normRegion, settings);
             if (data.success) {
                 if (data.boxes.length > 0) {
                     // Remove existing boxes whose center falls inside the drawn region
@@ -2038,14 +2101,18 @@ class Workspace {
     async autoLabelAll() {
         if (!this.allImages) return;
 
-        const unlabeledImages = this.allImages.filter(img => !img.is_labeled || !img.classes || img.classes.length === 0);
+        const settings = this.getAutoLabelSettings();
+        let targetImages = this.allImages;
+        if (!settings.overwrite) {
+            targetImages = this.allImages.filter(img => !img.is_labeled || !img.classes || img.classes.length === 0);
+        }
 
-        if (unlabeledImages.length === 0) {
-            alert("No unlabeled images found.");
+        if (targetImages.length === 0) {
+            alert("No images to auto label found.");
             return;
         }
 
-        if (!confirm(`Found ${unlabeledImages.length} unlabeled images. Auto label all of them now? This may take some time.`)) {
+        if (!confirm(`Found ${targetImages.length} images to auto label. Auto label all of them now? This may take some time.`)) {
             return;
         }
 
@@ -2062,7 +2129,7 @@ class Workspace {
         if (progressContainer) {
             progressContainer.classList.remove('hidden');
             if (progressBar) progressBar.style.width = '0%';
-            if (progressText) progressText.innerText = `Auto Labeling... 0/${unlabeledImages.length}`;
+            if (progressText) progressText.innerText = `Auto Labeling... 0/${targetImages.length}`;
         }
 
         let successCount = 0;
@@ -2070,9 +2137,9 @@ class Workspace {
         let processedCount = 0;
 
         try {
-            for (const img of unlabeledImages) {
+            for (const img of targetImages) {
                 try {
-                    const data = await API.autoLabel(img.id);
+                    const data = await API.autoLabel(img.id, null, settings);
                     if (data.success || data.boxes) {
                         if (data.boxes && data.boxes.length > 0) {
                             const saveData = {
@@ -3989,7 +4056,7 @@ function toggleDropdown(event, buttonId, dropdownId, dropdownWidth) {
     if (!btn || !dropdown) return;
 
     // Hide other dropdowns first
-    const allDropdowns = ['autoLabelDropdown', 'sequenceDropdown', 'collectCropsDropdown'];
+    const allDropdowns = ['autoLabelDropdown', 'autoLabelSettingsTooltip', 'sequenceDropdown', 'collectCropsDropdown'];
     allDropdowns.forEach(id => {
         if (id !== dropdownId) {
             const el = document.getElementById(id);
@@ -4024,6 +4091,10 @@ document.addEventListener('click', function (event) {
     if (dropdown && !dropdown.classList.contains('hidden') && !event.target.closest('#autoLabelDropdownWrapper')) {
         dropdown.classList.add('hidden');
     }
+    const settingsTooltip = document.getElementById('autoLabelSettingsTooltip');
+    if (settingsTooltip && !settingsTooltip.classList.contains('hidden') && !event.target.closest('#autoLabelSettingsWrapper')) {
+        settingsTooltip.classList.add('hidden');
+    }
     // Hide sequenceDropdown
     const seqDropdown = document.getElementById('sequenceDropdown');
     if (seqDropdown && !seqDropdown.classList.contains('hidden') && !event.target.closest('#btnShowSequenceNumbers') && !event.target.closest('#sequenceDropdown')) {
@@ -4037,12 +4108,14 @@ document.addEventListener('click', function (event) {
 
 window.addEventListener('resize', () => {
     positionFixedDropdown(document.getElementById('btnAutoLabelToggle'), document.getElementById('autoLabelDropdown'), 192);
+    positionFixedDropdown(document.getElementById('btnAutoLabelSettings'), document.getElementById('autoLabelSettingsTooltip'), 240);
     positionFixedDropdown(document.getElementById('btnShowSequenceNumbers'), document.getElementById('sequenceDropdown'), 192);
     positionFixedDropdown(document.getElementById('btnCollectAll'), document.getElementById('collectCropsDropdown'), 192);
 });
 
 window.addEventListener('scroll', () => {
     positionFixedDropdown(document.getElementById('btnAutoLabelToggle'), document.getElementById('autoLabelDropdown'), 192);
+    positionFixedDropdown(document.getElementById('btnAutoLabelSettings'), document.getElementById('autoLabelSettingsTooltip'), 240);
     positionFixedDropdown(document.getElementById('btnShowSequenceNumbers'), document.getElementById('sequenceDropdown'), 192);
 }, true);
 

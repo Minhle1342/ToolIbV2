@@ -1050,12 +1050,37 @@ def auto_label(image_id):
         return jsonify({'error': 'No active AI model found or model file missing.'}), 400
 
     region = None
-    if request.is_json:
-        data = request.get_json()
-        if data and 'region' in data:
-            region = data['region']
+    conf_threshold = 0.25
+    iou_threshold = 0.45
+    ioh_threshold = 0.50
 
-    result = engine.predict(image_path, region=region)
+    if request.is_json:
+        data = request.get_json() or {}
+        if 'region' in data:
+            region = data['region']
+        if 'conf_threshold' in data:
+            try:
+                conf_threshold = float(data['conf_threshold'])
+            except (ValueError, TypeError):
+                pass
+        if 'iou_threshold' in data:
+            try:
+                iou_threshold = float(data['iou_threshold'])
+            except (ValueError, TypeError):
+                pass
+        if 'ioh_threshold' in data:
+            try:
+                ioh_threshold = float(data['ioh_threshold'])
+            except (ValueError, TypeError):
+                pass
+
+    result = engine.predict(
+        image_path,
+        conf_threshold=conf_threshold,
+        iou_threshold=iou_threshold,
+        ioh_threshold=ioh_threshold,
+        region=region
+    )
 
     if 'error' in result:
         return jsonify(result), 400

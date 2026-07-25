@@ -87,13 +87,17 @@ class startAPI {
         return await res.json();
     }
 
-    async autoLabel(imageId, region = null) {
-        const body = region ? JSON.stringify({ region }) : null;
-        const headers = region ? { 'Content-Type': 'application/json' } : {};
+    async autoLabel(imageId, region = null, options = {}) {
+        const payload = {
+            ...(region ? { region } : {}),
+            ...(options && options.conf_threshold !== undefined ? { conf_threshold: options.conf_threshold } : {}),
+            ...(options && options.iou_threshold !== undefined ? { iou_threshold: options.iou_threshold } : {}),
+            ...(options && options.ioh_threshold !== undefined ? { ioh_threshold: options.ioh_threshold } : {})
+        };
         const res = await fetch(`/api/autolabel/${imageId}`, {
             method: 'POST',
-            headers: headers,
-            body: body
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
         if (!res.ok) {
             const err = await res.json();
@@ -198,6 +202,7 @@ class startAPI {
         });
         return await res.json();
     }
+
     async mergeProjectsPreflight(data) {
         const res = await fetch('/api/projects/merge/preflight', {
             method: 'POST',

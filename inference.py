@@ -80,13 +80,23 @@ class YOLOInference:
         
         # Preprocess: BGR -> RGB, float32, 0-1
         blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
+        
+        # Center the resized image on a padded canvas
+        pad_w = (target_w - new_w) // 2
+        pad_h = (target_h - new_h) // 2
+        
+        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = img_resized
+        
+        # Preprocess: BGR -> RGB, float32, 0-1
+        blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
         blob = blob.astype(np.float32) / 255.0
         blob = blob.transpose(2, 0, 1) # CHW
         blob = np.expand_dims(blob, axis=0) # Batch dimension
         
         return blob, (w, h), ratio, (pad_w, pad_h)
 
-    def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45, region=None):
+    def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45, ioh_threshold=0.50, region=None):
         self.ensure_session()
         if not self.session:
             return {'error': f'Model not found at {self.model_path}. Please ensure the file exists.'}
@@ -138,7 +148,8 @@ class YOLOInference:
                 pad_w,
                 pad_h,
                 offset_x,
-                offset_y
+                offset_y,
+                ioh_threshold=ioh_threshold
             )
 
         boxes = []
@@ -183,6 +194,9 @@ class YOLOInference:
             y = ((cy - bh / 2) - pad_h) / ratio
             w = bw / ratio
             h = bh / ratio
+            y = ((cy - bh / 2) - pad_h) / ratio
+            w = bw / ratio
+            h = bh / ratio
             
             boxes.append([x, y, w, h])
             confidences.append(float(filtered_scores[i]))
@@ -193,7 +207,30 @@ class YOLOInference:
         
         results = []
         if len(indices) > 0:
-            for i in indices.flatten():
+            kept_indices = []
+            flat_indices = indices.flatten()
+            for idx in flat_indices:
+                x, y, w, h = boxes[idx]
+                box_area = w * h
+                suppress = False
+                if ioh_threshold is not None and ioh_threshold < 1.0:
+                    for k_idx in kept_indices:
+                        kx, ky, kw, kh = boxes[k_idx]
+                        k_area = kw * kh
+                        ix1 = max(x, kx)
+                        iy1 = max(y, ky)
+                        ix2 = min(x + w, kx + kw)
+                        iy2 = min(y + h, ky + kh)
+                        if ix2 > ix1 and iy2 > iy1:
+                            inter = (ix2 - ix1) * (iy2 - iy1)
+                            min_area = min(box_area, k_area)
+                            if min_area > 0 and (inter / min_area) > ioh_threshold:
+                                suppress = True
+                                break
+                if not suppress:
+                    kept_indices.append(idx)
+
+            for i in kept_indices:
                 x, y, w, h = boxes[i]
 
                 x1 = np.clip(x, 0, orig_w)
@@ -300,7 +337,8 @@ class YOLOInference:
         pad_w,
         pad_h,
         offset_x,
-        offset_y
+        offset_y,
+        ioh_threshold=0.50
     ):
         results = []
         for row in rows:
@@ -339,6 +377,30 @@ class YOLOInference:
 
             if abs_w <= 0 or abs_h <= 0:
                 continue
+
+            # IoH suppression for end2end output
+            if ioh_threshold is not None and ioh_threshold < 1.0 and len(results) > 0:
+                box_area = abs_w * abs_h
+                suppress = False
+                for ex in results:
+                    ex_w = ex['w'] * full_w
+                    ex_h = ex['h'] * full_h
+                    ex_cx = ex['x'] * full_w
+                    ex_cy = ex['y'] * full_h
+                    ex_x1 = ex_cx - ex_w / 2
+                    ex_y1 = ex_cy - ex_h / 2
+                    ix1 = max(abs_x1, ex_x1)
+                    iy1 = max(abs_y1, ex_y1)
+                    ix2 = min(abs_x1 + abs_w, ex_x1 + ex_w)
+                    iy2 = min(abs_y1 + abs_h, ex_y1 + ex_h)
+                    if ix2 > ix1 and iy2 > iy1:
+                        inter = (ix2 - ix1) * (iy2 - iy1)
+                        min_area = min(box_area, ex_w * ex_h)
+                        if min_area > 0 and (inter / min_area) > ioh_threshold:
+                            suppress = True
+                            break
+                if suppress:
+                    continue
 
             cx = (abs_x1 + abs_w / 2) / full_w
             cy = (abs_y1 + abs_h / 2) / full_h

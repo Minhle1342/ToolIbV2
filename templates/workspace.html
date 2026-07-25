@@ -471,6 +471,63 @@
 
             <!-- Right Group -->
             <div class="flex flex-nowrap items-center gap-2 justify-end ml-auto flex-shrink-0">
+                <div class="relative flex items-center" id="autoLabelSettingsWrapper">
+                    <button id="btnAutoLabelSettings"
+                        class="p-2 text-content-muted hover:text-purple-500 rounded hover:bg-panel transition-colors"
+                        title="Cài đặt Auto Label (Confidence / IoU / IoH)"
+                        onclick="toggleDropdown(event, 'btnAutoLabelSettings', 'autoLabelSettingsTooltip', 240)">
+                        <i class="fa-solid fa-gear text-lg"></i>
+                    </button>
+                    <!-- Auto Label Settings Tooltip Popup -->
+                    <div id="autoLabelSettingsTooltip"
+                        class="fixed hidden flex-col bg-panel border border-border rounded-lg shadow-xl z-50 text-xs w-64 p-3 overflow-hidden space-y-3">
+                        <div class="flex items-center justify-between border-b border-border pb-2">
+                            <span class="font-bold text-content flex items-center gap-1.5">
+                                <i class="fa-solid fa-sliders text-purple-400"></i> Cài đặt Auto Label
+                            </span>
+                            <button onclick="document.getElementById('autoLabelSettingsTooltip').classList.add('hidden')" class="text-content-muted hover:text-content">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-content mb-1">
+                                <span>Confidence Threshold:</span>
+                                <span id="lblAutoConf" class="font-mono text-purple-400 font-semibold">0.25</span>
+                            </div>
+                            <input type="range" id="inputAutoConf" min="0.05" max="1.0" step="0.05" value="0.25"
+                                class="w-full h-1.5 bg-surface border border-border rounded appearance-none cursor-pointer accent-purple-500"
+                                oninput="currentWorkspace.updateAutoLabelSettingsUI()">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-content mb-1">
+                                <span>IoU Threshold:</span>
+                                <span id="lblAutoIoU" class="font-mono text-purple-400 font-semibold">0.45</span>
+                            </div>
+                            <input type="range" id="inputAutoIoU" min="0.05" max="1.0" step="0.05" value="0.45"
+                                class="w-full h-1.5 bg-surface border border-border rounded appearance-none cursor-pointer accent-purple-500"
+                                oninput="currentWorkspace.updateAutoLabelSettingsUI()">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between text-content mb-1">
+                                <span>IoH Threshold:</span>
+                                <span id="lblAutoIoH" class="font-mono text-purple-400 font-semibold">0.50</span>
+                            </div>
+                            <input type="range" id="inputAutoIoH" min="0.05" max="1.0" step="0.05" value="0.50"
+                                class="w-full h-1.5 bg-surface border border-border rounded appearance-none cursor-pointer accent-purple-500"
+                                oninput="currentWorkspace.updateAutoLabelSettingsUI()">
+                        </div>
+
+                        <div class="pt-2 border-t border-border flex items-center justify-between">
+                            <label for="inputAutoOverwrite" class="text-content-muted text-[11px] cursor-pointer flex items-center gap-1.5 select-none">
+                                <input type="checkbox" id="inputAutoOverwrite" class="rounded border-border accent-purple-500 cursor-pointer" onchange="currentWorkspace.saveAutoLabelSettings()">
+                                Ghi đè cả ảnh đã gán nhãn
+                            </label>
+                        </div>
+                    </div>
+                </div>
                 <button class="p-2 text-content-muted hover:text-blue-500 rounded hover:bg-panel"
                     onclick="openBackupModal()" id="btnBackup" title="Quản lý sao lưu" data-i18n-title="tool_backup">
                     <i class="fa-solid fa-clock-rotate-left text-lg"></i>
