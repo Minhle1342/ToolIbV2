@@ -33,6 +33,9 @@ PoC hiện hỗ trợ:
 - Poll trạng thái job.
 - Artifact được lưu về Google Drive.
 - Gửi job và theo dõi trực tiếp từ màn hình `/colab-manager`.
+- Lưu training history vào SQLite của ToolIbV2.
+- Resume polling sau khi reload trang.
+- Tải và import `best.onnx` vào Model Manager bằng một nút.
 
 PoC chưa hỗ trợ:
 
@@ -41,6 +44,7 @@ PoC chưa hỗ trợ:
 - Resume job sau khi Colab runtime bị dừng.
 - Các family YOLO-NAS, YOLOv7, YOLOX, PP-YOLOE hoặc Darknet.
 - Hủy training job từ UI.
+- Tự động activate model vừa import.
 
 ## 2. Chuẩn bị dataset
 
@@ -181,6 +185,21 @@ Các trạng thái:
 - `succeeded`
 - `failed`
 
+### Download ONNX artifact
+
+```http
+GET /api/jobs/<job_id>/artifacts/onnx
+Authorization: Bearer <token>
+```
+
+Endpoint chỉ trả file khi:
+
+- Job tồn tại và có trạng thái `succeeded`.
+- Artifact ONNX nằm trong đúng thư mục Drive của job.
+- File có extension `.onnx`.
+
+Client không được gửi filesystem path cần tải.
+
 ## 6. Test bằng PowerShell
 
 Thiết lập URL và token:
@@ -249,6 +268,11 @@ do {
 10. Bấm `Start Train`; UI phải hiện job ID và tự poll khoảng bốn giây một lần.
 11. Chờ trạng thái `succeeded` hoặc `failed`.
 12. Nếu thành công, kiểm tra UI hiển thị path `best.pt`, `best.onnx` và `manifest.json`.
+13. Kiểm tra job xuất hiện trong `Training history`.
+14. Reload trang; history vẫn phải còn.
+15. Với job `succeeded`, bấm `Import ONNX`.
+16. Mở Model Manager bằng link `Model #<id>`.
+17. Xác nhận model vừa import đang `inactive`.
 
 Quy tắc lưu trên browser:
 
@@ -260,6 +284,13 @@ Quy tắc lưu trên browser:
 Nếu Colab trả `409`, UI sẽ lấy `active_job_id` và chuyển sang theo dõi job đang chạy.
 
 Model ngoài `yolo11n.pt` và `yolo11s.pt` vẫn dùng được với phần Code Generator, nhưng nút Remote `Start Train` sẽ bị khóa.
+
+Nếu tab đã đóng hoặc token không còn trong `sessionStorage`:
+
+1. Nhập lại Quick Tunnel URL và bearer token.
+2. Trong Training history, bấm `Resume`.
+
+Nếu tunnel không phản hồi, job local được đánh dấu `unreachable`; trạng thái remote cuối cùng không bị đổi thành `failed`.
 
 ## 8. Test bảo vệ API
 
@@ -320,13 +351,23 @@ MyDrive/ToolIb_PoC/artifacts/<job_id>/failure.json
 
 ## 10. Import ONNX vào ToolIbV2
 
-1. Tải `best.onnx` từ Google Drive về máy.
-2. Mở màn hình quản lý model của ToolIbV2.
-3. Thêm model mới.
-4. Chọn type `detection`.
-5. Upload `best.onnx`.
-6. Activate model.
+Flow Phase 3:
+
+1. Tại Training history, bấm `Import ONNX`.
+2. Browser tải artifact bằng bearer token từ Colab.
+3. Browser upload file vào `/api/models`.
+4. ToolIbV2 tạo `AIModel` type `detection`.
+5. Model được giữ `inactive`.
+6. Mở link `Model #<id>` để tới Model Manager.
 7. Chạy inference smoke test trên một ảnh đã biết.
+8. Chỉ activate sau khi smoke test đạt.
+
+Nếu Quick Tunnel đã dừng trước khi import, có thể dùng flow thủ công:
+
+1. Tải `best.onnx` từ Google Drive về máy.
+2. Mở Model Manager.
+3. Thêm detection model mới.
+4. Upload file và smoke-test trước khi activate.
 
 Import thành công chỉ chứng minh file được app chấp nhận. Cần chạy inference để xác nhận ONNX tương thích với runtime hiện tại.
 
@@ -343,6 +384,11 @@ Import thành công chỉ chứng minh file được app chấp nhận. Cần ch
 - UI test connection hiển thị đúng GPU và active job.
 - UI không lưu token vào localStorage hoặc template.
 - UI tự dừng polling khi job `succeeded` hoặc `failed`.
+- Reload trang không làm mất local training history.
+- Đồng bộ cùng `remote_job_id` không tạo duplicate row.
+- Mất tunnel chỉ chuyển connection thành `unreachable`, không đổi remote status thành `failed`.
+- Download artifact yêu cầu bearer token và không nhận path từ client.
+- Model import từ Colab được giữ inactive cho tới khi người dùng activate.
 - `best.pt`, `best.onnx`, `manifest.json` tồn tại trên Drive.
 - ONNX được import lại ToolIbV2.
 - Inference smoke test chạy được.

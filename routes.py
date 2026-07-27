@@ -2,7 +2,7 @@
 from flask import Blueprint, jsonify, request, current_app
 # pyrefly: ignore [missing-import]
 import flask
-from models import db, Project, View, Image, AIModel, Tag
+from models import db, Project, View, Image, AIModel, Tag, TrainingJob
 import utils
 import os
 import re
@@ -18,6 +18,8 @@ import threading
 import time
 import uuid
 import zipfile
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 try:
     from clear_header import validate_and_rename_yolo_dataset
 except ModuleNotFoundError:
@@ -2282,6 +2284,231 @@ def get_project_assign_stats(project_id):
         'unlabeled': {'assigned': assigned_unlabeled, 'unassigned': unassigned_unlabeled}
     })
 
+# --- Colab training job history ---
+REMOTE_TRAINING_STATUSES = {'queued', 'running', 'succeeded', 'failed'}
+TERMINAL_TRAINING_STATUSES = {'succeeded', 'failed'}
+TRAINING_CONNECTION_STATUSES = {'synced', 'unreachable'}
+
+
+def normalize_training_api_url(value):
+    raw_value = str(value or '').strip()
+    if not raw_value:
+        raise ValueError('remote_api_url is required.')
+
+    parsed = urlsplit(raw_value)
+    is_local_http = (
+        parsed.scheme == 'http'
+        and parsed.hostname in {'localhost', '127.0.0.1'}
+    )
+    if parsed.scheme != 'https' and not is_local_http:
+        raise ValueError('remote_api_url must use HTTPS; HTTP is allowed only for localhost.')
+    if (
+        not parsed.hostname
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {'', '/'}
+    ):
+        raise ValueError('remote_api_url must contain only the API origin.')
+
+    port = f':{parsed.port}' if parsed.port else ''
+    return f'{parsed.scheme}://{parsed.hostname}{port}'
+
+
+def parse_remote_datetime(value):
+    if value in (None, ''):
+        return None
+    if not isinstance(value, str):
+        raise ValueError('Remote timestamps must be ISO-8601 strings.')
+
+    normalized = value.strip().replace('Z', '+00:00')
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def optional_int(value, field_name, minimum=0):
+    if value in (None, ''):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{field_name} must be an integer.') from exc
+    if parsed < minimum:
+        raise ValueError(f'{field_name} must be at least {minimum}.')
+    return parsed
+
+
+@api_bp.route('/training-jobs', methods=['GET'])
+def list_training_jobs():
+    limit = request.args.get('limit', default=50, type=int)
+    limit = min(max(limit or 50, 1), 100)
+    jobs = TrainingJob.query.order_by(
+        TrainingJob.created_at.desc(),
+        TrainingJob.id.desc()
+    ).limit(limit).all()
+    return jsonify([job.to_dict() for job in jobs])
+
+
+@api_bp.route('/training-jobs/sync', methods=['POST'])
+def sync_training_job():
+    payload = request.get_json(silent=True) or {}
+    remote_job_id = str(payload.get('remote_job_id') or '').strip()
+    try:
+        uuid.UUID(remote_job_id)
+    except (ValueError, AttributeError):
+        return jsonify({'error': 'remote_job_id must be a valid UUID.'}), 400
+
+    job = TrainingJob.query.filter_by(remote_job_id=remote_job_id).first()
+    is_new_job = job is None
+    try:
+        remote_api_url = payload.get('remote_api_url')
+        if remote_api_url is not None:
+            remote_api_url = normalize_training_api_url(remote_api_url)
+        elif job is None:
+            raise ValueError('remote_api_url is required for a new training job.')
+
+        remote_status = payload.get('status')
+        if remote_status is not None and remote_status not in REMOTE_TRAINING_STATUSES:
+            raise ValueError(f'Unsupported training status: {remote_status}')
+        if job is None and remote_status is None:
+            raise ValueError('status is required for a new training job.')
+
+        connection_status = payload.get(
+            'connection_status',
+            'synced' if remote_status is not None else None
+        )
+        if (
+            connection_status is not None
+            and connection_status not in TRAINING_CONNECTION_STATUSES
+        ):
+            raise ValueError(f'Unsupported connection status: {connection_status}')
+        should_apply_remote_snapshot = (
+            remote_status is not None
+            and (
+                job is None
+                or job.status not in TERMINAL_TRAINING_STATUSES
+                or remote_status in TERMINAL_TRAINING_STATUSES
+            )
+        )
+
+        project_id = payload.get('project_id')
+        if project_id not in (None, ''):
+            project_id = optional_int(project_id, 'project_id', minimum=1)
+            if db.session.get(Project, project_id) is None:
+                raise ValueError('project_id does not exist.')
+        elif project_id == '':
+            project_id = None
+
+        request_payload = payload.get('request')
+        if request_payload is not None and not isinstance(request_payload, dict):
+            raise ValueError('request must be a JSON object.')
+        request_payload = {
+            key: value
+            for key, value in (request_payload or {}).items()
+            if key in {'model', 'epochs', 'batch', 'imgsz'}
+        }
+
+        artifacts = payload.get('artifacts')
+        if artifacts is not None and not isinstance(artifacts, dict):
+            raise ValueError('artifacts must be a JSON object or null.')
+
+        if job is None:
+            job = TrainingJob(
+                remote_job_id=remote_job_id,
+                remote_api_url=remote_api_url,
+                status=remote_status,
+            )
+            db.session.add(job)
+
+        if remote_api_url is not None:
+            job.remote_api_url = remote_api_url
+        if 'project_id' in payload:
+            job.project_id = project_id
+
+        if should_apply_remote_snapshot:
+            job.status = remote_status
+
+        if connection_status is not None:
+            job.connection_status = connection_status
+        job.last_sync_error = (
+            str(payload.get('last_sync_error') or '')[:4000] or None
+            if job.connection_status == 'unreachable'
+            else None
+        )
+
+        if should_apply_remote_snapshot:
+            job.model = str(
+                payload.get('model')
+                or request_payload.get('model')
+                or job.model
+                or ''
+            )[:100] or None
+            job.epochs = optional_int(
+                payload.get('epochs', request_payload.get('epochs', job.epochs)),
+                'epochs',
+                minimum=1
+            )
+            job.batch = optional_int(
+                payload.get('batch', request_payload.get('batch', job.batch)),
+                'batch',
+                minimum=1
+            )
+            job.imgsz = optional_int(
+                payload.get('imgsz', request_payload.get('imgsz', job.imgsz)),
+                'imgsz',
+                minimum=1
+            )
+            job.current_epoch = optional_int(
+                payload.get('current_epoch', job.current_epoch),
+                'current_epoch'
+            ) or 0
+            job.total_epochs = optional_int(
+                payload.get('total_epochs', job.total_epochs),
+                'total_epochs'
+            ) or 0
+
+            if 'message' in payload:
+                job.message = str(payload.get('message') or '')[:4000] or None
+            if 'error' in payload:
+                job.error = str(payload.get('error') or '')[:8000] or None
+            if request_payload:
+                job.request_payload = request_payload
+            if 'artifacts' in payload:
+                job.artifacts = artifacts
+
+            timestamp_fields = {
+                'remote_created_at': payload.get('created_at'),
+                'started_at': payload.get('started_at'),
+                'finished_at': payload.get('finished_at'),
+            }
+            for field_name, value in timestamp_fields.items():
+                if value is not None:
+                    setattr(job, field_name, parse_remote_datetime(value))
+
+        job.last_synced_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(job.to_dict()), 201 if is_new_job else 200
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({'error': f'Could not sync training job: {exc}'}), 400
+
+
+@api_bp.route('/training-jobs/<int:job_id>', methods=['DELETE'])
+def delete_training_job(job_id):
+    job = db.session.get(TrainingJob, job_id)
+    if job is None:
+        return jsonify({'error': 'Training job not found.'}), 404
+    db.session.delete(job)
+    db.session.commit()
+    return jsonify({'message': 'Training history deleted.'})
+
+
 # --- AI Models ---
 @api_bp.route('/models/files', methods=['GET'])
 def get_model_files():
@@ -2324,15 +2551,19 @@ def get_models():
                 db.session.rollback()
                 print(f"Error auto-syncing models: {e}")
 
-        # Ensure at least one model is active if models exist
+        # Ensure at least one eligible model is active. Models imported from
+        # Colab remain inactive until the user smoke-tests and activates them.
         if AIModel.query.count() > 0:
             active_exists = AIModel.query.filter_by(is_active=True).first()
             if not active_exists:
-                default_model = AIModel.query.filter_by(filename='yolo12s.onnx').first()
+                activation_candidates = AIModel.query.filter_by(activation_ready=True)
+                default_model = activation_candidates.filter_by(
+                    filename='yolo12s.onnx'
+                ).first()
                 if default_model:
                     default_model.is_active = True
                 else:
-                    first_model = AIModel.query.first()
+                    first_model = activation_candidates.first()
                     if first_model:
                         first_model.is_active = True
                 try:
@@ -2351,6 +2582,26 @@ def add_model():
         name = request.form.get('name', '').strip()
         description = request.form.get('description', '').strip()
         model_type = request.form.get('model_type', 'detection').strip()
+        training_job_id = request.form.get('training_job_id', '').strip()
+        training_job = None
+
+        if training_job_id:
+            try:
+                training_job_id = int(training_job_id)
+            except ValueError:
+                return jsonify({'error': 'training_job_id must be an integer.'}), 400
+            training_job = db.session.get(TrainingJob, training_job_id)
+            if training_job is None:
+                return jsonify({'error': 'Training job not found.'}), 404
+            if training_job.status != 'succeeded':
+                return jsonify({'error': 'Only succeeded training jobs can import a model.'}), 409
+            if training_job.imported_model_id is not None:
+                return jsonify({
+                    'error': 'This training job already imported a model.',
+                    'model_id': training_job.imported_model_id,
+                }), 409
+            if model_type != 'detection':
+                return jsonify({'error': 'Colab training jobs can import detection models only.'}), 400
 
         if 'file' not in request.files:
             return jsonify({'error': 'Không tìm thấy file model tải lên.'}), 400
@@ -2387,12 +2638,18 @@ def add_model():
             name=name,
             description=description,
             filename=filename,
-            model_type=model_type
+            model_type=model_type,
+            is_active=False,
+            activation_ready=training_job is None,
         )
-        # If it's the first model, make it active
-        if AIModel.query.count() == 0:
+        # Preserve the historical manual-upload behavior. Colab imports are
+        # always inactive until explicitly activated after a smoke test.
+        if training_job is None and AIModel.query.count() == 0:
             new_model.is_active = True
         db.session.add(new_model)
+        db.session.flush()
+        if training_job is not None:
+            training_job.imported_model_id = new_model.id
         db.session.commit()
         return jsonify(new_model.to_dict()), 201
     except Exception as e:
@@ -2513,6 +2770,7 @@ def activate_model(model_id):
         # This allows YOLO and Classifier to be active simultaneously
         AIModel.query.filter_by(model_type=m.model_type).update({AIModel.is_active: False})
         m.is_active = True
+        m.activation_ready = True
         db.session.commit()
         # Reset the appropriate engine
         if m.model_type == 'classification':

@@ -279,6 +279,7 @@
         
         modelsData.forEach(m => {
             const isActive = m.is_active;
+            const needsSmokeTest = m.activation_ready === false;
             const item = document.createElement('div');
             item.className = `p-3 rounded border ${isActive ? 'border-primary bg-primary/5' : 'border-border bg-surface'} flex flex-col gap-2`;
             item.innerHTML = `
@@ -287,6 +288,7 @@
                         <div class="font-bold text-content flex items-center gap-2">
                             ${m.name} 
                             ${isActive ? '<span class="text-[10px] bg-primary text-content-inv px-1.5 py-0.5 rounded uppercase font-bold">Đang dùng (Active)</span>' : ''}
+                            ${needsSmokeTest ? '<span class="text-[10px] bg-amber-500/15 text-amber-500 border border-amber-500/30 px-1.5 py-0.5 rounded uppercase font-bold">Needs smoke test</span>' : ''}
                             <span class="text-[10px] px-1.5 py-0.5 rounded font-bold ${m.model_type === 'classification' ? 'bg-green-500/15 text-green-500 border border-green-500/30' : 'bg-blue-500/15 text-blue-500 border border-blue-500/30'}">
                                 ${m.model_type === 'classification' ? '<i class="fa-solid fa-tags mr-0.5"></i>Classifier' : '<i class="fa-solid fa-crosshairs mr-0.5"></i>Detection'}
                             </span>

@@ -81,6 +81,16 @@ def create_app(config_overrides=None):
                 conn.commit()
         except Exception:
             pass # Column already exists
+        try:
+            from sqlalchemy import text
+            with db.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE ai_models "
+                    "ADD COLUMN activation_ready BOOLEAN NOT NULL DEFAULT 1"
+                ))
+                conn.commit()
+        except Exception:
+            pass # Column already exists
     
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
