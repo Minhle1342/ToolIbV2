@@ -85,6 +85,13 @@ Start-Job -ScriptBlock {
 
 # Khoi chay Flask App
 Write-Host "[SERVER] Dang khoi chay Flask server bao mat tai https://localhost:5000..." -ForegroundColor Cyan
+Write-Host "[DATABASE] Dang khoi tao va kiem tra schema truoc khi chay cac process..." -ForegroundColor Cyan
+& $PythonPath -c "from app import create_app; create_app()"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[LOI] Khong the khoi tao database. Scheduler va Flask chua duoc khoi chay." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+Write-Host "[DATABASE] Schema da san sang." -ForegroundColor Green
 Write-Host "[SCHEDULER] Dang khoi chay training control plane rieng..." -ForegroundColor Cyan
 Write-Host "[LUU Y] Nhan Ctrl + C trong cua so nay de tat Server." -ForegroundColor DarkGray
 Write-Host "----------------------------------------------------------" -ForegroundColor Gray

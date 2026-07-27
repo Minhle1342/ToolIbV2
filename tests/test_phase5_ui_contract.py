@@ -30,6 +30,13 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
 def test_run_script_starts_and_stops_dedicated_scheduler_process():
     run_script = (REPOSITORY_ROOT / 'run.ps1').read_text(encoding='utf-8')
 
+    database_bootstrap = (
+        '& $PythonPath -c "from app import create_app; create_app()"'
+    )
+    assert database_bootstrap in run_script
+    scheduler_start = '$schedulerProcess = Start-Process'
+    assert run_script.index(database_bootstrap) < run_script.index(scheduler_start)
+    assert 'Scheduler va Flask chua duoc khoi chay.' in run_script
     assert 'Start-Process' in run_script
     assert 'training_scheduler.py' in run_script
     assert 'try {' in run_script
