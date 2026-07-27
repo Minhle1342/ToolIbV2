@@ -14,6 +14,7 @@ class Workspace {
         this.zoomOnFocus = localStorage.getItem('zoomOnFocus') !== 'false';
         this.imageById = new Map();
         this.collectCropsJobToken = 0;
+        this.autoLabelJobToken = 0;
         this.setupImageListDelegation();
         this.init();
         this.imageList = [];
@@ -68,12 +69,36 @@ class Workspace {
         const conf = parseFloat(localStorage.getItem('autolabel_conf') || '0.25');
         const iou = parseFloat(localStorage.getItem('autolabel_iou') || '0.45');
         const ioh = parseFloat(localStorage.getItem('autolabel_ioh') || '0.50');
-        const overwrite = localStorage.getItem('autolabel_overwrite') === 'true';
         return {
             conf_threshold: isNaN(conf) ? 0.25 : conf,
             iou_threshold: isNaN(iou) ? 0.45 : iou,
-            ioh_threshold: isNaN(ioh) ? 0.50 : ioh,
-            overwrite: overwrite
+            ioh_threshold: isNaN(ioh) ? 0.50 : ioh
+        };
+    }
+
+    hasValidBoundingBoxes(image) {
+        const boxes = Array.isArray(image?.boxes) ? image.boxes : [];
+        return boxes.some(box => {
+            const x = Number(box.x_center ?? box.x);
+            const y = Number(box.y_center ?? box.y);
+            const width = Number(box.width ?? box.w);
+            const height = Number(box.height ?? box.h);
+            return Number.isFinite(x)
+                && Number.isFinite(y)
+                && Number.isFinite(width)
+                && Number.isFinite(height)
+                && width > 0
+                && height > 0;
+        });
+    }
+
+    toImageListBox(box) {
+        return {
+            class_id: Number(box.class_id),
+            x_center: Number(box.x_center ?? box.x),
+            y_center: Number(box.y_center ?? box.y),
+            width: Number(box.width ?? box.w),
+            height: Number(box.height ?? box.h)
         };
     }
 
@@ -96,12 +121,10 @@ class Workspace {
         const confInput = document.getElementById('inputAutoConf');
         const iouInput = document.getElementById('inputAutoIoU');
         const iohInput = document.getElementById('inputAutoIoH');
-        const overwriteInput = document.getElementById('inputAutoOverwrite');
 
         if (confInput) localStorage.setItem('autolabel_conf', confInput.value);
         if (iouInput) localStorage.setItem('autolabel_iou', iouInput.value);
         if (iohInput) localStorage.setItem('autolabel_ioh', iohInput.value);
-        if (overwriteInput) localStorage.setItem('autolabel_overwrite', overwriteInput.checked ? 'true' : 'false');
     }
 
     initAutoLabelSettingsUI() {
@@ -109,7 +132,6 @@ class Workspace {
         const confInput = document.getElementById('inputAutoConf');
         const iouInput = document.getElementById('inputAutoIoU');
         const iohInput = document.getElementById('inputAutoIoH');
-        const overwriteInput = document.getElementById('inputAutoOverwrite');
         const confLbl = document.getElementById('lblAutoConf');
         const iouLbl = document.getElementById('lblAutoIoU');
         const iohLbl = document.getElementById('lblAutoIoH');
@@ -117,7 +139,6 @@ class Workspace {
         if (confInput) confInput.value = settings.conf_threshold;
         if (iouInput) iouInput.value = settings.iou_threshold;
         if (iohInput) iohInput.value = settings.ioh_threshold;
-        if (overwriteInput) overwriteInput.checked = settings.overwrite;
 
         if (confLbl) confLbl.innerText = settings.conf_threshold.toFixed(2);
         if (iouLbl) iouLbl.innerText = settings.iou_threshold.toFixed(2);
@@ -1402,6 +1423,7 @@ class Workspace {
                     const uniqueClasses = Array.from(new Set(boxes.map(b => b.class_id))).sort((a, b) => a - b);
                     localImg.classes = uniqueClasses;
                     localImg.is_labeled = boxes.length > 0;
+                    localImg.boxes = boxes.map(box => this.toImageListBox(box));
 
                     // Update check icon in DOM without reloading the whole list
                     const el = document.getElementById(`img-${currentImage.id}`);
@@ -2098,121 +2120,112 @@ class Workspace {
         }
     }
 
+    updateAutoLabelBulkProgress(job) {
+        const progressContainer = document.getElementById('uploadProgressContainer');
+        const progressBar = document.getElementById('uploadProgressBar');
+        const progressText = document.getElementById('uploadProgressText');
+        if (!progressContainer) return;
+
+        const total = Number(job.total_images || 0);
+        const processed = Number(job.processed_images || 0);
+        const percent = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+        const saved = Number(job.saved_count || 0);
+        const empty = Number(job.empty_count || 0);
+        const failed = Number(job.fail_count || 0);
+        const skipped = Number(job.skipped_count || 0);
+
+        progressContainer.classList.remove('hidden');
+        if (progressBar) {
+            progressBar.style.width = `${job.status === 'completed' ? 100 : percent}%`;
+        }
+
+        if (progressText) {
+            if (job.status === 'failed') {
+                progressText.innerText = `Auto Labeling failed: ${job.error || job.message || 'Unknown error'}`;
+            } else if (job.status === 'completed') {
+                progressText.innerText = `Auto Labeling complete: ${saved} saved, ${empty} empty, ${skipped} skipped, ${failed} failed`;
+            } else if (total === 0) {
+                progressText.innerText = job.message || 'Preparing auto-label job...';
+            } else {
+                progressText.innerText = `Auto Labeling... ${processed}/${total} (${percent}%)`;
+            }
+        }
+    }
+
+    async waitForAutoLabelBulkJob(jobId, token) {
+        while (token === this.autoLabelJobToken) {
+            const job = await API.getAutoLabelBulkJob(jobId);
+            this.updateAutoLabelBulkProgress(job);
+
+            if (job.status === 'completed') {
+                return job;
+            }
+
+            if (job.status === 'failed') {
+                throw new Error(job.error || job.message || 'Auto-label job failed');
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        return null;
+    }
+
     async autoLabelAll() {
         if (!this.allImages) return;
 
         const settings = this.getAutoLabelSettings();
-        let targetImages = this.allImages;
-        if (!settings.overwrite) {
-            targetImages = this.allImages.filter(img => !img.is_labeled || !img.classes || img.classes.length === 0);
-        }
+        const targetImages = this.allImages.filter(img => !this.hasValidBoundingBoxes(img));
 
         if (targetImages.length === 0) {
-            alert("No images to auto label found.");
+            alert("No images without bounding boxes found.");
             return;
         }
 
-        if (!confirm(`Found ${targetImages.length} images to auto label. Auto label all of them now? This may take some time.`)) {
+        if (!confirm(`Found ${targetImages.length} images without bounding boxes. Auto label them with 2 workers now? This may take some time.`)) {
             return;
         }
 
         const btn = document.getElementById('btnAutoLabelToggle');
         if (!btn) return;
         const originalHtml = btn.innerHTML;
+        const token = ++this.autoLabelJobToken;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         btn.disabled = true;
 
-        const progressContainer = document.getElementById('uploadProgressContainer');
-        const progressBar = document.getElementById('uploadProgressBar');
-        const progressText = document.getElementById('uploadProgressText');
-
-        if (progressContainer) {
-            progressContainer.classList.remove('hidden');
-            if (progressBar) progressBar.style.width = '0%';
-            if (progressText) progressText.innerText = `Auto Labeling... 0/${targetImages.length}`;
-        }
-
-        let successCount = 0;
-        let failCount = 0;
-        let processedCount = 0;
+        this.updateAutoLabelBulkProgress({
+            status: 'queued',
+            total_images: targetImages.length,
+            processed_images: 0,
+            message: 'Queued'
+        });
 
         try {
-            for (const img of targetImages) {
-                try {
-                    const data = await API.autoLabel(img.id, null, settings);
-                    if (data.success || data.boxes) {
-                        if (data.boxes && data.boxes.length > 0) {
-                            const saveData = {
-                                image_id: img.id,
-                                labels: data.boxes,
-                                flag_status: img.flag_status || false
-                            };
-                            const saveResult = await API.saveLabel(saveData);
-                            if (saveResult.message || saveResult.success) {
-                                successCount++;
-                                const acceptedBoxes = Array.isArray(data.boxes)
-                                    ? data.boxes.filter(box => Number.isFinite(Number(box.class_id))
-                                        && Number.isFinite(Number(box.x))
-                                        && Number.isFinite(Number(box.y))
-                                        && Number.isFinite(Number(box.w))
-                                        && Number.isFinite(Number(box.h))
-                                        && Number(box.w) > 0
-                                        && Number(box.h) > 0)
-                                    : [];
-                                img.classes = saveResult.is_labeled
-                                    ? Array.from(new Set(acceptedBoxes.map(b => Number(b.class_id)))).sort((a, b) => a - b)
-                                    : [];
-                                img.is_labeled = !!saveResult.is_labeled;
+            const startResult = await API.startAutoLabelBulkJob(PROJECT_ID, settings);
+            const finalJob = await this.waitForAutoLabelBulkJob(startResult.job_id, token);
+            if (!finalJob) return;
 
-                                const el = document.getElementById(`img-${img.id}`);
-                                if (el) {
-                                    const labelIcon = el.querySelector('.fa-regular.fa-circle, .fa-solid.fa-check');
-                                    if (labelIcon) {
-                                        labelIcon.className = img.is_labeled
-                                            ? 'fa-solid fa-check text-secondary'
-                                            : 'fa-regular fa-circle text-content-muted';
-                                    }
-                                }
-                            } else {
-                                failCount++;
-                            }
-                        } else {
-                            // Inference successful but no objects found
-                            successCount++;
-                        }
-                    } else {
-                        // Failed inference
-                        failCount++;
-                    }
-                } catch (err) {
-                    console.error(`Failed to auto-label image ${img.id}:`, err);
-                    failCount++;
-                }
-
-                processedCount++;
-                if (progressContainer) {
-                    const percentComplete = Math.round((processedCount / unlabeledImages.length) * 100);
-                    if (progressBar) progressBar.style.width = percentComplete + '%';
-                    if (progressText) progressText.innerText = `Auto Labeling... ${processedCount}/${unlabeledImages.length} (${percentComplete}%)`;
-                }
-            }
-
-            alert(`Quá trình gán nhãn tự động hoàn tất.\nThành công: ${successCount} ảnh.\n${failCount > 0 ? `Thất bại: ${failCount} ảnh.` : ''}`);
-
-            if (currentImage && unlabeledImages.find(img => img.id === currentImage.id)) {
+            await loadImages(true);
+            if (currentImage) {
                 const updatedImg = this.allImages.find(img => img.id === currentImage.id);
-                if (updatedImg.is_labeled) {
+                if (updatedImg) {
                     await this.selectImage(updatedImg);
                 }
             }
+
+            alert(`Quá trình gán nhãn tự động hoàn tất.\nĐã lưu: ${finalJob.saved_count || 0} ảnh.\nKhông phát hiện box: ${finalJob.empty_count || 0} ảnh.\n${finalJob.skipped_count > 0 ? `Bỏ qua: ${finalJob.skipped_count} ảnh.\n` : ''}${finalJob.fail_count > 0 ? `Thất bại: ${finalJob.fail_count} ảnh.` : ''}`);
         } catch (e) {
             alert("An error occurred during bulk auto-labeling: " + e.message);
         } finally {
-            if (progressContainer) {
-                progressContainer.classList.add('hidden');
+            if (token === this.autoLabelJobToken) {
+                setTimeout(() => {
+                    if (token === this.autoLabelJobToken) {
+                        document.getElementById('uploadProgressContainer')?.classList.add('hidden');
+                    }
+                }, 3500);
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
             }
-            btn.innerHTML = originalHtml;
-            btn.disabled = false;
         }
     }
 
@@ -3533,7 +3546,7 @@ function renderImageList(container, images, overlapThreshold) {
     cancelImageListRender();
 
     if (images.length === 0) {
-        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">KhÃ´ng cÃ³ áº£nh nÃ o khá»›p vá»›i bá»™ lá»c</div>';
+        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">No images match the current filters</div>';
         updateTotalImageCountFromImageList();
         return;
     }
@@ -3675,6 +3688,22 @@ function applyAdvancedClassFilter() {
 
     document.getElementById('advancedClassFilterModal').classList.add('hidden');
     loadImages(false);
+}
+
+function clearClassFiltersForStatusChange() {
+    document.querySelectorAll('.class-filter-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+    document.querySelectorAll('.adv-class-radio').forEach(radio => {
+        radio.checked = false;
+    });
+    advancedClassFilterActive = false;
+    advancedSelectedClasses = [];
+}
+
+function handleFlagFilterChange() {
+    clearClassFiltersForStatusChange();
+    loadImages(true);
 }
 
 function handleViewFilterChange() {
