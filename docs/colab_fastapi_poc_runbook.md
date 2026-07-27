@@ -1,0 +1,461 @@
+# ToolIbV2 Colab FastAPI PoC Runbook
+
+## Mục tiêu
+
+Runbook này kiểm tra flow tạm thời:
+
+```text
+ToolIbV2 export dataset
+→ ZIP trên Google Drive
+→ Colab giải nén vào local disk
+→ FastAPI nhận job
+→ Ultralytics train bằng GPU
+→ export best.pt và best.onnx
+→ lưu artifact vào Google Drive
+→ import ONNX lại ToolIbV2
+```
+
+Notebook sử dụng:
+
+- `notebooks/Colab_FastAPI_PoC.ipynb`
+
+Đây là PoC, không phải production deployment. Cloudflare Quick Tunnel có URL động và không có SLA.
+
+## 1. Phạm vi
+
+PoC hiện hỗ trợ:
+
+- Ultralytics YOLO detection.
+- `yolo11n.pt` và `yolo11s.pt`.
+- Một training job tại một thời điểm.
+- Dataset YOLO được tạo bởi ToolIbV2.
+- Bearer token.
+- Poll trạng thái job.
+- Artifact được lưu về Google Drive.
+- Gửi job và theo dõi trực tiếp từ màn hình `/colab-manager`.
+
+PoC chưa hỗ trợ:
+
+- Upload dataset qua public API.
+- Nhiều training job hoặc nhiều GPU.
+- Resume job sau khi Colab runtime bị dừng.
+- Các family YOLO-NAS, YOLOv7, YOLOX, PP-YOLOE hoặc Darknet.
+- Hủy training job từ UI.
+
+## 2. Chuẩn bị dataset
+
+Trong ToolIbV2:
+
+1. Mở màn hình Export.
+2. Chọn project/images/split cần train.
+3. Chọn format YOLO.
+4. Chạy `Export & Generate data.yaml`.
+5. Kiểm tra thư mục `exported_dataset`.
+
+Cấu trúc mong đợi:
+
+```text
+exported_dataset/
+├── data.yaml
+├── images/
+│   ├── train/
+│   └── val/
+└── labels/
+    ├── train/
+    └── val/
+```
+
+Nén toàn bộ thư mục thành `dataset.zip`. ZIP có thể chứa trực tiếp `data.yaml` hoặc chứa thêm thư mục `exported_dataset/`; notebook tự tìm YAML ở cả hai trường hợp.
+
+Upload file tới:
+
+```text
+MyDrive/ToolIb_PoC/dataset.zip
+```
+
+Không giải nén và train trực tiếp trên Drive. Notebook sẽ giải nén vào `/content/toolib_poc/dataset` để giảm I/O trên Drive.
+
+## 3. Tạo API token
+
+Trong Google Colab:
+
+1. Mở `Secrets`.
+2. Tạo secret tên `TOOLIB_COLAB_API_TOKEN`.
+3. Giá trị nên là chuỗi ngẫu nhiên ít nhất 16 ký tự.
+4. Bật quyền truy cập secret cho notebook.
+
+Ví dụ tạo token trên PowerShell:
+
+```powershell
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$bytes = New-Object byte[] 32
+$rng.GetBytes($bytes)
+$colabToken = -join ($bytes | ForEach-Object { $_.ToString('x2') })
+$rng.Dispose()
+$colabToken
+```
+
+Không paste token trực tiếp vào source notebook và không chia sẻ notebook kèm output chứa token.
+
+## 4. Khởi chạy notebook
+
+1. Upload `notebooks/Colab_FastAPI_PoC.ipynb` lên Google Colab.
+2. Chọn `Runtime → Change runtime type → GPU`.
+3. Chạy cell cài dependency.
+4. Chạy cell mount Drive và validate dataset.
+5. Xác nhận số ảnh train/val và class list đúng.
+6. Chạy cell tạo FastAPI app.
+7. Chạy cell Uvicorn + Cloudflare Tunnel.
+8. Copy URL `https://<random>.trycloudflare.com`.
+
+Không chạy lại cell tạo app hoặc server khi training đang hoạt động.
+
+Notebook Phase 2 cho phép CORS từ ToolIbV2 chạy tại:
+
+- `http://localhost:5000`
+- `https://localhost:5000`
+- `http://127.0.0.1:5000`
+- `https://127.0.0.1:5000`
+
+Nếu đã upload notebook trước Phase 2, phải upload lại file hiện tại và chạy lại từ đầu. Thay đổi CORS trong repo không tự cập nhật notebook đang mở trên Colab.
+
+## 5. API contract
+
+### Health
+
+```http
+GET /health
+```
+
+Không cần token. Response chỉ chứa trạng thái API, GPU và active job ID.
+
+### Submit training
+
+```http
+POST /api/train
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+Body:
+
+```json
+{
+  "model": "yolo11n.pt",
+  "epochs": 1,
+  "batch": 4,
+  "imgsz": 640
+}
+```
+
+Response thành công:
+
+```http
+202 Accepted
+```
+
+```json
+{
+  "job_id": "<uuid>",
+  "status": "queued"
+}
+```
+
+Nếu đang có job:
+
+```http
+409 Conflict
+```
+
+### Job status
+
+```http
+GET /api/jobs/<job_id>
+Authorization: Bearer <token>
+```
+
+Các trạng thái:
+
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+
+## 6. Test bằng PowerShell
+
+Thiết lập URL và token:
+
+```powershell
+$colabUrl = 'https://example.trycloudflare.com'
+$colabToken = 'replace-with-your-secret'
+$headers = @{ Authorization = "Bearer $colabToken" }
+```
+
+Health:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri "$colabUrl/health"
+```
+
+Submit một job một epoch:
+
+```powershell
+$body = @{
+    model  = 'yolo11n.pt'
+    epochs = 1
+    batch  = 4
+    imgsz  = 640
+} | ConvertTo-Json
+
+$submitted = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$colabUrl/api/train" `
+    -Headers $headers `
+    -ContentType 'application/json' `
+    -Body $body
+
+$submitted
+$jobId = $submitted.job_id
+```
+
+Poll trạng thái:
+
+```powershell
+do {
+    $job = Invoke-RestMethod `
+        -Method Get `
+        -Uri "$colabUrl/api/jobs/$jobId" `
+        -Headers $headers
+
+    $job | ConvertTo-Json -Depth 5
+    if ($job.status -in @('succeeded', 'failed')) {
+        break
+    }
+    Start-Sleep -Seconds 10
+} while ($true)
+```
+
+## 7. Test từ UI ToolIbV2
+
+1. Giữ cell server/tunnel trên Colab đang chạy.
+2. Khởi động ToolIbV2 tại `localhost:5000`.
+3. Mở `/colab-manager`.
+4. Chọn family `YOLO11`.
+5. Chọn `yolo11n.pt` hoặc `yolo11s.pt`.
+6. Chọn task `detect`, epochs, batch và image size hợp lệ.
+7. Trong panel `Remote Colab API (PoC)`, paste Quick Tunnel URL.
+8. Paste cùng giá trị của Colab Secret `TOOLIB_COLAB_API_TOKEN`.
+9. Bấm `Kiểm tra`; trạng thái phải là `Online · GPU`.
+10. Bấm `Start Train`; UI phải hiện job ID và tự poll khoảng bốn giây một lần.
+11. Chờ trạng thái `succeeded` hoặc `failed`.
+12. Nếu thành công, kiểm tra UI hiển thị path `best.pt`, `best.onnx` và `manifest.json`.
+
+Quy tắc lưu trên browser:
+
+- Endpoint được lưu trong `localStorage`, vì Quick Tunnel URL không phải secret.
+- Token chỉ được lưu trong `sessionStorage`; đóng tab sẽ xóa token.
+- Token không được lưu trong template và không được ghi ra console.
+- Nút `Dừng theo dõi` chỉ dừng polling của UI, không hủy training trên Colab.
+
+Nếu Colab trả `409`, UI sẽ lấy `active_job_id` và chuyển sang theo dõi job đang chạy.
+
+Model ngoài `yolo11n.pt` và `yolo11s.pt` vẫn dùng được với phần Code Generator, nhưng nút Remote `Start Train` sẽ bị khóa.
+
+## 8. Test bảo vệ API
+
+Không có token phải trả `401`:
+
+```powershell
+Invoke-WebRequest `
+    -Method Post `
+    -Uri "$colabUrl/api/train" `
+    -ContentType 'application/json' `
+    -Body $body `
+    -SkipHttpErrorCheck
+```
+
+Submit request thứ hai khi job đầu đang chạy phải trả `409`.
+
+Các giá trị sau phải bị từ chối với `422`:
+
+- Model ngoài `yolo11n.pt`, `yolo11s.pt`.
+- `epochs` nhỏ hơn 1 hoặc lớn hơn 100.
+- `batch` nhỏ hơn 1 hoặc lớn hơn 32.
+- `imgsz` ngoài `320, 416, 512, 640, 768`.
+
+API không nhận `dataset_yaml`, `drive_save_dir` hoặc filesystem path từ client.
+
+## 9. Kiểm tra artifact
+
+Khi job thành công, response status chứa:
+
+```text
+MyDrive/ToolIb_PoC/artifacts/<job_id>/best.pt
+MyDrive/ToolIb_PoC/artifacts/<job_id>/best.onnx
+MyDrive/ToolIb_PoC/artifacts/<job_id>/manifest.json
+```
+
+Có thể có thêm:
+
+- `results.csv`
+- `args.yaml`
+
+Manifest phải ghi:
+
+- Job ID.
+- Model.
+- Epochs.
+- Batch.
+- Image size.
+- Dataset YAML đã dùng.
+- Training save directory.
+- Artifact paths.
+- Finish timestamp.
+
+Nếu job lỗi, notebook cố gắng ghi:
+
+```text
+MyDrive/ToolIb_PoC/artifacts/<job_id>/failure.json
+```
+
+## 10. Import ONNX vào ToolIbV2
+
+1. Tải `best.onnx` từ Google Drive về máy.
+2. Mở màn hình quản lý model của ToolIbV2.
+3. Thêm model mới.
+4. Chọn type `detection`.
+5. Upload `best.onnx`.
+6. Activate model.
+7. Chạy inference smoke test trên một ảnh đã biết.
+
+Import thành công chỉ chứng minh file được app chấp nhận. Cần chạy inference để xác nhận ONNX tương thích với runtime hiện tại.
+
+## 11. Checklist nghiệm thu
+
+- Notebook chạy từ đầu trên một Colab GPU runtime mới.
+- Dataset ZIP được giải nén và validate.
+- API token sai hoặc thiếu trả `401`.
+- Submit hợp lệ trả `202` trong dưới hai giây.
+- Submit job thứ hai trả `409`.
+- Health và job status vẫn phản hồi khi GPU đang train.
+- Job chuyển `queued → running → succeeded` hoặc `failed`.
+- Epoch hiện tại được cập nhật.
+- UI test connection hiển thị đúng GPU và active job.
+- UI không lưu token vào localStorage hoặc template.
+- UI tự dừng polling khi job `succeeded` hoặc `failed`.
+- `best.pt`, `best.onnx`, `manifest.json` tồn tại trên Drive.
+- ONNX được import lại ToolIbV2.
+- Inference smoke test chạy được.
+
+## 12. Lỗi thường gặp
+
+### Dataset archive not found
+
+Kiểm tra chính xác:
+
+```text
+/content/drive/MyDrive/ToolIb_PoC/dataset.zip
+```
+
+Hoặc sửa biến `DRIVE_ARCHIVE` trong cell cấu hình notebook.
+
+### data.yaml không tìm thấy
+
+Mở ZIP và xác nhận có `data.yaml` hoặc `data.yml`.
+
+### Train split contains no images
+
+Kiểm tra đường dẫn `path` và `train` trong YAML có đúng tương đối với vị trí YAML sau khi giải nén.
+
+### Ultralytics tìm nhầm `/content/images/train` hoặc `/content/images/val`
+
+ToolIbV2 export `path: .`, trong khi một số phiên bản Ultralytics có thể resolve dấu `.` từ `/content` thay vì từ thư mục chứa YAML. Notebook hiện tại tạo `/content/toolib_poc/runtime_data.yaml` với `path` tuyệt đối trước khi train.
+
+Nếu đang dùng bản notebook cũ đã upload, chạy cell vá nóng sau cell dataset và trước khi submit job mới:
+
+```python
+from pathlib import Path
+import yaml
+
+source_yaml = Path("/content/toolib_poc/dataset/exported_dataset/data.yaml")
+with source_yaml.open("r", encoding="utf-8") as stream:
+    runtime_config = yaml.safe_load(stream) or {}
+
+configured_root = Path(str(runtime_config.get("path", ".")))
+if not configured_root.is_absolute():
+    configured_root = (source_yaml.parent / configured_root).resolve()
+
+runtime_config["path"] = str(configured_root)
+DATASET_YAML = Path("/content/toolib_poc/runtime_data.yaml")
+with DATASET_YAML.open("w", encoding="utf-8") as stream:
+    yaml.safe_dump(runtime_config, stream, sort_keys=False, allow_unicode=True)
+
+print(DATASET_YAML.read_text(encoding="utf-8"))
+```
+
+Output phải chứa một path tuyệt đối tương tự:
+
+```yaml
+path: /content/toolib_poc/dataset/exported_dataset
+```
+
+### CUDA out of memory
+
+Thử:
+
+- `batch: 2` hoặc `batch: 1`.
+- `imgsz: 320`.
+- `yolo11n.pt`.
+
+Job phải chuyển sang `failed`; API không được chết.
+
+### Cloudflare URL không xuất hiện
+
+- Chạy lại cell server/tunnel sau khi xác nhận local `/health` hoạt động.
+- Kiểm tra output của `cloudflared`.
+- URL Quick Tunnel có thể thay đổi mỗi lần chạy.
+
+### UI báo lỗi CORS hoặc `Failed to fetch`
+
+- Xác nhận đang dùng notebook Phase 2 hiện tại và đã chạy lại cell tạo FastAPI app.
+- Xác nhận ToolIbV2 đang mở đúng origin `localhost:5000` hoặc `127.0.0.1:5000`.
+- Không mở file HTML trực tiếp bằng `file://`.
+- Xác nhận Quick Tunnel URL mới nhất vẫn trả `/health`.
+- Nếu Flask chạy ở port khác, thêm đúng origin đó vào `allow_origins` trong notebook rồi chạy lại cell app và server.
+
+### `Text file busy: /content/cloudflared`
+
+Runtime cũ vẫn còn process `cloudflared` sử dụng executable. Notebook hiện tại sẽ kiểm tra và tái sử dụng binary hợp lệ thay vì ghi đè nó.
+
+Nếu đang dùng bản notebook cũ đã upload trước khi có fix, chạy một cell tạm:
+
+```python
+import subprocess
+import time
+
+subprocess.run(["pkill", "-x", "cloudflared"], check=False)
+time.sleep(2)
+```
+
+Sau đó chạy lại cell cài dependency. Nếu runtime đang ở trạng thái không ổn định hoặc vẫn còn server/thread cũ, chọn `Runtime → Disconnect and delete runtime`, kết nối lại GPU và chạy notebook từ đầu. Artifact đã copy lên Drive không bị xóa.
+
+### Colab runtime bị dừng
+
+Job trong memory sẽ mất. Artifact đã copy xong trên Drive vẫn còn. PoC không cam kết resume training.
+
+## 13. Cleanup
+
+Khi test xong:
+
+1. Dừng `cloudflared`.
+2. Đặt `UVICORN_SERVER.should_exit = True`.
+3. Shutdown executor.
+4. Disconnect và delete Colab runtime.
+
+Nếu cần xóa artifact, chỉ xóa thư mục:
+
+```text
+MyDrive/ToolIb_PoC
+```
+
+Không dùng script cleanup với path nhận từ request API.

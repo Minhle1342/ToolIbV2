@@ -171,6 +171,94 @@
                     </div>
                 </div>
 
+                <!-- PHASE 2: TEMPORARY REMOTE COLAB API -->
+                <div class="bg-panel border border-sky-500/40 rounded-xl p-4 space-y-4 shadow-sm">
+                    <h3 class="text-sm font-semibold text-sky-400 flex items-center justify-between border-b border-border pb-2">
+                        <span class="flex items-center gap-2">
+                            <i class="fa-solid fa-satellite-dish"></i>
+                            Remote Colab API (PoC)
+                        </span>
+                        <span id="colabRemoteConnectionBadge" class="text-[10px] font-mono text-content-muted bg-surface px-2 py-0.5 rounded border border-border">
+                            Chưa kiểm tra
+                        </span>
+                    </h3>
+
+                    <p class="text-[11px] text-content-muted leading-relaxed">
+                        Gọi trực tiếp FastAPI tạm thời trên Colab. URL Quick Tunnel được lưu trên trình duyệt;
+                        bearer token chỉ được giữ trong tab hiện tại và không được lưu cùng template.
+                    </p>
+
+                    <div>
+                        <label for="colabRemoteEndpoint" class="text-xs text-content font-medium mb-1 block">Temporary public API URL</label>
+                        <input
+                            type="url"
+                            id="colabRemoteEndpoint"
+                            placeholder="https://example.trycloudflare.com"
+                            autocomplete="url"
+                            spellcheck="false"
+                            class="w-full bg-surface border border-border text-sm rounded-lg p-2.5 text-content font-mono focus:border-sky-500 focus:outline-none"
+                        >
+                    </div>
+
+                    <div>
+                        <label for="colabRemoteToken" class="text-xs text-content font-medium mb-1 block">Bearer token</label>
+                        <input
+                            type="password"
+                            id="colabRemoteToken"
+                            placeholder="TOOLIB_COLAB_API_TOKEN"
+                            autocomplete="off"
+                            spellcheck="false"
+                            class="w-full bg-surface border border-border text-sm rounded-lg p-2.5 text-content font-mono focus:border-sky-500 focus:outline-none"
+                        >
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2">
+                        <button id="colabRemoteTestBtn" type="button" onclick="testColabRemoteConnection()" class="bg-sky-700 hover:bg-sky-600 text-white text-xs px-3 py-2 rounded-lg font-medium transition">
+                            <i class="fa-solid fa-plug-circle-check mr-1"></i> Kiểm tra
+                        </button>
+                        <button id="colabRemoteStartBtn" type="button" onclick="startColabRemoteTraining()" class="bg-emerald-700 hover:bg-emerald-600 disabled:bg-surface disabled:text-content-muted disabled:cursor-not-allowed text-white text-xs px-3 py-2 rounded-lg font-medium transition">
+                            <i class="fa-solid fa-play mr-1"></i> Start Train
+                        </button>
+                        <button id="colabRemoteStopBtn" type="button" onclick="stopColabRemotePolling()" disabled class="bg-rose-900/70 hover:bg-rose-800 disabled:bg-surface disabled:text-content-muted disabled:cursor-not-allowed text-rose-100 text-xs px-3 py-2 rounded-lg font-medium transition">
+                            <i class="fa-solid fa-stop mr-1"></i> Dừng theo dõi
+                        </button>
+                    </div>
+
+                    <p id="colabRemoteEligibility" class="text-[11px] text-content-muted"></p>
+
+                    <div id="colabRemoteHealthDetails" class="hidden grid grid-cols-2 gap-2 text-xs">
+                        <div class="bg-surface rounded-lg border border-border p-2">
+                            <span class="text-content-muted">GPU:</span>
+                            <span id="colabRemoteGpu" class="ml-1 font-semibold">-</span>
+                        </div>
+                        <div class="bg-surface rounded-lg border border-border p-2 min-w-0">
+                            <span class="text-content-muted">Active job:</span>
+                            <span id="colabRemoteActiveJob" class="ml-1 font-mono break-all">-</span>
+                        </div>
+                    </div>
+
+                    <div id="colabRemoteJobPanel" class="hidden bg-surface rounded-lg border border-border p-3 space-y-2 text-xs">
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-content-muted">Job ID</span>
+                            <span id="colabRemoteJobId" class="font-mono text-right break-all">-</span>
+                        </div>
+                        <div class="flex items-center justify-between gap-2">
+                            <span class="text-content-muted">Status</span>
+                            <span id="colabRemoteJobStatus" class="font-semibold">-</span>
+                        </div>
+                        <div class="h-2 rounded-full bg-panel overflow-hidden">
+                            <div id="colabRemoteProgressBar" class="h-full bg-sky-500 transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                        <div id="colabRemoteJobEpoch" class="text-content-muted">Epoch: 0/0</div>
+                        <div id="colabRemoteJobMessage" class="text-content break-words">-</div>
+                        <pre id="colabRemoteError" class="hidden whitespace-pre-wrap break-words text-rose-300 bg-rose-950/30 border border-rose-900/50 rounded p-2"></pre>
+                        <div id="colabRemoteArtifactsWrap" class="hidden">
+                            <div class="text-content-muted mb-1">Artifacts trên Google Drive</div>
+                            <pre id="colabRemoteArtifacts" class="whitespace-pre-wrap break-words text-emerald-300 bg-emerald-950/20 border border-emerald-900/50 rounded p-2"></pre>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- SECTION: EXPORT & STORAGE -->
                 <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-emerald-400 flex items-center justify-between border-b border-border pb-2">
@@ -830,11 +918,20 @@
 
         let currentTemplates = {};
         let activeTemplateId = "preset_yolo26_nextgen";
+        const COLAB_REMOTE_ENDPOINT_KEY = "toolib_colab_remote_endpoint_v1";
+        const COLAB_REMOTE_TOKEN_KEY = "toolib_colab_remote_token_v1";
+        const COLAB_REMOTE_ALLOWED_MODELS = new Set(["yolo11n.pt", "yolo11s.pt"]);
+        const COLAB_REMOTE_ALLOWED_IMAGE_SIZES = new Set([320, 416, 512, 640, 768]);
+        const COLAB_REMOTE_POLL_INTERVAL_MS = 4000;
+        let colabRemotePollTimer = null;
+        let colabRemotePollGeneration = 0;
+        let colabRemoteActiveJobId = null;
 
         window.addEventListener('DOMContentLoaded', () => {
             loadTemplatesFromStorage();
             populateTemplateDropdown();
             loadTemplateToUI(activeTemplateId);
+            loadColabRemoteSettings();
         });
 
         function loadTemplatesFromStorage() {
@@ -1231,6 +1328,7 @@ print("Initialized YOLO-NAS Training Configuration")
 
             const codeBlock = document.getElementById('colabCodeBlock');
             codeBlock.innerHTML = codeHtml;
+            updateColabRemoteEligibility(st);
 
             // Auto-scroll to highlighted active parameter element
             if (activeKey) {
@@ -1240,6 +1338,356 @@ print("Initialized YOLO-NAS Training Configuration")
                         activeEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     }
                 }, 50);
+            }
+        }
+
+        function loadColabRemoteSettings() {
+            const endpointInput = document.getElementById("colabRemoteEndpoint");
+            const tokenInput = document.getElementById("colabRemoteToken");
+            endpointInput.value = localStorage.getItem(COLAB_REMOTE_ENDPOINT_KEY) || "";
+            tokenInput.value = sessionStorage.getItem(COLAB_REMOTE_TOKEN_KEY) || "";
+
+            endpointInput.addEventListener("input", () => {
+                const value = endpointInput.value.trim();
+                if (value) {
+                    localStorage.setItem(COLAB_REMOTE_ENDPOINT_KEY, value);
+                } else {
+                    localStorage.removeItem(COLAB_REMOTE_ENDPOINT_KEY);
+                }
+                setColabRemoteConnectionState("idle", "Chưa kiểm tra");
+            });
+
+            tokenInput.addEventListener("input", () => {
+                const value = tokenInput.value.trim();
+                if (value) {
+                    sessionStorage.setItem(COLAB_REMOTE_TOKEN_KEY, value);
+                } else {
+                    sessionStorage.removeItem(COLAB_REMOTE_TOKEN_KEY);
+                }
+            });
+        }
+
+        function normalizeColabRemoteEndpoint(rawValue) {
+            const value = rawValue.trim();
+            if (!value) {
+                throw new Error("Hãy nhập Temporary public API URL.");
+            }
+
+            let url;
+            try {
+                url = new URL(value);
+            } catch {
+                throw new Error("API URL không hợp lệ.");
+            }
+
+            const isLocalHttp = url.protocol === "http:"
+                && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+            if (url.protocol !== "https:" && !isLocalHttp) {
+                throw new Error("API URL phải dùng HTTPS; HTTP chỉ được phép cho localhost.");
+            }
+            if (url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) {
+                throw new Error("Chỉ nhập origin của API, ví dụ https://example.trycloudflare.com.");
+            }
+            return url.origin;
+        }
+
+        function getColabRemoteCredentials(requireToken = false) {
+            const endpointInput = document.getElementById("colabRemoteEndpoint");
+            const tokenInput = document.getElementById("colabRemoteToken");
+            const endpoint = normalizeColabRemoteEndpoint(endpointInput.value);
+            const token = tokenInput.value.trim();
+            if (requireToken && !token) {
+                throw new Error("Hãy nhập bearer token trước khi gọi API train.");
+            }
+            localStorage.setItem(COLAB_REMOTE_ENDPOINT_KEY, endpoint);
+            endpointInput.value = endpoint;
+            if (token) {
+                sessionStorage.setItem(COLAB_REMOTE_TOKEN_KEY, token);
+            }
+            return { endpoint, token };
+        }
+
+        async function readColabRemoteResponse(response) {
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+                return response.json();
+            }
+            const text = await response.text();
+            return text ? { detail: text } : {};
+        }
+
+        function getColabRemoteErrorMessage(payload, fallback) {
+            const detail = payload && payload.detail;
+            if (typeof detail === "string") return detail;
+            if (detail && typeof detail.message === "string") return detail.message;
+            if (Array.isArray(detail)) {
+                return detail.map(item => item.msg || JSON.stringify(item)).join("; ");
+            }
+            return fallback;
+        }
+
+        async function colabRemoteFetch(path, { method = "GET", body = null, requireToken = false } = {}) {
+            const { endpoint, token } = getColabRemoteCredentials(requireToken);
+            const headers = { "Accept": "application/json" };
+            if (requireToken) headers.Authorization = `Bearer ${token}`;
+            if (body !== null) headers["Content-Type"] = "application/json";
+
+            let response;
+            try {
+                response = await fetch(`${endpoint}${path}`, {
+                    method,
+                    headers,
+                    body: body === null ? undefined : JSON.stringify(body)
+                });
+            } catch (error) {
+                throw new Error(`Không kết nối được Colab API. Kiểm tra URL, tunnel và CORS. ${error.message}`);
+            }
+
+            const payload = await readColabRemoteResponse(response);
+            if (!response.ok) {
+                const error = new Error(getColabRemoteErrorMessage(payload, `HTTP ${response.status}`));
+                error.status = response.status;
+                error.payload = payload;
+                throw error;
+            }
+            return payload;
+        }
+
+        function setColabRemoteConnectionState(state, text) {
+            const badge = document.getElementById("colabRemoteConnectionBadge");
+            badge.textContent = text;
+            badge.classList.remove(
+                "text-content-muted", "border-border",
+                "text-emerald-300", "border-emerald-700",
+                "text-rose-300", "border-rose-700",
+                "text-amber-300", "border-amber-700"
+            );
+            const classes = state === "online"
+                ? ["text-emerald-300", "border-emerald-700"]
+                : state === "error"
+                    ? ["text-rose-300", "border-rose-700"]
+                    : state === "checking"
+                        ? ["text-amber-300", "border-amber-700"]
+                        : ["text-content-muted", "border-border"];
+            badge.classList.add(...classes);
+        }
+
+        function updateColabRemoteHealth(health) {
+            document.getElementById("colabRemoteHealthDetails").classList.remove("hidden");
+            const gpu = document.getElementById("colabRemoteGpu");
+            gpu.textContent = health.gpu_available ? "Available" : "Unavailable";
+            gpu.className = health.gpu_available
+                ? "ml-1 font-semibold text-emerald-300"
+                : "ml-1 font-semibold text-rose-300";
+            document.getElementById("colabRemoteActiveJob").textContent = health.active_job_id || "Không có";
+        }
+
+        async function testColabRemoteConnection() {
+            const button = document.getElementById("colabRemoteTestBtn");
+            button.disabled = true;
+            setColabRemoteConnectionState("checking", "Đang kiểm tra...");
+            try {
+                const health = await colabRemoteFetch("/health");
+                if (health.status !== "online") {
+                    throw new Error("API trả về trạng thái không hợp lệ.");
+                }
+                updateColabRemoteHealth(health);
+                setColabRemoteConnectionState("online", health.gpu_available ? "Online · GPU" : "Online · No GPU");
+                showToast("Đã kết nối Colab API.");
+                if (health.active_job_id && document.getElementById("colabRemoteToken").value.trim()) {
+                    startColabRemotePolling(health.active_job_id);
+                }
+            } catch (error) {
+                setColabRemoteConnectionState("error", "Kết nối lỗi");
+                showColabRemoteError(error.message);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        function updateColabRemoteEligibility(state = getUIFormState("temp")) {
+            const startButton = document.getElementById("colabRemoteStartBtn");
+            const eligibility = document.getElementById("colabRemoteEligibility");
+            if (!startButton || !eligibility) return;
+
+            const modelEligible = state.task_type === "detect"
+                && state.yolo_family === "yolo11"
+                && COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version);
+            const parametersEligible = state.epochs >= 1
+                && state.epochs <= 100
+                && state.batch_size >= 1
+                && state.batch_size <= 32
+                && COLAB_REMOTE_ALLOWED_IMAGE_SIZES.has(Number(state.imgsz));
+            const eligible = modelEligible && parametersEligible;
+            startButton.disabled = !eligible || colabRemoteActiveJobId !== null;
+
+            if (!modelEligible) {
+                eligibility.textContent = "Remote API PoC chỉ hỗ trợ detect với yolo11n.pt hoặc yolo11s.pt. Các model khác vẫn dùng Code Generator.";
+            } else if (!parametersEligible) {
+                eligibility.textContent = "Remote API yêu cầu epochs 1-100, batch 1-32 và imgsz thuộc 320, 416, 512, 640, 768.";
+            } else if (colabRemoteActiveJobId !== null) {
+                eligibility.textContent = `Đang theo dõi job ${colabRemoteActiveJobId}; dừng polling trước khi gửi job khác.`;
+            } else {
+                eligibility.textContent = `Sẵn sàng gửi ${state.model_version}, ${state.epochs} epoch, batch ${state.batch_size}, imgsz ${state.imgsz}.`;
+            }
+            eligibility.className = eligible && colabRemoteActiveJobId === null
+                ? "text-[11px] text-emerald-300"
+                : "text-[11px] text-amber-300";
+        }
+
+        async function startColabRemoteTraining() {
+            const state = getUIFormState("temp");
+            if (
+                state.task_type !== "detect"
+                || state.yolo_family !== "yolo11"
+                || !COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version)
+                || state.epochs < 1
+                || state.epochs > 100
+                || state.batch_size < 1
+                || state.batch_size > 32
+                || !COLAB_REMOTE_ALLOWED_IMAGE_SIZES.has(Number(state.imgsz))
+            ) {
+                showColabRemoteError("Cấu hình không thuộc contract Remote API PoC. Kiểm tra model, epochs, batch và imgsz.");
+                return;
+            }
+
+            stopColabRemotePolling(true);
+            const startButton = document.getElementById("colabRemoteStartBtn");
+            startButton.disabled = true;
+            clearColabRemoteJobOutput();
+            setColabRemoteConnectionState("checking", "Đang gửi job...");
+
+            try {
+                const submitted = await colabRemoteFetch("/api/train", {
+                    method: "POST",
+                    requireToken: true,
+                    body: {
+                        model: state.model_version,
+                        epochs: state.epochs,
+                        batch: state.batch_size,
+                        imgsz: Number(state.imgsz)
+                    }
+                });
+                setColabRemoteConnectionState("online", "Job đã nhận");
+                startColabRemotePolling(submitted.job_id);
+                showToast(`Colab đã nhận job ${submitted.job_id}.`);
+            } catch (error) {
+                const activeJobId = error.status === 409
+                    ? error.payload?.detail?.active_job_id
+                    : null;
+                if (activeJobId) {
+                    setColabRemoteConnectionState("online", "Job đang chạy");
+                    startColabRemotePolling(activeJobId);
+                    showColabRemoteError(`Colab đang bận. Đã chuyển sang theo dõi job ${activeJobId}.`);
+                } else {
+                    setColabRemoteConnectionState("error", "Gửi job lỗi");
+                    showColabRemoteError(error.message);
+                }
+            } finally {
+                updateColabRemoteEligibility(state);
+            }
+        }
+
+        function clearColabRemoteJobOutput() {
+            document.getElementById("colabRemoteJobPanel").classList.remove("hidden");
+            document.getElementById("colabRemoteJobId").textContent = "-";
+            document.getElementById("colabRemoteJobStatus").textContent = "Đang gửi";
+            document.getElementById("colabRemoteJobEpoch").textContent = "Epoch: 0/0";
+            document.getElementById("colabRemoteJobMessage").textContent = "-";
+            document.getElementById("colabRemoteProgressBar").style.width = "0%";
+            document.getElementById("colabRemoteError").classList.add("hidden");
+            document.getElementById("colabRemoteArtifactsWrap").classList.add("hidden");
+        }
+
+        function showColabRemoteError(message) {
+            document.getElementById("colabRemoteJobPanel").classList.remove("hidden");
+            const errorElement = document.getElementById("colabRemoteError");
+            errorElement.textContent = message;
+            errorElement.classList.remove("hidden");
+        }
+
+        function renderColabRemoteJob(job) {
+            document.getElementById("colabRemoteJobPanel").classList.remove("hidden");
+            document.getElementById("colabRemoteJobId").textContent = job.job_id || "-";
+            document.getElementById("colabRemoteJobStatus").textContent = job.status || "-";
+            document.getElementById("colabRemoteJobMessage").textContent = job.message || "-";
+
+            const currentEpoch = Number(job.current_epoch) || 0;
+            const totalEpochs = Number(job.total_epochs) || 0;
+            const progress = totalEpochs > 0
+                ? Math.min(100, Math.max(0, currentEpoch / totalEpochs * 100))
+                : 0;
+            document.getElementById("colabRemoteJobEpoch").textContent = `Epoch: ${currentEpoch}/${totalEpochs}`;
+            document.getElementById("colabRemoteProgressBar").style.width = `${progress}%`;
+
+            const errorElement = document.getElementById("colabRemoteError");
+            if (job.error) {
+                errorElement.textContent = job.error;
+                errorElement.classList.remove("hidden");
+            } else {
+                errorElement.textContent = "";
+                errorElement.classList.add("hidden");
+            }
+
+            const artifactsWrap = document.getElementById("colabRemoteArtifactsWrap");
+            const artifactsElement = document.getElementById("colabRemoteArtifacts");
+            if (job.artifacts) {
+                artifactsElement.textContent = JSON.stringify(job.artifacts, null, 2);
+                artifactsWrap.classList.remove("hidden");
+            } else {
+                artifactsElement.textContent = "";
+                artifactsWrap.classList.add("hidden");
+            }
+        }
+
+        function startColabRemotePolling(jobId) {
+            stopColabRemotePolling(true);
+            colabRemoteActiveJobId = jobId;
+            const generation = colabRemotePollGeneration;
+            document.getElementById("colabRemoteStopBtn").disabled = false;
+            document.getElementById("colabRemoteJobPanel").classList.remove("hidden");
+            document.getElementById("colabRemoteJobId").textContent = jobId;
+            updateColabRemoteEligibility();
+
+            const poll = async () => {
+                try {
+                    const job = await colabRemoteFetch(`/api/jobs/${encodeURIComponent(jobId)}`, {
+                        requireToken: true
+                    });
+                    if (generation !== colabRemotePollGeneration) return;
+                    renderColabRemoteJob(job);
+                    if (job.status === "succeeded" || job.status === "failed") {
+                        stopColabRemotePolling(true);
+                        setColabRemoteConnectionState(
+                            job.status === "succeeded" ? "online" : "error",
+                            job.status === "succeeded" ? "Hoàn tất" : "Job thất bại"
+                        );
+                        showToast(job.status === "succeeded" ? "Training và export đã hoàn tất." : "Training job thất bại.");
+                        return;
+                    }
+                    colabRemotePollTimer = window.setTimeout(poll, COLAB_REMOTE_POLL_INTERVAL_MS);
+                } catch (error) {
+                    if (generation !== colabRemotePollGeneration) return;
+                    showColabRemoteError(error.message);
+                    setColabRemoteConnectionState("error", "Polling lỗi");
+                    stopColabRemotePolling(true);
+                }
+            };
+            poll();
+        }
+
+        function stopColabRemotePolling(silent = false) {
+            colabRemotePollGeneration += 1;
+            if (colabRemotePollTimer !== null) {
+                window.clearTimeout(colabRemotePollTimer);
+                colabRemotePollTimer = null;
+            }
+            colabRemoteActiveJobId = null;
+            const stopButton = document.getElementById("colabRemoteStopBtn");
+            if (stopButton) stopButton.disabled = true;
+            updateColabRemoteEligibility();
+            if (!silent) {
+                showToast("Đã dừng theo dõi trên UI; job Colab vẫn tiếp tục chạy.");
             }
         }
 
