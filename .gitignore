@@ -39,6 +39,7 @@ yolo_labeling.db
 # Uploaded/generated datasets, crops, project guides & exports
 uploads/
 exported_dataset/
+training_datasets/
 exports/
 classification_crops/
 project_backup/

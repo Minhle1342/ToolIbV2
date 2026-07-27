@@ -1,5 +1,115 @@
 # ToolIbV2 Colab FastAPI PoC Runbook
 
+## Phase 4 - flow hiện tại (ưu tiên đọc phần này)
+
+Phase 4 thay thế bước export, nén ZIP và upload Drive thủ công bằng flow:
+
+```text
+Chọn ToolIb project trên /colab-manager
+→ ToolIb tạo snapshot YOLO riêng có dataset_id
+→ ToolIb stream dataset.zip có bearer token tới Colab
+→ Colab kiểm tra UUID + SHA-256 + nội dung ZIP
+→ Colab lưu MyDrive/ToolIb_PoC/datasets/<dataset_id>/dataset.zip
+→ Start Train gửi đúng dataset_id
+→ Training history lưu liên kết project + dataset snapshot + remote job
+```
+
+Các phần bên dưới mô tả ZIP thủ công chỉ còn là fallback để test notebook độc
+lập. Khi test UI Phase 4, không cần tự tạo hoặc copy
+`MyDrive/ToolIb_PoC/dataset.zip`.
+
+### Thao tác thật từ đầu đến cuối
+
+1. Upload lại file `notebooks/Colab_FastAPI_PoC.ipynb` hiện tại lên Colab.
+2. Chọn GPU runtime và cấp quyền cho secret `TOOLIB_COLAB_API_TOKEN`.
+3. Chạy Cell 1 đến Cell 4. Cell 2 không còn báo lỗi nếu không có
+   `MyDrive/ToolIb_PoC/dataset.zip`.
+4. Giữ Cell 4 và runtime hoạt động, rồi copy Quick Tunnel URL.
+5. Mở ToolIbV2 tại `/colab-manager`, nhập URL và cùng bearer token, sau đó bấm
+   `Kiểm tra`.
+6. Trong thẻ `Training dataset snapshot`, chọn đúng ToolIb project.
+7. Giữ split mặc định `80/20/0` hoặc nhập split khác có tổng bằng 100; train và
+   val đều phải lớn hơn 0.
+8. Bấm `Chuẩn bị & tải dataset lên Colab`. Chờ trạng thái `uploaded` và ghi lại
+   8 ký tự đầu của `dataset_id`.
+9. Chọn `yolo11n.pt`, task `detect`, epochs, batch và imgsz rồi bấm
+   `Start Train`. Nút này bị khóa nếu chưa có snapshot `uploaded`.
+10. Trong Training history, xác nhận job hiển thị cùng `dataset_id`.
+11. Khi job `succeeded`, xác nhận Drive có:
+
+```text
+MyDrive/ToolIb_PoC/datasets/<dataset_id>/dataset.zip
+MyDrive/ToolIb_PoC/datasets/<dataset_id>/manifest.json
+MyDrive/ToolIb_PoC/artifacts/<job_id>/best.pt
+MyDrive/ToolIb_PoC/artifacts/<job_id>/best.onnx
+MyDrive/ToolIb_PoC/artifacts/<job_id>/manifest.json
+```
+
+12. Import ONNX từ Training history và giữ model inactive cho đến khi inference
+    smoke test đạt.
+
+Nếu sửa ảnh, nhãn, classes hoặc split sau khi đã tạo snapshot, hãy bấm lại
+`Chuẩn bị & tải dataset lên Colab`. ToolIb sẽ tạo `dataset_id` mới; snapshot cũ
+không bị ghi đè.
+
+### API contract bổ sung của Phase 4
+
+ToolIb local:
+
+```http
+POST /api/training-datasets
+Content-Type: application/json
+
+{
+  "project_id": 1,
+  "splits": {"train": 80, "val": 20, "test": 0},
+  "exclude_flagged": true,
+  "include_unlabeled": false
+}
+```
+
+```http
+POST /api/training-datasets/<local_dataset_pk>/upload
+Content-Type: application/json
+
+{
+  "remote_api_url": "https://<random>.trycloudflare.com",
+  "api_token": "<bearer token>"
+}
+```
+
+ToolIb backend mở file ZIP và stream tới Colab; browser không đọc toàn bộ ZIP
+vào RAM. Token chỉ dùng cho request này, không nằm trong
+`training_datasets` hoặc `training_jobs`.
+
+Colab:
+
+```http
+POST /api/datasets
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+dataset_id=<uuid>
+sha256=<64 hex characters>
+archive=@dataset.zip
+```
+
+Training request Phase 4:
+
+```json
+{
+  "model": "yolo11n.pt",
+  "epochs": 2,
+  "batch": 4,
+  "imgsz": 640,
+  "dataset_id": "<uuid>"
+}
+```
+
+Colab không nhận đường dẫn dataset do client cung cấp. Nó tự ánh xạ UUID tới
+Drive root cố định, từ chối checksum sai, path traversal, symlink trong ZIP,
+train/val rỗng, hoặc cùng `dataset_id` nhưng archive khác.
+
 ## Mục tiêu
 
 Runbook này kiểm tra flow tạm thời:

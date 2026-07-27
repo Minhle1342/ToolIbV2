@@ -81,6 +81,17 @@ def create_app(config_overrides=None):
                 conn.commit()
         except Exception:
             pass # Column already exists
+        for migration_sql in (
+            "ALTER TABLE training_jobs ADD COLUMN training_dataset_id INTEGER",
+            "ALTER TABLE training_jobs ADD COLUMN dataset_id VARCHAR(36)",
+        ):
+            try:
+                from sqlalchemy import text
+                with db.engine.connect() as conn:
+                    conn.execute(text(migration_sql))
+                    conn.commit()
+            except Exception:
+                pass # Column already exists or the table was just created
         try:
             from sqlalchemy import text
             with db.engine.connect() as conn:

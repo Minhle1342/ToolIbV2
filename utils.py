@@ -579,7 +579,7 @@ def save_yolo_label(image, labels):
                 pass
     return saved_count
 
-def export_dataset(criteria, splits=None, format='yolo'):
+def export_dataset(criteria, splits=None, format='yolo', output_dir=None):
     """
     Exports dataset based on criteria.
     criteria: { ... }
@@ -603,7 +603,7 @@ def export_dataset(criteria, splits=None, format='yolo'):
         }
 
     # 1. Prepare Export Directory
-    base_export_dir = os.path.abspath("exported_dataset")
+    base_export_dir = os.path.abspath(output_dir or "exported_dataset")
     if os.path.exists(base_export_dir):
         shutil.rmtree(base_export_dir)
 

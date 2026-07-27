@@ -132,6 +132,55 @@ class AIModel(db.Model):
         }
 
 
+class TrainingDataset(db.Model):
+    __tablename__ = 'training_datasets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    dataset_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey('projects.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True
+    )
+    status = db.Column(db.String(20), nullable=False, default='exporting', index=True)
+    archive_path = db.Column(db.String(1000), nullable=True)
+    archive_sha256 = db.Column(db.String(64), nullable=True)
+    archive_size = db.Column(db.Integer, nullable=True)
+    train_count = db.Column(db.Integer, nullable=False, default=0)
+    val_count = db.Column(db.Integer, nullable=False, default=0)
+    test_count = db.Column(db.Integer, nullable=False, default=0)
+    total_count = db.Column(db.Integer, nullable=False, default=0)
+    class_names = db.Column(db.JSON, nullable=True)
+    split_config = db.Column(db.JSON, nullable=True)
+    remote_api_url = db.Column(db.String(500), nullable=True)
+    remote_drive_path = db.Column(db.String(1000), nullable=True)
+    error = db.Column(db.Text, nullable=True)
+    uploaded_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'dataset_id': self.dataset_id,
+            'project_id': self.project_id,
+            'status': self.status,
+            'archive_sha256': self.archive_sha256,
+            'archive_size': self.archive_size,
+            'train_count': self.train_count,
+            'val_count': self.val_count,
+            'test_count': self.test_count,
+            'total_count': self.total_count,
+            'class_names': self.class_names,
+            'splits': self.split_config,
+            'remote_api_url': self.remote_api_url,
+            'remote_drive_path': self.remote_drive_path,
+            'error': self.error,
+            'uploaded_at': self.uploaded_at.isoformat() if self.uploaded_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class TrainingJob(db.Model):
     __tablename__ = 'training_jobs'
 
@@ -149,6 +198,13 @@ class TrainingJob(db.Model):
         nullable=True,
         index=True
     )
+    training_dataset_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_datasets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True
+    )
+    dataset_id = db.Column(db.String(36), nullable=True, index=True)
     remote_api_url = db.Column(db.String(500), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='queued', index=True)
     connection_status = db.Column(db.String(20), nullable=False, default='synced')
@@ -175,6 +231,8 @@ class TrainingJob(db.Model):
             'remote_job_id': self.remote_job_id,
             'project_id': self.project_id,
             'imported_model_id': self.imported_model_id,
+            'training_dataset_id': self.training_dataset_id,
+            'dataset_id': self.dataset_id,
             'remote_api_url': self.remote_api_url,
             'status': self.status,
             'connection_status': self.connection_status,

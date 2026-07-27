@@ -212,6 +212,59 @@
                         >
                     </div>
 
+                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-semibold text-content flex items-center gap-1.5">
+                                <i class="fa-solid fa-database text-violet-400"></i>
+                                Training dataset snapshot
+                            </h4>
+                            <span id="colabDatasetBadge" class="text-[10px] text-content-muted border border-border rounded px-1.5 py-0.5">
+                                Chưa sẵn sàng
+                            </span>
+                        </div>
+
+                        <div>
+                            <label for="colabDatasetProject" class="text-[11px] text-content-muted mb-1 block">ToolIb project</label>
+                            <select id="colabDatasetProject" class="w-full bg-panel border border-border text-xs rounded-lg p-2 text-content focus:border-violet-500 focus:outline-none">
+                                <option value="">Đang tải projects...</option>
+                            </select>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="text-[10px] text-content-muted">
+                                Train %
+                                <input id="colabDatasetTrainSplit" type="number" value="80" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Val %
+                                <input id="colabDatasetValSplit" type="number" value="20" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Test %
+                                <input id="colabDatasetTestSplit" type="number" value="0" min="0" max="98" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                        </div>
+
+                        <div class="flex flex-wrap gap-3 text-[10px] text-content-muted">
+                            <label class="flex items-center gap-1.5">
+                                <input id="colabDatasetExcludeFlagged" type="checkbox" checked>
+                                Loại ảnh flagged
+                            </label>
+                            <label class="flex items-center gap-1.5">
+                                <input id="colabDatasetIncludeUnlabeled" type="checkbox">
+                                Gồm ảnh background chưa label
+                            </label>
+                        </div>
+
+                        <button id="colabDatasetPrepareBtn" type="button" onclick="prepareAndUploadColabDataset()" class="w-full bg-violet-700 hover:bg-violet-600 disabled:bg-panel disabled:text-content-muted disabled:cursor-not-allowed text-white text-xs px-3 py-2 rounded-lg font-medium transition">
+                            <i class="fa-solid fa-cloud-arrow-up mr-1"></i>
+                            Prepare & Upload Dataset
+                        </button>
+                        <div id="colabDatasetStatus" class="text-[10px] text-content-muted break-words">
+                            Chọn project, sau đó tạo snapshot trước khi Start Train.
+                        </div>
+                    </div>
+
                     <div class="grid grid-cols-3 gap-2">
                         <button id="colabRemoteTestBtn" type="button" onclick="testColabRemoteConnection()" class="bg-sky-700 hover:bg-sky-600 text-white text-xs px-3 py-2 rounded-lg font-medium transition">
                             <i class="fa-solid fa-plug-circle-check mr-1"></i> Kiểm tra
@@ -939,6 +992,7 @@
         let activeTemplateId = "preset_yolo26_nextgen";
         const COLAB_REMOTE_ENDPOINT_KEY = "toolib_colab_remote_endpoint_v1";
         const COLAB_REMOTE_TOKEN_KEY = "toolib_colab_remote_token_v1";
+        const COLAB_DATASET_PROJECT_KEY = "toolib_colab_dataset_project_v1";
         const COLAB_REMOTE_ALLOWED_MODELS = new Set(["yolo11n.pt", "yolo11s.pt"]);
         const COLAB_REMOTE_ALLOWED_IMAGE_SIZES = new Set([320, 416, 512, 640, 768]);
         const COLAB_REMOTE_POLL_INTERVAL_MS = 4000;
@@ -946,6 +1000,8 @@
         let colabRemotePollGeneration = 0;
         let colabRemoteActiveJobId = null;
         let colabTrainingHistory = [];
+        let colabTrainingDatasets = [];
+        let colabPreparedDataset = null;
 
         window.addEventListener('DOMContentLoaded', () => {
             loadTemplatesFromStorage();
@@ -953,6 +1009,7 @@
             loadTemplateToUI(activeTemplateId);
             loadColabRemoteSettings();
             loadColabTrainingHistory();
+            initializeColabTrainingDatasets();
         });
 
         function loadTemplatesFromStorage() {
@@ -1498,6 +1555,184 @@ print("Initialized YOLO-NAS Training Configuration")
             return payload;
         }
 
+        function formatColabDatasetBytes(value) {
+            const bytes = Number(value || 0);
+            if (!bytes) return "0 B";
+            const units = ["B", "KB", "MB", "GB"];
+            const index = Math.min(
+                Math.floor(Math.log(bytes) / Math.log(1024)),
+                units.length - 1
+            );
+            return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+        }
+
+        function renderColabDatasetState(dataset = colabPreparedDataset, message = null) {
+            const badge = document.getElementById("colabDatasetBadge");
+            const status = document.getElementById("colabDatasetStatus");
+            if (!dataset) {
+                badge.textContent = "Chưa sẵn sàng";
+                badge.className = "text-[10px] text-content-muted border border-border rounded px-1.5 py-0.5";
+                status.textContent = message || "Chọn project, sau đó tạo snapshot trước khi Start Train.";
+                updateColabRemoteEligibility();
+                return;
+            }
+
+            const ready = dataset.status === "uploaded";
+            badge.textContent = ready ? "Ready" : dataset.status;
+            badge.className = ready
+                ? "text-[10px] text-emerald-300 border border-emerald-700 rounded px-1.5 py-0.5"
+                : "text-[10px] text-amber-300 border border-amber-700 rounded px-1.5 py-0.5";
+            const shortId = String(dataset.dataset_id || "").slice(0, 8);
+            status.textContent = message || (
+                `${shortId} · train ${dataset.train_count} · val ${dataset.val_count} · `
+                + `${formatColabDatasetBytes(dataset.archive_size)}`
+            );
+            updateColabRemoteEligibility();
+        }
+
+        function selectLatestColabDatasetForProject() {
+            const projectId = Number(document.getElementById("colabDatasetProject").value || 0);
+            colabPreparedDataset = colabTrainingDatasets.find(dataset => {
+                return dataset.project_id === projectId && dataset.status === "uploaded";
+            }) || null;
+            renderColabDatasetState();
+        }
+
+        function invalidateColabDatasetSelection(message) {
+            colabPreparedDataset = null;
+            renderColabDatasetState(null, message);
+        }
+
+        async function initializeColabTrainingDatasets() {
+            const projectSelect = document.getElementById("colabDatasetProject");
+            const snapshotInputs = [
+                "colabDatasetTrainSplit",
+                "colabDatasetValSplit",
+                "colabDatasetTestSplit",
+                "colabDatasetExcludeFlagged",
+                "colabDatasetIncludeUnlabeled"
+            ];
+            snapshotInputs.forEach(id => {
+                document.getElementById(id).addEventListener("change", () => {
+                    invalidateColabDatasetSelection(
+                        "Thông số dataset đã thay đổi. Hãy Prepare & Upload snapshot mới."
+                    );
+                });
+            });
+
+            projectSelect.addEventListener("change", () => {
+                const value = projectSelect.value;
+                if (value) {
+                    localStorage.setItem(COLAB_DATASET_PROJECT_KEY, value);
+                } else {
+                    localStorage.removeItem(COLAB_DATASET_PROJECT_KEY);
+                }
+                selectLatestColabDatasetForProject();
+            });
+
+            try {
+                const [projects, datasets] = await Promise.all([
+                    localTrainingApiFetch("/api/projects"),
+                    localTrainingApiFetch("/api/training-datasets?limit=50")
+                ]);
+                projectSelect.replaceChildren();
+                if (!projects.length) {
+                    const option = document.createElement("option");
+                    option.value = "";
+                    option.textContent = "Chưa có ToolIb project";
+                    projectSelect.appendChild(option);
+                    renderColabDatasetState(null, "Tạo ToolIb project trước khi chuẩn bị dataset.");
+                    return;
+                }
+
+                projects.forEach(project => {
+                    const option = document.createElement("option");
+                    option.value = String(project.id);
+                    option.textContent = project.name;
+                    projectSelect.appendChild(option);
+                });
+                const savedProjectId = localStorage.getItem(COLAB_DATASET_PROJECT_KEY);
+                if (savedProjectId && projects.some(project => String(project.id) === savedProjectId)) {
+                    projectSelect.value = savedProjectId;
+                }
+                colabTrainingDatasets = Array.isArray(datasets) ? datasets : [];
+                selectLatestColabDatasetForProject();
+            } catch (error) {
+                renderColabDatasetState(null, `Không tải được projects/datasets: ${error.message}`);
+            }
+        }
+
+        async function prepareAndUploadColabDataset() {
+            const button = document.getElementById("colabDatasetPrepareBtn");
+            const projectId = Number(document.getElementById("colabDatasetProject").value || 0);
+            if (!projectId) {
+                showColabRemoteError("Hãy chọn ToolIb project.");
+                return;
+            }
+
+            let credentials;
+            try {
+                credentials = getColabRemoteCredentials(true);
+            } catch (error) {
+                showColabRemoteError(error.message);
+                return;
+            }
+
+            const splits = {
+                train: Number(document.getElementById("colabDatasetTrainSplit").value),
+                val: Number(document.getElementById("colabDatasetValSplit").value),
+                test: Number(document.getElementById("colabDatasetTestSplit").value)
+            };
+            if (
+                Object.values(splits).some(value => !Number.isInteger(value) || value < 0)
+                || splits.train <= 0
+                || splits.val <= 0
+                || splits.train + splits.val + splits.test !== 100
+            ) {
+                showColabRemoteError("Train/Val/Test phải là số nguyên không âm, Train và Val > 0, tổng bằng 100.");
+                return;
+            }
+
+            const originalHtml = button.innerHTML;
+            button.disabled = true;
+            invalidateColabDatasetSelection("Đang export snapshot trên ToolIb...");
+            try {
+                const prepared = await localTrainingApiFetch("/api/training-datasets", {
+                    method: "POST",
+                    body: {
+                        project_id: projectId,
+                        splits,
+                        exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                        include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
+                    }
+                });
+                renderColabDatasetState(prepared, "Snapshot đã tạo. Đang stream ZIP sang Colab...");
+                const uploaded = await localTrainingApiFetch(
+                    `/api/training-datasets/${prepared.id}/upload`,
+                    {
+                        method: "POST",
+                        body: {
+                            remote_api_url: credentials.endpoint,
+                            api_token: credentials.token
+                        }
+                    }
+                );
+                colabTrainingDatasets = [
+                    uploaded,
+                    ...colabTrainingDatasets.filter(item => item.id !== uploaded.id)
+                ];
+                colabPreparedDataset = uploaded;
+                renderColabDatasetState(uploaded);
+                showToast(`Dataset ${uploaded.dataset_id.slice(0, 8)} đã sẵn sàng trên Colab.`);
+            } catch (error) {
+                invalidateColabDatasetSelection(`Dataset chưa sẵn sàng: ${error.message}`);
+                showColabRemoteError(error.message);
+            } finally {
+                button.disabled = false;
+                button.innerHTML = originalHtml;
+            }
+        }
+
         function upsertColabTrainingHistory(job) {
             const index = colabTrainingHistory.findIndex(item => item.id === job.id);
             if (index >= 0) {
@@ -1528,6 +1763,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     epochs: requestPayload.epochs,
                     batch: requestPayload.batch,
                     imgsz: requestPayload.imgsz,
+                    dataset_id: requestPayload.dataset_id,
                     current_epoch: job.current_epoch,
                     total_epochs: job.total_epochs,
                     message: job.message,
@@ -1618,7 +1854,10 @@ print("Initialized YOLO-NAS Training Configuration")
 
                 const details = document.createElement("div");
                 details.className = "text-content-muted";
-                details.textContent = `Epoch ${job.current_epoch || 0}/${job.total_epochs || job.epochs || 0} · batch ${job.batch ?? "-"} · imgsz ${job.imgsz ?? "-"}`;
+                const datasetLabel = job.dataset_id
+                    ? ` · dataset ${String(job.dataset_id).slice(0, 8)}`
+                    : "";
+                details.textContent = `Epoch ${job.current_epoch || 0}/${job.total_epochs || job.epochs || 0} · batch ${job.batch ?? "-"} · imgsz ${job.imgsz ?? "-"}${datasetLabel}`;
 
                 const actions = document.createElement("div");
                 actions.className = "flex flex-wrap gap-1.5";
@@ -1669,6 +1908,18 @@ print("Initialized YOLO-NAS Training Configuration")
             }
             document.getElementById("colabRemoteEndpoint").value = job.remote_api_url;
             localStorage.setItem(COLAB_REMOTE_ENDPOINT_KEY, job.remote_api_url);
+            if (job.dataset_id) {
+                const linkedDataset = colabTrainingDatasets.find(
+                    item => item.dataset_id === job.dataset_id
+                );
+                if (linkedDataset) {
+                    colabPreparedDataset = linkedDataset;
+                    document.getElementById("colabDatasetProject").value = String(
+                        linkedDataset.project_id || ""
+                    );
+                    renderColabDatasetState(linkedDataset);
+                }
+            }
             startColabRemotePolling(job.remote_job_id);
         }
 
@@ -1820,17 +2071,20 @@ print("Initialized YOLO-NAS Training Configuration")
                 && state.batch_size >= 1
                 && state.batch_size <= 32
                 && COLAB_REMOTE_ALLOWED_IMAGE_SIZES.has(Number(state.imgsz));
-            const eligible = modelEligible && parametersEligible;
+            const datasetEligible = colabPreparedDataset?.status === "uploaded";
+            const eligible = modelEligible && parametersEligible && datasetEligible;
             startButton.disabled = !eligible || colabRemoteActiveJobId !== null;
 
             if (!modelEligible) {
                 eligibility.textContent = "Remote API PoC chỉ hỗ trợ detect với yolo11n.pt hoặc yolo11s.pt. Các model khác vẫn dùng Code Generator.";
             } else if (!parametersEligible) {
                 eligibility.textContent = "Remote API yêu cầu epochs 1-100, batch 1-32 và imgsz thuộc 320, 416, 512, 640, 768.";
+            } else if (!datasetEligible) {
+                eligibility.textContent = "Hãy Prepare & Upload một dataset snapshot trước khi Start Train.";
             } else if (colabRemoteActiveJobId !== null) {
                 eligibility.textContent = `Đang theo dõi job ${colabRemoteActiveJobId}; dừng polling trước khi gửi job khác.`;
             } else {
-                eligibility.textContent = `Sẵn sàng gửi ${state.model_version}, ${state.epochs} epoch, batch ${state.batch_size}, imgsz ${state.imgsz}.`;
+                eligibility.textContent = `Sẵn sàng gửi ${state.model_version}, ${state.epochs} epoch, batch ${state.batch_size}, imgsz ${state.imgsz}, dataset ${colabPreparedDataset.dataset_id.slice(0, 8)}.`;
             }
             eligibility.className = eligible && colabRemoteActiveJobId === null
                 ? "text-[11px] text-emerald-300"
@@ -1852,6 +2106,10 @@ print("Initialized YOLO-NAS Training Configuration")
                 showColabRemoteError("Cấu hình không thuộc contract Remote API PoC. Kiểm tra model, epochs, batch và imgsz.");
                 return;
             }
+            if (colabPreparedDataset?.status !== "uploaded") {
+                showColabRemoteError("Hãy Prepare & Upload dataset snapshot trước khi Start Train.");
+                return;
+            }
 
             stopColabRemotePolling(true);
             const startButton = document.getElementById("colabRemoteStartBtn");
@@ -1864,7 +2122,8 @@ print("Initialized YOLO-NAS Training Configuration")
                     model: state.model_version,
                     epochs: state.epochs,
                     batch: state.batch_size,
-                    imgsz: Number(state.imgsz)
+                    imgsz: Number(state.imgsz),
+                    dataset_id: colabPreparedDataset.dataset_id
                 };
                 const submitted = await colabRemoteFetch("/api/train", {
                     method: "POST",

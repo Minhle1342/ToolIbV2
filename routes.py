@@ -2,10 +2,22 @@
 from flask import Blueprint, jsonify, request, current_app
 # pyrefly: ignore [missing-import]
 import flask
-from models import db, Project, View, Image, AIModel, Tag, TrainingJob
+from models import (
+    db,
+    Project,
+    View,
+    Image,
+    AIModel,
+    Tag,
+    TrainingDataset,
+    TrainingJob,
+)
 import utils
+import hashlib
 import os
 import re
+import requests
+from requests_toolbelt.multipart.encoder import MultipartEncoder
 import shutil
 import contextlib
 import csv
@@ -20,6 +32,7 @@ import uuid
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlsplit
 try:
     from clear_header import validate_and_rename_yolo_dataset
@@ -33,6 +46,7 @@ classifier_engine = None
 auto_label_thread_local = threading.local()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GUIDE_STORAGE_DIR = os.path.join(BASE_DIR, 'project_guides')
+TRAINING_DATASET_ROOT = os.path.join(BASE_DIR, 'training_datasets')
 
 
 def get_project_guide_path(project_id):
@@ -2622,6 +2636,250 @@ def optional_int(value, field_name, minimum=0):
     return parsed
 
 
+def get_training_dataset_paths(dataset_id):
+    normalized_id = str(uuid.UUID(str(dataset_id)))
+    storage_root = Path(TRAINING_DATASET_ROOT).resolve()
+    snapshot_root = (storage_root / normalized_id).resolve()
+    try:
+        snapshot_root.relative_to(storage_root)
+    except ValueError as exc:
+        raise ValueError('Invalid training dataset storage path.') from exc
+    return {
+        'root': snapshot_root,
+        'dataset': snapshot_root / 'dataset',
+        'archive': snapshot_root / 'dataset.zip',
+        'manifest': snapshot_root / 'manifest.json',
+    }
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def parse_training_dataset_splits(value):
+    raw_splits = value or {'train': 80, 'val': 20, 'test': 0}
+    if not isinstance(raw_splits, dict):
+        raise ValueError('splits must be a JSON object.')
+
+    splits = {}
+    for split_name in ('train', 'val', 'test'):
+        splits[split_name] = optional_int(
+            raw_splits.get(split_name, 0),
+            f'splits.{split_name}',
+            minimum=0,
+        ) or 0
+    if sum(splits.values()) != 100:
+        raise ValueError('Dataset split percentages must total 100.')
+    if splits['train'] <= 0 or splits['val'] <= 0:
+        raise ValueError('Phase 4 requires non-zero train and val percentages.')
+    return splits
+
+
+@api_bp.route('/training-datasets', methods=['GET'])
+def list_training_datasets():
+    limit = request.args.get('limit', default=25, type=int)
+    limit = min(max(limit or 25, 1), 100)
+    datasets = TrainingDataset.query.order_by(
+        TrainingDataset.created_at.desc(),
+        TrainingDataset.id.desc(),
+    ).limit(limit).all()
+    return jsonify([dataset.to_dict() for dataset in datasets])
+
+
+@api_bp.route('/training-datasets', methods=['POST'])
+def prepare_training_dataset():
+    payload = request.get_json(silent=True) or {}
+    dataset = None
+    try:
+        project_id = optional_int(payload.get('project_id'), 'project_id', minimum=1)
+        if project_id is None:
+            raise ValueError('project_id is required.')
+        project = db.session.get(Project, project_id)
+        if project is None:
+            return jsonify({'error': 'Project not found.'}), 404
+
+        splits = parse_training_dataset_splits(payload.get('splits'))
+        include_unlabeled = payload.get('include_unlabeled', False)
+        exclude_flagged = payload.get('exclude_flagged', True)
+        if not isinstance(include_unlabeled, bool) or not isinstance(exclude_flagged, bool):
+            raise ValueError('include_unlabeled and exclude_flagged must be booleans.')
+
+        dataset_uuid = str(uuid.uuid4())
+        paths = get_training_dataset_paths(dataset_uuid)
+        dataset = TrainingDataset(
+            dataset_id=dataset_uuid,
+            project_id=project.id,
+            status='exporting',
+            split_config=splits,
+        )
+        db.session.add(dataset)
+        db.session.commit()
+
+        paths['root'].mkdir(parents=True, exist_ok=False)
+        result = utils.export_dataset(
+            {
+                'project_ids': [project.id],
+                'include_unlabeled': include_unlabeled,
+                'exclude_flagged': exclude_flagged,
+            },
+            splits=splits,
+            format='yolo',
+            output_dir=str(paths['dataset']),
+        )
+        if result.get('status') != 'success':
+            raise ValueError(result.get('message') or 'Dataset export failed.')
+
+        run_clear_header_for_export(str(paths['dataset']))
+        stats = result.get('stats') or {}
+        if int(stats.get('train') or 0) <= 0:
+            raise ValueError('The exported train split contains no images.')
+        if int(stats.get('val') or 0) <= 0:
+            raise ValueError(
+                'The exported val split contains no images. '
+                'Add more labeled images or adjust the split.'
+            )
+
+        class_names = utils.get_classes(project)
+        if not class_names:
+            raise ValueError('The project does not define any classes.')
+
+        manifest = {
+            'dataset_id': dataset_uuid,
+            'project_id': project.id,
+            'project_name': project.name,
+            'splits': splits,
+            'stats': stats,
+            'class_names': class_names,
+            'include_unlabeled': include_unlabeled,
+            'exclude_flagged': exclude_flagged,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+        }
+        paths['manifest'].write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+        shutil.copy2(paths['manifest'], paths['dataset'] / 'toolib_manifest.json')
+        archive_path = shutil.make_archive(
+            str(paths['archive'].with_suffix('')),
+            'zip',
+            root_dir=str(paths['dataset']),
+        )
+        archive_sha256 = sha256_file(archive_path)
+
+        dataset.status = 'prepared'
+        dataset.archive_path = str(Path(archive_path).resolve())
+        dataset.archive_sha256 = archive_sha256
+        dataset.archive_size = os.path.getsize(archive_path)
+        dataset.train_count = int(stats.get('train') or 0)
+        dataset.val_count = int(stats.get('val') or 0)
+        dataset.test_count = int(stats.get('test') or 0)
+        dataset.total_count = int(stats.get('total') or 0)
+        dataset.class_names = list(class_names)
+        dataset.error = None
+        db.session.commit()
+        return jsonify(dataset.to_dict()), 201
+    except ValueError as exc:
+        db.session.rollback()
+        if dataset is not None and dataset.id is not None:
+            persisted = db.session.get(TrainingDataset, dataset.id)
+            if persisted is not None:
+                persisted.status = 'failed'
+                persisted.error = str(exc)[:8000]
+                db.session.commit()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        current_app.logger.exception('Could not prepare Colab training dataset')
+        db.session.rollback()
+        if dataset is not None and dataset.id is not None:
+            persisted = db.session.get(TrainingDataset, dataset.id)
+            if persisted is not None:
+                persisted.status = 'failed'
+                persisted.error = str(exc)[:8000]
+                db.session.commit()
+        return jsonify({'error': f'Could not prepare training dataset: {exc}'}), 500
+
+
+@api_bp.route('/training-datasets/<int:dataset_pk>/upload', methods=['POST'])
+def upload_training_dataset(dataset_pk):
+    dataset = db.session.get(TrainingDataset, dataset_pk)
+    if dataset is None:
+        return jsonify({'error': 'Training dataset not found.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    token = str(payload.get('api_token') or '').strip()
+    if not token:
+        return jsonify({'error': 'api_token is required for the Colab upload.'}), 400
+
+    try:
+        remote_api_url = normalize_training_api_url(payload.get('remote_api_url'))
+        archive_path = Path(dataset.archive_path or '').resolve()
+        expected_path = get_training_dataset_paths(dataset.dataset_id)['archive']
+        if archive_path != expected_path or not archive_path.is_file():
+            raise ValueError('The prepared dataset archive is missing or has an invalid path.')
+        if sha256_file(archive_path) != dataset.archive_sha256:
+            raise ValueError('The prepared dataset archive checksum has changed.')
+
+        with archive_path.open('rb') as archive_stream:
+            multipart_body = MultipartEncoder(fields={
+                'dataset_id': dataset.dataset_id,
+                'sha256': dataset.archive_sha256,
+                'archive': (
+                    f'{dataset.dataset_id}.zip',
+                    archive_stream,
+                    'application/zip',
+                ),
+            })
+            response = requests.post(
+                f'{remote_api_url}/api/datasets',
+                headers={
+                    'Accept': 'application/json',
+                    'Authorization': f'Bearer {token}',
+                    'Content-Type': multipart_body.content_type,
+                },
+                data=multipart_body,
+                timeout=(15, 3600),
+                allow_redirects=False,
+            )
+
+        try:
+            remote_payload = response.json()
+        except ValueError:
+            remote_payload = {'detail': response.text[:2000]}
+        if not isinstance(remote_payload, dict):
+            remote_payload = {'detail': 'Colab returned an invalid JSON response.'}
+        if not 200 <= response.status_code < 300:
+            detail = remote_payload.get('detail') or remote_payload.get('error')
+            raise RuntimeError(
+                f'Colab dataset upload returned HTTP {response.status_code}: '
+                f'{detail or "Unknown error"}'
+            )
+        if remote_payload.get('dataset_id') != dataset.dataset_id:
+            raise RuntimeError('Colab returned a different dataset_id.')
+        if remote_payload.get('sha256') != dataset.archive_sha256:
+            raise RuntimeError('Colab returned a different dataset checksum.')
+
+        dataset.status = 'uploaded'
+        dataset.remote_api_url = remote_api_url
+        dataset.remote_drive_path = str(remote_payload.get('drive_path') or '')[:1000] or None
+        dataset.error = None
+        dataset.uploaded_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(dataset.to_dict())
+    except (ValueError, RuntimeError, requests.RequestException) as exc:
+        db.session.rollback()
+        dataset = db.session.get(TrainingDataset, dataset_pk)
+        if dataset is not None:
+            dataset.status = 'upload_failed'
+            dataset.error = str(exc)[:8000]
+            db.session.commit()
+        status_code = 400 if isinstance(exc, ValueError) else 502
+        return jsonify({'error': str(exc)}), status_code
+
+
 @api_bp.route('/training-jobs', methods=['GET'])
 def list_training_jobs():
     limit = request.args.get('limit', default=50, type=int)
@@ -2689,8 +2947,28 @@ def sync_training_job():
         request_payload = {
             key: value
             for key, value in (request_payload or {}).items()
-            if key in {'model', 'epochs', 'batch', 'imgsz'}
+            if key in {'model', 'epochs', 'batch', 'imgsz', 'dataset_id'}
         }
+        dataset_id = str(
+            payload.get('dataset_id')
+            or request_payload.get('dataset_id')
+            or (job.dataset_id if job is not None else '')
+            or ''
+        ).strip() or None
+        training_dataset = None
+        if dataset_id is not None:
+            dataset_id = str(uuid.UUID(dataset_id))
+            training_dataset = TrainingDataset.query.filter_by(
+                dataset_id=dataset_id
+            ).first()
+            if (
+                training_dataset is not None
+                and project_id is not None
+                and training_dataset.project_id != project_id
+            ):
+                raise ValueError('dataset_id does not belong to project_id.')
+            if training_dataset is not None:
+                project_id = training_dataset.project_id
 
         artifacts = payload.get('artifacts')
         if artifacts is not None and not isinstance(artifacts, dict):
@@ -2706,8 +2984,15 @@ def sync_training_job():
 
         if remote_api_url is not None:
             job.remote_api_url = remote_api_url
-        if 'project_id' in payload:
+        if 'project_id' in payload or training_dataset is not None:
             job.project_id = project_id
+        if dataset_id is not None:
+            job.dataset_id = dataset_id
+            job.training_dataset_id = (
+                training_dataset.id if training_dataset is not None else None
+            )
+            if training_dataset is not None:
+                job.project_id = training_dataset.project_id
 
         if should_apply_remote_snapshot:
             job.status = remote_status
