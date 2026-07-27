@@ -3,6 +3,13 @@ import os
 from flask import Flask, abort, current_app, redirect, render_template, request
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.middleware.proxy_fix import ProxyFix
+from database_support import (
+    configure_database_engine,
+    engine_options_for_uri,
+    ensure_runtime_columns,
+    normalize_database_uri,
+    repair_orphaned_training_references,
+)
 from models import Project, db, slugify_project_name
 from routes import api_bp
 
@@ -12,10 +19,10 @@ LOCAL_HTTP_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 def get_default_database_uri():
     basedir = os.path.abspath(os.path.dirname(__file__))
-    return os.environ.get(
+    return normalize_database_uri(os.environ.get(
         'YOLO_LABELING_DB_URI',
         'sqlite:///' + os.path.join(basedir, 'yolo_labeling.db')
-    )
+    ))
 
 
 def should_redirect_to_https():
@@ -54,10 +61,13 @@ def resolve_project(identifier):
 def create_app(config_overrides=None):
     app = Flask(__name__)
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-    
+
+    database_uri = get_default_database_uri()
+
     # Configuration
     app.config.update({
-        'SQLALCHEMY_DATABASE_URI': get_default_database_uri(),
+        'SQLALCHEMY_DATABASE_URI': database_uri,
+        'SQLALCHEMY_ENGINE_OPTIONS': engine_options_for_uri(database_uri),
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         'PREFERRED_URL_SCHEME': 'https',
         'FORCE_HTTPS_REDIRECTS': True,
@@ -69,40 +79,28 @@ def create_app(config_overrides=None):
 
     if config_overrides:
         app.config.update(config_overrides)
-    
+        overridden_uri = normalize_database_uri(
+            app.config['SQLALCHEMY_DATABASE_URI']
+        )
+        app.config['SQLALCHEMY_DATABASE_URI'] = overridden_uri
+        if 'SQLALCHEMY_ENGINE_OPTIONS' not in config_overrides:
+            app.config['SQLALCHEMY_ENGINE_OPTIONS'] = engine_options_for_uri(
+                overridden_uri
+            )
+
     # Initialize DB
     db.init_app(app)
     with app.app_context():
+        configure_database_engine(db.engine)
         db.create_all()
-        try:
-            from sqlalchemy import text
-            with db.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE ai_models ADD COLUMN model_type VARCHAR(50) DEFAULT 'detection'"))
-                conn.commit()
-        except Exception:
-            pass # Column already exists
-        for migration_sql in (
-            "ALTER TABLE training_jobs ADD COLUMN training_dataset_id INTEGER",
-            "ALTER TABLE training_jobs ADD COLUMN dataset_id VARCHAR(36)",
-        ):
-            try:
-                from sqlalchemy import text
-                with db.engine.connect() as conn:
-                    conn.execute(text(migration_sql))
-                    conn.commit()
-            except Exception:
-                pass # Column already exists or the table was just created
-        try:
-            from sqlalchemy import text
-            with db.engine.connect() as conn:
-                conn.execute(text(
-                    "ALTER TABLE ai_models "
-                    "ADD COLUMN activation_ready BOOLEAN NOT NULL DEFAULT 1"
-                ))
-                conn.commit()
-        except Exception:
-            pass # Column already exists
-    
+        ensure_runtime_columns(db.engine)
+        repaired_references = repair_orphaned_training_references(db.engine)
+        if repaired_references:
+            app.logger.warning(
+                'Repaired %s orphaned training job reference(s).',
+                repaired_references,
+            )
+
     # Register Blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
 

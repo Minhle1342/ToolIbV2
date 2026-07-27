@@ -5,11 +5,30 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptPath
 
+$postgresConfigLoaded = $false
+$postgresEnvironmentPath = Join-Path $scriptPath '.env.postgres.local'
+if (Test-Path -LiteralPath $postgresEnvironmentPath) {
+    foreach ($line in Get-Content -LiteralPath $postgresEnvironmentPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) {
+            continue
+        }
+        $name, $value = $trimmed -split '=', 2
+        if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+    $postgresConfigLoaded = $true
+}
+
 Clear-Host
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "              TEAM YOLO LABELING HUB                      " -ForegroundColor White -BackgroundColor Blue
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host ""
+if ($postgresConfigLoaded) {
+    Write-Host "[DATABASE] Da nap cau hinh PostgreSQL local." -ForegroundColor Green
+}
 
 # Kiem tra Virtual Environment (.venv)
 $PythonPath = "python"

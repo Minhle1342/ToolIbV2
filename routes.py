@@ -47,6 +47,7 @@ from training_control_plane import (
     ACTIVE_TASK_STATUSES,
     ColabHttpWorkerAdapter,
     WORKER_PROVIDERS,
+    adopt_remote_job,
     adapter_for_worker,
     cancel_batch,
     create_training_batch,
@@ -3089,6 +3090,25 @@ def delete_training_job(job_id):
     job = db.session.get(TrainingJob, job_id)
     if job is None:
         return jsonify({'error': 'Training job not found.'}), 404
+    linked_tasks = TrainingQueueTask.query.filter_by(
+        training_job_id=job.id
+    ).all()
+    active_tasks = [
+        task.task_id
+        for task in linked_tasks
+        if task.status in ACTIVE_TASK_STATUSES | {'worker_lost'}
+    ]
+    if active_tasks:
+        return jsonify({
+            'error': (
+                'Training history is still referenced by an active or '
+                'recoverable queue task.'
+            ),
+            'task_ids': active_tasks,
+        }), 409
+    for task in linked_tasks:
+        task.training_job_id = None
+    db.session.flush()
     db.session.delete(job)
     db.session.commit()
     return jsonify({'message': 'Training history deleted.'})
@@ -3356,6 +3376,41 @@ def retry_training_queue_task(task_id):
         return jsonify(retry_task(task).to_dict(include_attempts=True))
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 409
+
+
+@api_bp.route('/training-queue-tasks/<int:task_id>/adopt', methods=['POST'])
+def adopt_training_queue_task_remote_job(task_id):
+    task = db.session.get(TrainingQueueTask, task_id)
+    if task is None:
+        return jsonify({'error': 'Training queue task not found.'}), 404
+    payload = request.get_json(silent=True) or {}
+    try:
+        worker_id = int(payload.get('worker_id'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'worker_id must be an integer.'}), 400
+    worker = db.session.get(TrainingWorker, worker_id)
+    if worker is None:
+        return jsonify({'error': 'Training worker not found.'}), 404
+    try:
+        attempt = adopt_remote_job(
+            task,
+            worker,
+            payload.get('remote_job_id'),
+        )
+        return jsonify({
+            'task': task.to_dict(include_attempts=True, include_events=True),
+            'attempt': attempt.to_dict(),
+        })
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 409
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(
+            'Could not adopt remote training job',
+            extra={'task_id': task.task_id},
+        )
+        return jsonify({'error': f'Could not adopt remote job: {exc}'}), 502
 
 
 @api_bp.route('/training-control-plane/status', methods=['GET'])

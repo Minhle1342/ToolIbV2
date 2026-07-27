@@ -274,6 +274,11 @@ class TrainingWorker(db.Model):
     capacity = db.Column(db.Integer, nullable=False, default=1)
     gpu_available = db.Column(db.Boolean, nullable=False, default=False)
     gpu_name = db.Column(db.String(200), nullable=True)
+    remote_active_job_id = db.Column(
+        db.String(36),
+        nullable=True,
+        index=True,
+    )
     capabilities = db.Column(db.JSON, nullable=True)
     last_heartbeat_at = db.Column(db.DateTime, nullable=True, index=True)
     last_error = db.Column(db.Text, nullable=True)
@@ -304,6 +309,7 @@ class TrainingWorker(db.Model):
             'available_capacity': max(self.capacity - active_leases, 0),
             'gpu_available': self.gpu_available,
             'gpu_name': self.gpu_name,
+            'remote_active_job_id': self.remote_active_job_id,
             'capabilities': self.capabilities or {},
             'credentials_configured': bool(self.token_ciphertext),
             'last_heartbeat_at': (

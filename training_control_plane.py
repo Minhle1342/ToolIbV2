@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import threading
@@ -63,12 +64,33 @@ class WorkerUnavailableError(WorkerApiError):
     pass
 
 
+class WorkerBusyError(WorkerApiError):
+    def __init__(self, message, active_job_id=None):
+        super().__init__(message)
+        self.active_job_id = normalize_remote_job_id(
+            active_job_id,
+            required=False,
+        )
+
+
 class RemoteTrainingFailedError(WorkerApiError):
     pass
 
 
 def utcnow():
     return datetime.utcnow()
+
+
+def normalize_remote_job_id(value, *, required=True):
+    normalized = str(value or '').strip()
+    if not normalized:
+        if required:
+            raise WorkerApiError('Worker response omitted job_id.')
+        return None
+    try:
+        return str(uuid.UUID(normalized))
+    except ValueError as exc:
+        raise WorkerApiError('Worker returned an invalid job_id.') from exc
 
 
 def normalize_worker_api_url(value):
@@ -319,7 +341,31 @@ class ColabHttpWorkerAdapter:
             )
         except requests.RequestException as exc:
             raise WorkerUnavailableError(f'Training submission failed: {exc}') from exc
-        return self._require_success(response, 'Training submission')
+        response_payload = self._response_payload(response)
+        if response.status_code == 409:
+            detail = response_payload.get('detail')
+            if isinstance(detail, dict):
+                active_job_id = detail.get('active_job_id')
+                detail_message = (
+                    detail.get('message')
+                    or detail.get('error')
+                    or str(detail)
+                )
+            else:
+                active_job_id = response_payload.get('active_job_id')
+                detail_message = (
+                    detail
+                    or response_payload.get('message')
+                    or response_payload.get('error')
+                    or 'Worker is already running another training job.'
+                )
+            raise WorkerBusyError(
+                f'Training submission returned HTTP 409: {detail_message}',
+                active_job_id=active_job_id,
+            )
+        if not 200 <= response.status_code < 300:
+            return self._require_success(response, 'Training submission')
+        return response_payload
 
     def get_job(self, remote_job_id):
         try:
@@ -488,6 +534,10 @@ def probe_worker(worker, session=None):
         worker.status = 'online'
         worker.gpu_available = bool(health.get('gpu_available'))
         worker.gpu_name = str(health.get('gpu_name') or '')[:200] or None
+        worker.remote_active_job_id = normalize_remote_job_id(
+            health.get('active_job_id'),
+            required=False,
+        )
         worker.capabilities = health.get('capabilities') or {}
         worker.last_heartbeat_at = utcnow()
         worker.last_error = None
@@ -685,13 +735,7 @@ def _claim_task_for_worker(task, worker):
 
 
 def _sync_local_training_job(task, worker, remote_payload):
-    remote_job_id = str(remote_payload.get('job_id') or '').strip()
-    if not remote_job_id:
-        raise WorkerApiError('Worker training response omitted job_id.')
-    try:
-        remote_job_id = str(uuid.UUID(remote_job_id))
-    except ValueError as exc:
-        raise WorkerApiError('Worker returned an invalid job_id.') from exc
+    remote_job_id = normalize_remote_job_id(remote_payload.get('job_id'))
 
     job = TrainingJob.query.filter_by(remote_job_id=remote_job_id).first()
     if job is None:
@@ -730,10 +774,79 @@ def _sync_local_training_job(task, worker, remote_payload):
     job.connection_status = 'synced'
     job.last_sync_error = None
     job.last_synced_at = utcnow()
-    task.training_job_id = job.id
     db.session.flush()
+
+    linked_task = TrainingQueueTask.query.filter(
+        TrainingQueueTask.training_job_id == job.id,
+        TrainingQueueTask.id != task.id,
+    ).first()
+    if linked_task is not None:
+        raise WorkerApiError(
+            f'Remote job {remote_job_id} is already linked to '
+            f'task {linked_task.task_id}.'
+        )
     task.training_job_id = job.id
+    if job.status in REMOTE_TERMINAL_STATUSES:
+        if worker.remote_active_job_id == remote_job_id:
+            worker.remote_active_job_id = None
+    else:
+        worker.remote_active_job_id = remote_job_id
     return job
+
+
+def _persist_remote_acceptance(task, attempt, worker, remote_payload):
+    remote_job_id = normalize_remote_job_id(remote_payload.get('job_id'))
+    existing_attempt = TrainingJobAttempt.query.filter(
+        TrainingJobAttempt.remote_job_id == remote_job_id,
+        TrainingJobAttempt.task_id != task.id,
+    ).first()
+    if existing_attempt is not None:
+        raise WorkerApiError(
+            f'Remote job {remote_job_id} is already owned by another task.'
+        )
+
+    attempt.remote_job_id = remote_job_id
+    attempt.status = 'running'
+    attempt.heartbeat_at = utcnow()
+    worker.remote_active_job_id = remote_job_id
+    record_task_event(
+        task,
+        'remote_submission_accepted',
+        message=f'Remote worker accepted job {remote_job_id}.',
+        details={
+            'remote_job_id': remote_job_id,
+            'worker_id': worker.worker_id,
+        },
+        attempt=attempt,
+    )
+    # This commit is intentionally separate from TrainingJob synchronization.
+    # Once the remote API accepts a job, its identity must survive any later
+    # local model/constraint error so reconciliation can resume without retrying.
+    db.session.commit()
+    return remote_job_id
+
+
+def _submission_idempotency_key(task):
+    remote_job_ids = {
+        remote_job_id
+        for (remote_job_id,) in db.session.query(
+            TrainingJobAttempt.remote_job_id
+        ).filter(
+            TrainingJobAttempt.task_id == task.id,
+            TrainingJobAttempt.remote_job_id.isnot(None),
+        ).all()
+    }
+    failed_remote_jobs = 0
+    if remote_job_ids:
+        failed_remote_jobs = TrainingJob.query.filter(
+            TrainingJob.remote_job_id.in_(remote_job_ids),
+            TrainingJob.status == 'failed',
+        ).count()
+    generation = failed_remote_jobs + 1
+    key_digest = hashlib.sha256(
+        task.idempotency_key.encode('utf-8')
+    ).hexdigest()[:16]
+    return f'toolib:{task.task_id}:run:{generation}:{key_digest}'
 
 
 def _import_task_model(task, job, onnx_path):
@@ -793,13 +906,42 @@ def _handle_pipeline_failure(task, attempt, exc):
     task.lease_token = None
     task.lease_expires_at = None
 
-    if isinstance(exc, WorkerUnavailableError) and attempt.remote_job_id:
+    if isinstance(exc, WorkerBusyError):
+        attempt.status = 'blocked'
+        task.assigned_worker_id = None
+        task.next_attempt_at = utcnow() + _retry_delay(task.attempt_count)
+        if task.attempt_count >= task.max_attempts:
+            task.max_attempts = task.attempt_count + 1
+        worker = (
+            db.session.get(TrainingWorker, attempt.worker_id)
+            if attempt.worker_id
+            else None
+        )
+        if worker is not None:
+            worker.remote_active_job_id = exc.active_job_id
+        transition_task(
+            task,
+            'waiting_for_worker',
+            'waiting_for_worker',
+            'Worker is busy; task returned to the queue without consuming '
+            'a training failure.',
+            attempt=attempt,
+            details={
+                'active_job_id': exc.active_job_id,
+                'error_type': type(exc).__name__,
+            },
+        )
+    elif (
+        attempt.remote_job_id
+        and not isinstance(exc, RemoteTrainingFailedError)
+    ):
         attempt.status = 'worker_lost'
         transition_task(
             task,
             'worker_lost',
             'waiting_for_worker_reconnect',
-            'Worker became unreachable while a remote job may still be running.',
+            'Remote job was accepted but local processing was interrupted; '
+            'reconciliation will resume the same job.',
             attempt=attempt,
             details={'remote_job_id': attempt.remote_job_id},
         )
@@ -878,6 +1020,17 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 if task.training_job_id
                 else None
             )
+            if attempt.remote_job_id and (
+                job is None
+                or job.remote_job_id != attempt.remote_job_id
+            ):
+                remote_snapshot = adapter.get_job(attempt.remote_job_id)
+                job = _sync_local_training_job(
+                    task,
+                    worker,
+                    remote_snapshot,
+                )
+                db.session.commit()
             is_resuming_remote_job = (
                 job is not None
                 and attempt.remote_job_id
@@ -923,13 +1076,10 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 db.session.commit()
                 submit_payload = dict(task.request_payload or {})
                 submit_payload['dataset_id'] = dataset.dataset_id
-                submission_key = (
-                    f'{task.idempotency_key}:attempt:{attempt.attempt_number}'
-                )
+                submission_key = _submission_idempotency_key(task)
                 remote = adapter.submit_job(submit_payload, submission_key)
+                _persist_remote_acceptance(task, attempt, worker, remote)
                 job = _sync_local_training_job(task, worker, remote)
-                attempt.remote_job_id = job.remote_job_id
-                attempt.status = 'running'
                 transition_task(
                     task,
                     'remote_queued',
@@ -1172,10 +1322,15 @@ def dispatch_once(
             asynchronous,
         )
 
-        workers = TrainingWorker.query.filter_by(
+        online_workers = TrainingWorker.query.filter_by(
             enabled=True,
             status='online',
         ).order_by(TrainingWorker.id.asc()).all()
+        workers = [
+            worker
+            for worker in online_workers
+            if not worker.remote_active_job_id
+        ]
         tasks = TrainingQueueTask.query.filter(
             TrainingQueueTask.status.in_(DISPATCHABLE_TASK_STATUSES),
             db.or_(
@@ -1211,7 +1366,8 @@ def dispatch_once(
         return {
             'dispatched': dispatched,
             'resumed': resumed,
-            'online_workers': len(workers),
+            'online_workers': len(online_workers),
+            'busy_workers': len(online_workers) - len(workers),
             'queued_tasks': len(tasks),
         }
 
@@ -1248,6 +1404,19 @@ def retry_task(task):
         )
     if task.status not in {'failed', 'cancelled'}:
         raise ValueError('Only failed or cancelled tasks can be retried.')
+    remote_attempt = TrainingJobAttempt.query.filter(
+        TrainingJobAttempt.task_id == task.id,
+        TrainingJobAttempt.remote_job_id.isnot(None),
+    ).order_by(TrainingJobAttempt.attempt_number.desc()).first()
+    if remote_attempt is not None:
+        remote_job = TrainingJob.query.filter_by(
+            remote_job_id=remote_attempt.remote_job_id
+        ).first()
+        if remote_job is None or remote_job.status != 'failed':
+            raise ValueError(
+                'A remote job already exists for this task. Adopt/reconcile '
+                'that job instead of retrying to avoid duplicate training.'
+            )
     previous_status = task.status
     task.status = 'retry_wait'
     task.stage = 'retry_wait'
@@ -1269,6 +1438,70 @@ def retry_task(task):
     refresh_batch_status(task.batch_id)
     db.session.commit()
     return task
+
+
+def adopt_remote_job(
+    task,
+    worker,
+    remote_job_id,
+    adapter_factory=adapter_for_worker,
+):
+    if task.status in ACTIVE_TASK_STATUSES | {'worker_lost'}:
+        raise ValueError('An active task cannot adopt another remote job.')
+    if task.imported_model_id is not None or task.status == 'succeeded':
+        raise ValueError('A completed task cannot adopt another remote job.')
+    if worker is None or not worker.enabled:
+        raise ValueError('The selected worker is unavailable.')
+
+    normalized_job_id = normalize_remote_job_id(remote_job_id)
+    duplicate_attempt = TrainingJobAttempt.query.filter(
+        TrainingJobAttempt.remote_job_id == normalized_job_id,
+        TrainingJobAttempt.task_id != task.id,
+    ).first()
+    if duplicate_attempt is not None:
+        raise ValueError('The remote job is already assigned to another task.')
+
+    remote_snapshot = adapter_factory(worker).get_job(normalized_job_id)
+    if normalize_remote_job_id(remote_snapshot.get('job_id')) != normalized_job_id:
+        raise WorkerApiError('Worker returned a different job during adoption.')
+
+    task.attempt_count += 1
+    task.max_attempts = max(task.max_attempts, task.attempt_count)
+    lease_token = str(uuid.uuid4())
+    attempt = TrainingJobAttempt(
+        attempt_id=str(uuid.uuid4()),
+        task_id=task.id,
+        worker_id=worker.id,
+        attempt_number=task.attempt_count,
+        status='worker_lost',
+        lease_token=lease_token,
+        remote_job_id=normalized_job_id,
+        heartbeat_at=utcnow(),
+    )
+    db.session.add(attempt)
+    db.session.flush()
+
+    task.assigned_worker_id = worker.id
+    task.lease_token = lease_token
+    task.lease_expires_at = utcnow() + _lease_duration()
+    task.next_attempt_at = None
+    task.finished_at = None
+    task.error = None
+    _sync_local_training_job(task, worker, remote_snapshot)
+    transition_task(
+        task,
+        'worker_lost',
+        'waiting_for_worker_reconnect',
+        f'Adopted remote job {normalized_job_id}; reconciliation scheduled.',
+        attempt=attempt,
+        details={
+            'remote_job_id': normalized_job_id,
+            'worker_id': worker.worker_id,
+        },
+    )
+    refresh_batch_status(task.batch_id)
+    db.session.commit()
+    return attempt
 
 
 def scheduler_status():

@@ -1,0 +1,23 @@
+services:
+  toolib-postgres:
+    image: postgres:17-alpine
+    container_name: toolib_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${TOOLIB_POSTGRES_DB}
+      POSTGRES_USER: ${TOOLIB_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${TOOLIB_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:${TOOLIB_POSTGRES_PORT}:5432"
+    volumes:
+      - toolib_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "${TOOLIB_POSTGRES_USER}" -d "${TOOLIB_POSTGRES_DB}"
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  toolib_postgres_data:

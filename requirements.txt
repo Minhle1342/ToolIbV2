@@ -11,3 +11,4 @@ pypdf==5.1.0
 requests==2.32.4
 requests-toolbelt==1.0.0
 cryptography==49.0.0
+psycopg[binary]==3.2.9

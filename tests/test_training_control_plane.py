@@ -435,6 +435,191 @@ class TestTrainingControlPlane:
             assert task.imported_model_id is not None
             assert state.submit_count == 1
 
+    def test_remote_acceptance_survives_local_sync_failure_without_resubmit(self):
+        self.add_worker('WorkerDurableAcceptance')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        state = FakeWorkerState()
+        factory = lambda worker: FakeWorkerAdapter(worker, state)
+
+        with mock.patch(
+            'training_control_plane._sync_local_training_job',
+            side_effect=RuntimeError('simulated local constraint failure'),
+        ):
+            first = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=False,
+            )
+
+        assert first['dispatched'] == 1
+        with self.app.app_context():
+            task = TrainingQueueTask.query.one()
+            attempt = TrainingJobAttempt.query.one()
+            assert task.status == 'worker_lost'
+            assert attempt.remote_job_id
+            assert state.submit_count == 1
+
+        second = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+
+        assert second['resumed'] == 1
+        with self.app.app_context():
+            task = TrainingQueueTask.query.one()
+            assert task.status == 'succeeded'
+            assert state.submit_count == 1
+
+    def test_ambiguous_submit_retry_uses_same_idempotency_key(self):
+        self.add_worker('WorkerAmbiguousSubmit')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        state = FakeWorkerState()
+        failed_after_acceptance = [False]
+
+        class AmbiguousSubmitAdapter(FakeWorkerAdapter):
+            def submit_job(self, request_payload, idempotency_key):
+                response = super().submit_job(
+                    request_payload,
+                    idempotency_key,
+                )
+                if not failed_after_acceptance[0]:
+                    failed_after_acceptance[0] = True
+                    raise WorkerUnavailableError(
+                        'connection closed after remote acceptance'
+                    )
+                return response
+
+        def factory(worker):
+            return AmbiguousSubmitAdapter(worker, state)
+
+        first = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert first['dispatched'] == 1
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'retry_wait'
+            assert state.submit_count == 1
+
+        second = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert second['dispatched'] == 1
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'succeeded'
+            assert state.submit_count == 1
+
+    def test_confirmed_remote_failure_uses_new_idempotency_generation(self):
+        self.add_worker('WorkerConfirmedFailure')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        state = FakeWorkerState()
+        first_remote_job_id = [None]
+
+        class FailFirstRemoteJobAdapter(FakeWorkerAdapter):
+            def submit_job(self, request_payload, idempotency_key):
+                response = super().submit_job(
+                    request_payload,
+                    idempotency_key,
+                )
+                if first_remote_job_id[0] is None:
+                    first_remote_job_id[0] = response['job_id']
+                return response
+
+            def get_job(self, remote_job_id):
+                if remote_job_id == first_remote_job_id[0]:
+                    return {
+                        'job_id': remote_job_id,
+                        'status': 'failed',
+                        'model': 'yolo11n.pt',
+                        'epochs': 1,
+                        'batch': 4,
+                        'imgsz': 640,
+                        'current_epoch': 0,
+                        'total_epochs': 1,
+                        'message': 'simulated confirmed training failure',
+                        'error': 'simulated confirmed training failure',
+                        'artifacts': None,
+                    }
+                return super().get_job(remote_job_id)
+
+        factory = lambda worker: FailFirstRemoteJobAdapter(worker, state)
+        first = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert first['dispatched'] == 1
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'retry_wait'
+            assert state.submit_count == 1
+
+        second = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert second['dispatched'] == 1
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'succeeded'
+            assert state.submit_count == 2
+
+    def test_remote_busy_worker_is_not_dispatched(self):
+        worker_id = self.add_worker('WorkerBusy')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        with self.app.app_context():
+            worker = db.session.get(TrainingWorker, worker_id)
+            worker.remote_active_job_id = str(uuid.uuid4())
+            db.session.commit()
+
+        result = dispatch_once(
+            self.app,
+            adapter_factory=lambda worker: FakeWorkerAdapter(
+                worker,
+                FakeWorkerState(),
+            ),
+            probe=False,
+            asynchronous=False,
+        )
+
+        assert result['dispatched'] == 0
+        assert result['busy_workers'] == 1
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'queued'
+
+    def test_deleting_training_history_clears_queue_reference(self):
+        self.add_worker('WorkerDeleteHistory')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        state = FakeWorkerState()
+        dispatch_once(
+            self.app,
+            adapter_factory=lambda worker: FakeWorkerAdapter(worker, state),
+            probe=False,
+            asynchronous=False,
+        )
+
+        with self.app.app_context():
+            task = TrainingQueueTask.query.one()
+            job_id = task.training_job_id
+            assert task.status == 'succeeded'
+            assert job_id is not None
+
+        response = self.client.delete(f'/api/training-jobs/{job_id}')
+
+        assert response.status_code == 200
+        with self.app.app_context():
+            task = TrainingQueueTask.query.one()
+            assert task.training_job_id is None
+
     def test_queue_survives_new_app_instance_using_same_database(self):
         batch_id = self.create_batch(project_ids=[self.project_ids[0]])
         with self.app.app_context():

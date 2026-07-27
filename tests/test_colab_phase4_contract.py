@@ -40,7 +40,7 @@ def test_notebook_accepts_authenticated_checksum_bound_dataset_snapshots():
 
     for expected in (
         'python-multipart>=0.0.20,<1',
-        'version="0.4.0"',
+        'version="0.5.0"',
         'from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status',
         '@app.post("/api/datasets", dependencies=[Depends(require_api_token)])',
         'dataset_id: str = Form(...)',
@@ -67,6 +67,21 @@ def test_notebook_exposes_phase5_worker_capabilities_and_idempotent_submit():
         '"max_concurrent_jobs": 1',
         '"idempotent_submit": True',
         '"gpu_name": torch.cuda.get_device_name(0)',
+    ):
+        assert expected in source
+
+
+def test_notebook_restores_persisted_drive_jobs_after_runtime_restart():
+    source = notebook_source()
+
+    for expected in (
+        'def restore_persisted_jobs() -> int:',
+        'DRIVE_ARTIFACT_ROOT.iterdir()',
+        'manifest_path = artifact_dir / "manifest.json"',
+        'failure_path = artifact_dir / "failure.json"',
+        'RESTORED_JOB_COUNT = restore_persisted_jobs()',
+        'IDEMPOTENCY_INDEX[str(idempotency_key)] = job_id',
+        '"idempotency_key": job_snapshot.get("idempotency_key")',
     ):
         assert expected in source
 
