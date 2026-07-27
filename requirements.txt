@@ -10,3 +10,4 @@ eventlet==0.41.0
 pypdf==5.1.0
 requests==2.32.4
 requests-toolbelt==1.0.0
+cryptography==49.0.0

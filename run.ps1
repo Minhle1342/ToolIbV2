@@ -85,10 +85,33 @@ Start-Job -ScriptBlock {
 
 # Khoi chay Flask App
 Write-Host "[SERVER] Dang khoi chay Flask server bao mat tai https://localhost:5000..." -ForegroundColor Cyan
+Write-Host "[SCHEDULER] Dang khoi chay training control plane rieng..." -ForegroundColor Cyan
 Write-Host "[LUU Y] Nhan Ctrl + C trong cua so nay de tat Server." -ForegroundColor DarkGray
 Write-Host "----------------------------------------------------------" -ForegroundColor Gray
 
-& $PythonPath app.py
+$schedulerProcess = $null
+try {
+    $schedulerProcess = Start-Process `
+        -FilePath $PythonPath `
+        -ArgumentList @("training_scheduler.py") `
+        -PassThru `
+        -WindowStyle Hidden
+    Start-Sleep -Milliseconds 300
+    if ($schedulerProcess.HasExited) {
+        Write-Host "[CANH BAO] Training scheduler khong khoi dong duoc. Chay run_training_scheduler.ps1 de xem log." -ForegroundColor Yellow
+        $schedulerProcess = $null
+    } else {
+        Write-Host "[SCHEDULER] Da khoi chay (PID $($schedulerProcess.Id))." -ForegroundColor Green
+    }
+
+    & $PythonPath app.py
+} finally {
+    if ($null -ne $schedulerProcess -and -not $schedulerProcess.HasExited) {
+        Write-Host "[SCHEDULER] Dang dung training control plane..." -ForegroundColor DarkGray
+        Stop-Process -Id $schedulerProcess.Id -ErrorAction SilentlyContinue
+        Wait-Process -Id $schedulerProcess.Id -Timeout 5 -ErrorAction SilentlyContinue
+    }
+}
 
 Write-Host ""
 Write-Host "Nhan phim bat ky de dong cua so nay..." -ForegroundColor Yellow

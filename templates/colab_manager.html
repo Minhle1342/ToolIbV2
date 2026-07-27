@@ -331,6 +331,96 @@
                     </div>
                 </div>
 
+                <!-- PHASE 5: PRODUCTION TRAINING CONTROL PLANE -->
+                <div class="bg-panel border border-emerald-500/40 rounded-xl p-4 space-y-4 shadow-sm">
+                    <div class="flex items-center justify-between gap-3 border-b border-border pb-2">
+                        <h3 class="text-sm font-semibold text-emerald-400 flex items-center gap-2">
+                            <i class="fa-solid fa-diagram-project"></i>
+                            Phase 5 · Multi-worker Training Control Plane
+                        </h3>
+                        <button type="button" onclick="loadTrainingControlPlane()" class="text-[10px] text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
+                            <i class="fa-solid fa-rotate mr-1"></i> Refresh
+                        </button>
+                    </div>
+
+                    <p class="text-[11px] text-content-muted leading-relaxed">
+                        ToolIbV2 giữ queue, lease, retry và artifacts. Colab chỉ là worker GPU có thể thay thế.
+                        Token worker được mã hóa trong local control plane và không được trả lại qua API.
+                    </p>
+
+                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-semibold text-content">
+                                <i class="fa-solid fa-server text-emerald-400 mr-1"></i>
+                                Worker registry
+                            </h4>
+                            <span id="trainingWorkerSummary" class="text-[10px] text-content-muted">0 worker</span>
+                        </div>
+                        <div class="grid grid-cols-[1fr_auto] gap-2">
+                            <input id="trainingWorkerName" type="text" placeholder="Ví dụ: Colab T4 account A" class="bg-panel border border-border rounded p-2 text-xs text-content focus:border-emerald-500 focus:outline-none">
+                            <button id="trainingWorkerRegisterBtn" type="button" onclick="registerCurrentColabWorker()" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
+                                <i class="fa-solid fa-plus mr-1"></i> Đăng ký API hiện tại
+                            </button>
+                        </div>
+                        <div class="text-[10px] text-content-muted">
+                            Nút này dùng URL và bearer token ở khối “Remote Colab API” phía trên. Lặp lại với từng Colab runtime.
+                        </div>
+                        <div id="trainingWorkerEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
+                            Chưa có worker.
+                        </div>
+                        <div id="trainingWorkerList" class="space-y-2"></div>
+                    </div>
+
+                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-semibold text-content">
+                                <i class="fa-solid fa-layer-group text-violet-400 mr-1"></i>
+                                Create automated batch
+                            </h4>
+                            <span class="text-[10px] text-content-muted">Ctrl/Shift để chọn nhiều project</span>
+                        </div>
+                        <input id="trainingBatchName" type="text" placeholder="Tên batch, ví dụ: vial-models-july" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-violet-500 focus:outline-none">
+                        <select id="trainingBatchProjects" multiple size="5" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-violet-500 focus:outline-none">
+                            <option disabled>Đang tải projects...</option>
+                        </select>
+                        <div class="grid grid-cols-2 gap-2">
+                            <label class="text-[10px] text-content-muted">
+                                Max attempts
+                                <input id="trainingBatchMaxAttempts" type="number" value="3" min="1" max="10" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Priority
+                                <input id="trainingBatchPriority" type="number" value="0" min="-100" max="100" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                        </div>
+                        <button id="trainingBatchCreateBtn" type="button" onclick="createAutomatedTrainingBatch()" class="w-full bg-violet-700 hover:bg-violet-600 text-white rounded px-3 py-2 text-xs font-medium">
+                            <i class="fa-solid fa-list-check mr-1"></i>
+                            Queue selected projects
+                        </button>
+                    </div>
+
+                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-semibold text-content">
+                                <i class="fa-solid fa-gauge-high text-sky-400 mr-1"></i>
+                                Scheduler & batches
+                            </h4>
+                            <button id="trainingDispatchBtn" type="button" onclick="dispatchTrainingControlPlane()" class="text-[10px] text-sky-300 border border-sky-800 rounded px-2 py-1 hover:bg-sky-950/40">
+                                Dispatch now
+                            </button>
+                        </div>
+                        <div id="trainingControlPlaneStatus" class="grid grid-cols-3 gap-2 text-[10px]">
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Workers:</span> <strong id="trainingStatusWorkers">0/0</strong></div>
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Queued:</span> <strong id="trainingStatusQueued">0</strong></div>
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Active:</span> <strong id="trainingStatusActive">0</strong></div>
+                        </div>
+                        <div id="trainingBatchEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
+                            Chưa có automated batch.
+                        </div>
+                        <div id="trainingBatchList" class="space-y-2"></div>
+                    </div>
+                </div>
+
                 <!-- SECTION: EXPORT & STORAGE -->
                 <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-emerald-400 flex items-center justify-between border-b border-border pb-2">
@@ -1002,6 +1092,10 @@
         let colabTrainingHistory = [];
         let colabTrainingDatasets = [];
         let colabPreparedDataset = null;
+        let trainingControlPlaneWorkers = [];
+        let trainingControlPlaneBatches = [];
+        let trainingControlPlaneRefreshTimer = null;
+        let trainingControlPlaneLoading = false;
 
         window.addEventListener('DOMContentLoaded', () => {
             loadTemplatesFromStorage();
@@ -1010,6 +1104,7 @@
             loadColabRemoteSettings();
             loadColabTrainingHistory();
             initializeColabTrainingDatasets();
+            initializeTrainingControlPlane();
         });
 
         function loadTemplatesFromStorage() {
@@ -1553,6 +1648,440 @@ print("Initialized YOLO-NAS Training Configuration")
                 throw new Error(payload.error || `ToolIb API returned HTTP ${response.status}.`);
             }
             return payload;
+        }
+
+        async function initializeTrainingControlPlane() {
+            try {
+                const projects = await localTrainingApiFetch("/api/projects");
+                const selector = document.getElementById("trainingBatchProjects");
+                selector.innerHTML = "";
+                for (const project of projects) {
+                    const option = document.createElement("option");
+                    option.value = project.id;
+                    option.textContent = `${project.name} (#${project.id})`;
+                    selector.appendChild(option);
+                }
+                if (!projects.length) {
+                    const option = document.createElement("option");
+                    option.disabled = true;
+                    option.textContent = "Chưa có ToolIb project.";
+                    selector.appendChild(option);
+                }
+            } catch (error) {
+                showColabRemoteError(`Không tải được project cho batch: ${error.message}`);
+            }
+
+            await loadTrainingControlPlane();
+            if (trainingControlPlaneRefreshTimer !== null) {
+                window.clearInterval(trainingControlPlaneRefreshTimer);
+            }
+            trainingControlPlaneRefreshTimer = window.setInterval(
+                () => loadTrainingControlPlane(true),
+                5000
+            );
+        }
+
+        function trainingStatusClasses(status) {
+            if (status === "online" || status === "succeeded") return "text-emerald-300";
+            if (["failed", "offline", "worker_lost"].includes(status)) return "text-rose-300";
+            if (["running", "remote_running", "uploading_dataset", "submitting"].includes(status)) return "text-sky-300";
+            return "text-amber-300";
+        }
+
+        async function loadTrainingControlPlane(silent = false) {
+            if (trainingControlPlaneLoading) return;
+            trainingControlPlaneLoading = true;
+            try {
+                const [workers, batches, status] = await Promise.all([
+                    localTrainingApiFetch("/api/training-workers"),
+                    localTrainingApiFetch("/api/training-batches?limit=20"),
+                    localTrainingApiFetch("/api/training-control-plane/status")
+                ]);
+                trainingControlPlaneWorkers = workers;
+                const detailedBatches = await Promise.all(
+                    batches.map(batch => localTrainingApiFetch(`/api/training-batches/${batch.id}`))
+                );
+                trainingControlPlaneBatches = detailedBatches;
+                renderTrainingWorkers();
+                renderTrainingBatches();
+                document.getElementById("trainingStatusWorkers").textContent =
+                    `${status.workers.online}/${status.workers.total}`;
+                document.getElementById("trainingStatusQueued").textContent = status.tasks.queued;
+                document.getElementById("trainingStatusActive").textContent =
+                    status.tasks.active + status.tasks.worker_lost;
+            } catch (error) {
+                if (!silent) {
+                    showColabRemoteError(`Control plane: ${error.message}`);
+                }
+            } finally {
+                trainingControlPlaneLoading = false;
+            }
+        }
+
+        function renderTrainingWorkers() {
+            const list = document.getElementById("trainingWorkerList");
+            const empty = document.getElementById("trainingWorkerEmpty");
+            const onlineCount = trainingControlPlaneWorkers.filter(
+                worker => worker.enabled && worker.status === "online"
+            ).length;
+            document.getElementById("trainingWorkerSummary").textContent =
+                `${onlineCount}/${trainingControlPlaneWorkers.length} online`;
+            list.innerHTML = "";
+            empty.classList.toggle("hidden", trainingControlPlaneWorkers.length > 0);
+
+            for (const worker of trainingControlPlaneWorkers) {
+                const card = document.createElement("div");
+                card.className = "border border-border rounded-lg p-2.5 text-[10px] space-y-1.5";
+
+                const header = document.createElement("div");
+                header.className = "flex items-center justify-between gap-2";
+                const name = document.createElement("strong");
+                name.className = "text-content";
+                name.textContent = worker.name;
+                const status = document.createElement("span");
+                status.className = `${trainingStatusClasses(worker.status)} font-mono`;
+                status.textContent = worker.status;
+                header.append(name, status);
+
+                const detail = document.createElement("div");
+                detail.className = "text-content-muted break-all";
+                detail.textContent = (
+                    `${worker.provider} · GPU ${worker.gpu_name || (worker.gpu_available ? "available" : "unavailable")} · `
+                    + `capacity ${worker.active_leases}/${worker.capacity} · ${worker.api_url}`
+                );
+
+                const actions = document.createElement("div");
+                actions.className = "flex flex-wrap gap-1.5";
+                const probeButton = document.createElement("button");
+                probeButton.type = "button";
+                probeButton.className = "text-sky-300 border border-sky-800 rounded px-2 py-1";
+                probeButton.textContent = "Probe";
+                probeButton.addEventListener("click", () => probeTrainingWorker(worker.id));
+                actions.appendChild(probeButton);
+                const reconnectButton = document.createElement("button");
+                reconnectButton.type = "button";
+                reconnectButton.className = "text-violet-300 border border-violet-800 rounded px-2 py-1";
+                reconnectButton.textContent = "Use current API";
+                reconnectButton.title = "Replace this worker's URL/token with the current Colab API fields.";
+                reconnectButton.addEventListener(
+                    "click",
+                    () => reconnectTrainingWorker(worker.id, worker.name, worker.capacity)
+                );
+                actions.appendChild(reconnectButton);
+                if (worker.enabled) {
+                    const disableButton = document.createElement("button");
+                    disableButton.type = "button";
+                    disableButton.className = "text-rose-300 border border-rose-900 rounded px-2 py-1";
+                    disableButton.textContent = "Disable";
+                    disableButton.addEventListener("click", () => disableTrainingWorker(worker.id));
+                    actions.appendChild(disableButton);
+                }
+
+                if (worker.last_error) {
+                    const error = document.createElement("div");
+                    error.className = "text-rose-300 break-words";
+                    error.textContent = worker.last_error;
+                    card.append(header, detail, error, actions);
+                } else {
+                    card.append(header, detail, actions);
+                }
+                list.appendChild(card);
+            }
+        }
+
+        async function registerCurrentColabWorker() {
+            const button = document.getElementById("trainingWorkerRegisterBtn");
+            const workerName = document.getElementById("trainingWorkerName").value.trim();
+            if (!workerName) {
+                showColabRemoteError("Nhập tên worker để phân biệt các Colab runtime.");
+                return;
+            }
+            let credentials;
+            try {
+                credentials = getColabRemoteCredentials(true);
+            } catch (error) {
+                showColabRemoteError(error.message);
+                return;
+            }
+
+            button.disabled = true;
+            try {
+                await localTrainingApiFetch("/api/training-workers", {
+                    method: "POST",
+                    body: {
+                        name: workerName,
+                        provider: "colab_http",
+                        api_url: credentials.endpoint,
+                        api_token: credentials.token,
+                        capacity: 1
+                    }
+                });
+                document.getElementById("trainingWorkerName").value = "";
+                showToast(`Đã đăng ký worker ${workerName}.`);
+                await loadTrainingControlPlane();
+            } catch (error) {
+                showColabRemoteError(`Đăng ký worker lỗi: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function probeTrainingWorker(workerId) {
+            try {
+                await localTrainingApiFetch(`/api/training-workers/${workerId}/probe`, {
+                    method: "POST"
+                });
+                await loadTrainingControlPlane();
+            } catch (error) {
+                showColabRemoteError(`Probe worker lỗi: ${error.message}`);
+            }
+        }
+
+        async function reconnectTrainingWorker(workerId, workerName, capacity) {
+            let credentials;
+            try {
+                credentials = getColabRemoteCredentials(true);
+            } catch (error) {
+                showColabRemoteError(error.message);
+                return;
+            }
+            try {
+                await localTrainingApiFetch(`/api/training-workers/${workerId}`, {
+                    method: "PUT",
+                    body: {
+                        name: workerName,
+                        api_url: credentials.endpoint,
+                        api_token: credentials.token,
+                        capacity
+                    }
+                });
+                showToast(`Worker ${workerName} reconnected; resuming recoverable jobs.`);
+                await dispatchTrainingControlPlane(true);
+            } catch (error) {
+                showColabRemoteError(`Reconnect worker failed: ${error.message}`);
+            }
+        }
+
+        async function disableTrainingWorker(workerId) {
+            try {
+                await localTrainingApiFetch(`/api/training-workers/${workerId}/disable`, {
+                    method: "POST"
+                });
+                await loadTrainingControlPlane();
+            } catch (error) {
+                showColabRemoteError(`Disable worker lỗi: ${error.message}`);
+            }
+        }
+
+        async function createAutomatedTrainingBatch() {
+            const selectedProjectIds = Array.from(
+                document.getElementById("trainingBatchProjects").selectedOptions
+            ).map(option => Number(option.value)).filter(Boolean);
+            if (!selectedProjectIds.length) {
+                showColabRemoteError("Chọn ít nhất một ToolIb project cho automated batch.");
+                return;
+            }
+
+            const state = getUIFormState("temp");
+            if (
+                state.task_type !== "detect"
+                || !COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version)
+                || state.epochs < 1
+                || state.epochs > 100
+                || state.batch_size < 1
+                || state.batch_size > 32
+                || !COLAB_REMOTE_ALLOWED_IMAGE_SIZES.has(Number(state.imgsz))
+            ) {
+                showColabRemoteError("Batch automation hiện hỗ trợ contract YOLO detect của Colab worker.");
+                return;
+            }
+
+            const splits = {
+                train: Number(document.getElementById("colabDatasetTrainSplit").value),
+                val: Number(document.getElementById("colabDatasetValSplit").value),
+                test: Number(document.getElementById("colabDatasetTestSplit").value)
+            };
+            if (
+                !Number.isInteger(splits.train)
+                || !Number.isInteger(splits.val)
+                || !Number.isInteger(splits.test)
+                || splits.train <= 0
+                || splits.val <= 0
+                || splits.train + splits.val + splits.test !== 100
+            ) {
+                showColabRemoteError("Split batch phải là số nguyên, Train/Val > 0 và tổng bằng 100.");
+                return;
+            }
+
+            const createButton = document.getElementById("trainingBatchCreateBtn");
+            createButton.disabled = true;
+            try {
+                const priority = Number(document.getElementById("trainingBatchPriority").value || 0);
+                const maxAttempts = Number(document.getElementById("trainingBatchMaxAttempts").value || 3);
+                const batch = await localTrainingApiFetch("/api/training-batches", {
+                    method: "POST",
+                    body: {
+                        name: document.getElementById("trainingBatchName").value.trim(),
+                        max_attempts: maxAttempts,
+                        jobs: selectedProjectIds.map(projectId => ({
+                            project_id: projectId,
+                            model: state.model_version,
+                            epochs: Number(state.epochs),
+                            batch: Number(state.batch_size),
+                            imgsz: Number(state.imgsz),
+                            priority,
+                            splits,
+                            exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                            include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
+                        }))
+                    }
+                });
+                showToast(`Đã queue ${batch.total_jobs} job trong batch ${batch.batch_id.slice(0, 8)}.`);
+                await dispatchTrainingControlPlane(true);
+            } catch (error) {
+                showColabRemoteError(`Tạo batch lỗi: ${error.message}`);
+            } finally {
+                createButton.disabled = false;
+                await loadTrainingControlPlane(true);
+            }
+        }
+
+        function renderTrainingBatches() {
+            const list = document.getElementById("trainingBatchList");
+            const empty = document.getElementById("trainingBatchEmpty");
+            list.innerHTML = "";
+            empty.classList.toggle("hidden", trainingControlPlaneBatches.length > 0);
+
+            for (const batch of trainingControlPlaneBatches) {
+                const card = document.createElement("div");
+                card.className = "border border-border rounded-lg p-2.5 text-[10px] space-y-2";
+
+                const header = document.createElement("div");
+                header.className = "flex items-center justify-between gap-2";
+                const title = document.createElement("strong");
+                title.className = "text-content";
+                title.textContent = `${batch.name} · ${batch.batch_id.slice(0, 8)}`;
+                const status = document.createElement("span");
+                status.className = `${trainingStatusClasses(batch.status)} font-mono`;
+                status.textContent = batch.status;
+                header.append(title, status);
+
+                const summary = document.createElement("div");
+                summary.className = "text-content-muted";
+                summary.textContent = (
+                    `${batch.succeeded_jobs}/${batch.total_jobs} succeeded · `
+                    + `${batch.failed_jobs} failed · ${batch.cancelled_jobs} cancelled`
+                );
+
+                const tasks = document.createElement("div");
+                tasks.className = "space-y-1";
+                for (const task of batch.tasks || []) {
+                    const row = document.createElement("div");
+                    row.className = "flex items-start justify-between gap-2 border-t border-border/70 pt-1.5";
+                    const info = document.createElement("div");
+                    info.className = "min-w-0";
+                    const taskStatus = document.createElement("div");
+                    taskStatus.className = `${trainingStatusClasses(task.status)} font-mono`;
+                    taskStatus.textContent = `Project #${task.project_id} · ${task.status} · attempt ${task.attempt_count}/${task.max_attempts}`;
+                    const message = document.createElement("div");
+                    message.className = "text-content-muted break-words";
+                    message.textContent = task.error || task.message || task.stage;
+                    info.append(taskStatus, message);
+
+                    const latestAttempt = (task.attempts || []).at(-1);
+                    if (latestAttempt) {
+                        const attemptDetail = document.createElement("div");
+                        attemptDetail.className = "text-content-muted break-all";
+                        attemptDetail.textContent = (
+                            `Attempt #${latestAttempt.attempt_number}`
+                            + ` · worker ${latestAttempt.worker_id || "unassigned"}`
+                            + ` · remote ${latestAttempt.remote_job_id || "not submitted"}`
+                            + ` · ${latestAttempt.status}`
+                        );
+                        info.appendChild(attemptDetail);
+                    }
+
+                    const latestEvent = (task.events || []).at(-1);
+                    if (latestEvent) {
+                        const eventDetail = document.createElement("div");
+                        eventDetail.className = "text-content-muted break-words";
+                        eventDetail.textContent = `Last event: ${latestEvent.event_type} · ${latestEvent.message || ""}`;
+                        info.appendChild(eventDetail);
+                    }
+                    row.appendChild(info);
+                    if (["failed", "cancelled"].includes(task.status)) {
+                        const retryButton = document.createElement("button");
+                        retryButton.type = "button";
+                        retryButton.className = "shrink-0 text-amber-300 border border-amber-800 rounded px-2 py-1";
+                        retryButton.textContent = "Retry";
+                        retryButton.addEventListener("click", () => retryTrainingTask(task.id));
+                        row.appendChild(retryButton);
+                    } else if (task.status === "worker_lost") {
+                        const reconnectHint = document.createElement("span");
+                        reconnectHint.className = "shrink-0 text-amber-300";
+                        reconnectHint.textContent = "Await reconnect";
+                        reconnectHint.title = "Reconnect and probe the same worker to resume its existing remote job.";
+                        row.appendChild(reconnectHint);
+                    }
+                    tasks.appendChild(row);
+                }
+
+                const actions = document.createElement("div");
+                actions.className = "flex gap-1.5";
+                if (!["succeeded", "failed", "cancelled", "partial_failed"].includes(batch.status)) {
+                    const cancelButton = document.createElement("button");
+                    cancelButton.type = "button";
+                    cancelButton.className = "text-rose-300 border border-rose-900 rounded px-2 py-1";
+                    cancelButton.textContent = "Cancel queued";
+                    cancelButton.addEventListener("click", () => cancelTrainingBatch(batch.id));
+                    actions.appendChild(cancelButton);
+                }
+                card.append(header, summary, tasks, actions);
+                list.appendChild(card);
+            }
+        }
+
+        async function retryTrainingTask(taskId) {
+            try {
+                await localTrainingApiFetch(`/api/training-queue-tasks/${taskId}/retry`, {
+                    method: "POST"
+                });
+                await dispatchTrainingControlPlane(true);
+            } catch (error) {
+                showColabRemoteError(`Retry task lỗi: ${error.message}`);
+            }
+        }
+
+        async function cancelTrainingBatch(batchId) {
+            try {
+                const result = await localTrainingApiFetch(`/api/training-batches/${batchId}/cancel`, {
+                    method: "POST"
+                });
+                if (result.running_not_cancelled.length) {
+                    showToast("Đã cancel job đang chờ; remote job đang chạy không bị giả lập cancel.");
+                }
+                await loadTrainingControlPlane();
+            } catch (error) {
+                showColabRemoteError(`Cancel batch lỗi: ${error.message}`);
+            }
+        }
+
+        async function dispatchTrainingControlPlane(silent = false) {
+            const button = document.getElementById("trainingDispatchBtn");
+            button.disabled = true;
+            try {
+                const result = await localTrainingApiFetch("/api/training-control-plane/dispatch", {
+                    method: "POST"
+                });
+                if (!silent) {
+                    showToast(`Dispatched ${result.dispatched}, resumed ${result.resumed}.`);
+                }
+                await loadTrainingControlPlane(true);
+            } catch (error) {
+                showColabRemoteError(`Dispatch lỗi: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
         }
 
         function formatColabDatasetBytes(value) {

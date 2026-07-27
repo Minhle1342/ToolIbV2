@@ -253,3 +253,312 @@ class TrainingJob(db.Model):
             'last_synced_at': self.last_synced_at.isoformat() if self.last_synced_at else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class TrainingWorker(db.Model):
+    __tablename__ = 'training_workers'
+
+    id = db.Column(db.Integer, primary_key=True)
+    worker_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(120), nullable=False)
+    provider = db.Column(
+        db.String(40),
+        nullable=False,
+        default='colab_http',
+        index=True,
+    )
+    api_url = db.Column(db.String(500), nullable=False)
+    token_ciphertext = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default='offline', index=True)
+    enabled = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    capacity = db.Column(db.Integer, nullable=False, default=1)
+    gpu_available = db.Column(db.Boolean, nullable=False, default=False)
+    gpu_name = db.Column(db.String(200), nullable=True)
+    capabilities = db.Column(db.JSON, nullable=True)
+    last_heartbeat_at = db.Column(db.DateTime, nullable=True, index=True)
+    last_error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint('provider', 'api_url', name='uq_training_worker_provider_url'),
+        db.CheckConstraint('capacity >= 1', name='ck_training_worker_capacity'),
+    )
+
+    def to_dict(self, active_leases=0):
+        return {
+            'id': self.id,
+            'worker_id': self.worker_id,
+            'name': self.name,
+            'provider': self.provider,
+            'api_url': self.api_url,
+            'status': self.status,
+            'enabled': self.enabled,
+            'capacity': self.capacity,
+            'active_leases': active_leases,
+            'available_capacity': max(self.capacity - active_leases, 0),
+            'gpu_available': self.gpu_available,
+            'gpu_name': self.gpu_name,
+            'capabilities': self.capabilities or {},
+            'credentials_configured': bool(self.token_ciphertext),
+            'last_heartbeat_at': (
+                self.last_heartbeat_at.isoformat()
+                if self.last_heartbeat_at
+                else None
+            ),
+            'last_error': self.last_error,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class TrainingBatch(db.Model):
+    __tablename__ = 'training_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    name = db.Column(db.String(160), nullable=False)
+    status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    total_jobs = db.Column(db.Integer, nullable=False, default=0)
+    succeeded_jobs = db.Column(db.Integer, nullable=False, default=0)
+    failed_jobs = db.Column(db.Integer, nullable=False, default=0)
+    cancelled_jobs = db.Column(db.Integer, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self, include_tasks=False):
+        payload = {
+            'id': self.id,
+            'batch_id': self.batch_id,
+            'name': self.name,
+            'status': self.status,
+            'total_jobs': self.total_jobs,
+            'succeeded_jobs': self.succeeded_jobs,
+            'failed_jobs': self.failed_jobs,
+            'cancelled_jobs': self.cancelled_jobs,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+        }
+        if include_tasks:
+            tasks = TrainingQueueTask.query.filter_by(batch_id=self.id).order_by(
+                TrainingQueueTask.priority.desc(),
+                TrainingQueueTask.id.asc(),
+            ).all()
+            payload['tasks'] = [task.to_dict() for task in tasks]
+        return payload
+
+
+class TrainingQueueTask(db.Model):
+    __tablename__ = 'training_queue_tasks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    idempotency_key = db.Column(db.String(100), nullable=False, unique=True, index=True)
+    batch_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_batches.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    project_id = db.Column(
+        db.Integer,
+        db.ForeignKey('projects.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    training_dataset_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_datasets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    training_job_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_jobs.id', ondelete='SET NULL'),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    imported_model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='SET NULL'),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    assigned_worker_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_workers.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    status = db.Column(db.String(40), nullable=False, default='queued', index=True)
+    stage = db.Column(db.String(50), nullable=False, default='queued')
+    priority = db.Column(db.Integer, nullable=False, default=0, index=True)
+    request_payload = db.Column(db.JSON, nullable=False)
+    dataset_config = db.Column(db.JSON, nullable=False)
+    attempt_count = db.Column(db.Integer, nullable=False, default=0)
+    max_attempts = db.Column(db.Integer, nullable=False, default=3)
+    lease_token = db.Column(db.String(36), nullable=True, unique=True, index=True)
+    lease_expires_at = db.Column(db.DateTime, nullable=True, index=True)
+    next_attempt_at = db.Column(db.DateTime, nullable=True, index=True)
+    message = db.Column(db.Text, nullable=True)
+    error = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+    started_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.CheckConstraint('attempt_count >= 0', name='ck_training_task_attempt_count'),
+        db.CheckConstraint('max_attempts >= 1', name='ck_training_task_max_attempts'),
+    )
+
+    def to_dict(self, include_attempts=False, include_events=False):
+        payload = {
+            'id': self.id,
+            'task_id': self.task_id,
+            'idempotency_key': self.idempotency_key,
+            'batch_id': self.batch_id,
+            'project_id': self.project_id,
+            'training_dataset_id': self.training_dataset_id,
+            'training_job_id': self.training_job_id,
+            'imported_model_id': self.imported_model_id,
+            'assigned_worker_id': self.assigned_worker_id,
+            'status': self.status,
+            'stage': self.stage,
+            'priority': self.priority,
+            'request': self.request_payload or {},
+            'dataset_config': self.dataset_config or {},
+            'attempt_count': self.attempt_count,
+            'max_attempts': self.max_attempts,
+            'lease_expires_at': (
+                self.lease_expires_at.isoformat()
+                if self.lease_expires_at
+                else None
+            ),
+            'next_attempt_at': (
+                self.next_attempt_at.isoformat()
+                if self.next_attempt_at
+                else None
+            ),
+            'message': self.message,
+            'error': self.error,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+        }
+        if include_attempts:
+            attempts = TrainingJobAttempt.query.filter_by(task_id=self.id).order_by(
+                TrainingJobAttempt.attempt_number.asc()
+            ).all()
+            payload['attempts'] = [attempt.to_dict() for attempt in attempts]
+        if include_events:
+            events = TrainingJobEvent.query.filter_by(task_id=self.id).order_by(
+                TrainingJobEvent.id.asc()
+            ).all()
+            payload['events'] = [event.to_dict() for event in events]
+        return payload
+
+
+class TrainingJobAttempt(db.Model):
+    __tablename__ = 'training_job_attempts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    attempt_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    task_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_queue_tasks.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    worker_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_workers.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    attempt_number = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(30), nullable=False, default='leased', index=True)
+    lease_token = db.Column(db.String(36), nullable=False, unique=True, index=True)
+    remote_job_id = db.Column(db.String(36), nullable=True, index=True)
+    error = db.Column(db.Text, nullable=True)
+    started_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    heartbeat_at = db.Column(db.DateTime, nullable=True)
+    finished_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'task_id',
+            'attempt_number',
+            name='uq_training_attempt_task_number',
+        ),
+        db.CheckConstraint('attempt_number >= 1', name='ck_training_attempt_number'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'attempt_id': self.attempt_id,
+            'task_id': self.task_id,
+            'worker_id': self.worker_id,
+            'attempt_number': self.attempt_number,
+            'status': self.status,
+            'remote_job_id': self.remote_job_id,
+            'error': self.error,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'heartbeat_at': (
+                self.heartbeat_at.isoformat() if self.heartbeat_at else None
+            ),
+            'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+        }
+
+
+class TrainingJobEvent(db.Model):
+    __tablename__ = 'training_job_events'
+
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_queue_tasks.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    attempt_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_job_attempts.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    event_type = db.Column(db.String(50), nullable=False, index=True)
+    from_status = db.Column(db.String(40), nullable=True)
+    to_status = db.Column(db.String(40), nullable=True)
+    message = db.Column(db.Text, nullable=True)
+    details = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'attempt_id': self.attempt_id,
+            'event_type': self.event_type,
+            'from_status': self.from_status,
+            'to_status': self.to_status,
+            'message': self.message,
+            'details': self.details or {},
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }

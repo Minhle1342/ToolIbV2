@@ -34,7 +34,7 @@ Công cụ gán nhãn dữ liệu YOLO chuyên nghiệp, hoạt động trên n�
 
 #### Cách 1: Click đúp chạy ngay (Khuyên dùng)
 * Nhấp đúp chuột vào file **`run.bat`** ở thư mục gốc của dự án.
-* File này sẽ tự động chạy script PowerShell **`run.ps1`**, kích hoạt môi trường ảo `.venv` (nếu có), tự động mở trình duyệt hiển thị ứng dụng tại địa chỉ `https://localhost:5000` và khởi chạy server Flask.
+* File này sẽ tự động chạy script PowerShell **`run.ps1`**, kích hoạt môi trường ảo `.venv` (nếu có), tự động mở trình duyệt hiển thị ứng dụng tại địa chỉ `https://localhost:5000`, khởi chạy server Flask và training scheduler Phase 5.
 
 #### Cách 2: Khởi chạy bằng lệnh thủ công (Terminal)
 Chạy lệnh sau để khởi động server:

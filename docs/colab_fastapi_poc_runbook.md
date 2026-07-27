@@ -615,3 +615,113 @@ MyDrive/ToolIb_PoC
 ```
 
 Không dùng script cleanup với path nhận từ request API.
+
+## 14. Phase 5 - nhiều Colab worker và hàng đợi tự động
+
+Phase 5 giữ một ranh giới thủ công bắt buộc của Colab: người dùng phải mở
+runtime và cấp quyền Google Drive. Sau khi worker được đăng ký, ToolIbV2 tự
+tạo snapshot, upload, submit, theo dõi, tải ONNX, import model ở trạng thái
+inactive và chạy job tiếp theo.
+
+### 14.1 Chuẩn bị control plane
+
+Tạo một Fernet key duy nhất cho môi trường. Không đổi key khi database còn
+chứa worker, vì token cũ sẽ không giải mã được.
+
+```powershell
+$env:TOOLIB_WORKER_CREDENTIAL_KEY = & .\.venv\Scripts\python.exe -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Production phải lấy giá trị này từ secret manager. Không commit key vào Git.
+Đặt thêm `TOOLIB_REQUIRE_EXTERNAL_CREDENTIAL_KEY=1` ở production để app fail
+closed thay vì tự tạo local key khi secret bị thiếu.
+
+Áp dụng migration cộng thêm và kiểm tra schema:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\migrate_phase5_control_plane.py
+.\.venv\Scripts\python.exe scripts\migrate_phase5_control_plane.py --check
+```
+
+Chạy `run.ps1` hoặc `run.bat`. Script sẽ chạy Flask và một scheduler process
+riêng. Nếu cần xem log scheduler trực tiếp, chạy hai cửa sổ:
+
+```powershell
+.\.venv\Scripts\python.exe app.py
+.\run_training_scheduler.ps1
+```
+
+Chỉ chạy một scheduler cho một database trong Phase 5. SQLite phù hợp test
+local; production nên dùng PostgreSQL qua `YOLO_LABELING_DB_URI`.
+Không public trực tiếp Flask hiện tại ra Internet. Trước production phải đặt
+toàn bộ UI/API sau authenticated reverse proxy hoặc bổ sung login/RBAC ở cấp
+ứng dụng.
+
+### 14.2 Đăng ký nhiều Colab
+
+Với mỗi Google account:
+
+1. Mở một Colab notebook Phase 5.
+2. Chọn GPU runtime, tạo một bearer token riêng và lưu vào
+   `TOOLIB_COLAB_API_TOKEN`.
+3. Chạy notebook đến khi có `Temporary public API`.
+4. Tại `/colab-manager`, paste URL và token vào phần Colab API hiện tại.
+5. Nhập tên phân biệt, ví dụ `colab-account-1-t4`.
+6. Bấm `Đăng ký API hiện tại`.
+7. Lặp lại bằng account/runtime khác.
+
+Mỗi worker online có capacity mặc định bằng 1. Hai worker có thể nhận hai task
+song song; task thứ ba giữ trạng thái `queued` cho đến khi có capacity.
+
+### 14.3 Queue batch
+
+1. Chọn model, epochs, batch size, imgsz và split dataset.
+2. Trong `Production training control plane`, chọn một hoặc nhiều ToolIb
+   project.
+3. Chọn priority và max attempts.
+4. Bấm `Queue selected projects`.
+5. Theo dõi worker, batch, task, attempt và event ngay trên cùng màn hình.
+
+Model ONNX hoàn tất được import với `is_active=false` và
+`activation_ready=false`. Người dùng phải kiểm tra chất lượng trước khi kích
+hoạt.
+
+### 14.4 Mất kết nối và reconnect
+
+- Nếu chỉ tunnel đổi URL nhưng Colab runtime/job vẫn còn: paste URL/token mới,
+  tìm đúng worker cũ và bấm `Use current API`. Scheduler tiếp tục poll cùng
+  `remote_job_id`; không submit job thứ hai.
+- Nếu Colab runtime đã bị xóa: remote in-memory job không còn. Sau reconnect,
+  worker trả `404`; task chuyển qua retry theo policy và dùng lại snapshot đã
+  lưu ở control plane.
+- Không bấm tạo worker mới để thay cho worker đang có task `worker_lost`, vì
+  task được gắn với stable worker ID.
+
+### 14.5 Acceptance test nhiều worker
+
+1. Đăng ký hai worker và xác nhận `2/2 online`.
+2. Queue ba project nhỏ, mỗi project 1 epoch.
+3. Xác nhận hai task có attempt `running` trên hai worker khác nhau.
+4. Xác nhận task thứ ba vẫn `queued`.
+5. Sau khi một task xong, xác nhận task thứ ba tự chạy mà không bấm Dispatch.
+6. Xác nhận cả ba model được import nhưng chưa active.
+7. Trong một lần test riêng, dừng tunnel khi job đang chạy, xác nhận
+   `worker_lost`, khôi phục URL bằng `Use current API` và xác nhận không có
+   remote job trùng.
+
+### 14.6 Rollback
+
+Trước deployment, backup database và artifact root. Nếu phải rollback code,
+checkout commit Phase 4 rồi chạy lại app. Không xóa năm bảng Phase 5 trong
+rollback thông thường; giữ chúng để bảo toàn queue/audit history:
+
+```text
+training_workers
+training_batches
+training_queue_tasks
+training_job_attempts
+training_job_events
+```
+
+Chỉ drop các bảng này bằng migration phá hủy riêng sau khi đã export/backup dữ
+liệu và chắc chắn không quay lại Phase 5.

@@ -9,8 +9,12 @@ from models import (
     Image,
     AIModel,
     Tag,
+    TrainingBatch,
     TrainingDataset,
     TrainingJob,
+    TrainingJobAttempt,
+    TrainingQueueTask,
+    TrainingWorker,
 )
 import utils
 import hashlib
@@ -39,6 +43,21 @@ try:
 except ModuleNotFoundError:
     from scripts.clear_header import validate_and_rename_yolo_dataset
 from inference import YOLOInference, ClassificationInference
+from training_control_plane import (
+    ACTIVE_TASK_STATUSES,
+    ColabHttpWorkerAdapter,
+    WORKER_PROVIDERS,
+    adapter_for_worker,
+    cancel_batch,
+    create_training_batch,
+    dispatch_once,
+    encrypt_worker_token,
+    normalize_worker_api_url,
+    probe_worker,
+    retry_task,
+    scheduler_status,
+    serialize_worker,
+)
 
 # Initialize Inference Engines
 inference_engine = None
@@ -3073,6 +3092,298 @@ def delete_training_job(job_id):
     db.session.delete(job)
     db.session.commit()
     return jsonify({'message': 'Training history deleted.'})
+
+
+# --- Phase 5 training control plane ---
+@api_bp.route('/training-workers', methods=['GET'])
+def list_training_workers():
+    workers = TrainingWorker.query.order_by(
+        TrainingWorker.enabled.desc(),
+        TrainingWorker.created_at.asc(),
+    ).all()
+    return jsonify([serialize_worker(worker) for worker in workers])
+
+
+@api_bp.route('/training-workers', methods=['POST'])
+def register_training_worker():
+    payload = request.get_json(silent=True) or {}
+    try:
+        provider = str(payload.get('provider') or 'colab_http').strip()
+        if provider not in WORKER_PROVIDERS:
+            raise ValueError(f'Unsupported worker provider: {provider}')
+
+        name = str(payload.get('name') or '').strip()
+        if not name:
+            raise ValueError('name is required.')
+        api_url = normalize_worker_api_url(payload.get('api_url'))
+        api_token = str(payload.get('api_token') or '').strip()
+        if not api_token:
+            raise ValueError('api_token is required.')
+        capacity = optional_int(payload.get('capacity', 1), 'capacity', minimum=1)
+        if capacity is None or capacity > 8:
+            raise ValueError('capacity must be between 1 and 8.')
+
+        health = ColabHttpWorkerAdapter(api_url, api_token).health()
+        maximum_capacity = int(
+            (health.get('capabilities') or {}).get('max_concurrent_jobs') or 1
+        )
+        capacity = min(capacity, max(maximum_capacity, 1))
+
+        worker = TrainingWorker.query.filter_by(
+            provider=provider,
+            api_url=api_url,
+        ).first()
+        created = worker is None
+        if worker is None:
+            worker = TrainingWorker(
+                worker_id=str(uuid.uuid4()),
+                provider=provider,
+                api_url=api_url,
+            )
+            db.session.add(worker)
+
+        worker.name = name[:120]
+        worker.token_ciphertext = encrypt_worker_token(api_token)
+        worker.enabled = True
+        worker.status = 'online'
+        worker.capacity = capacity
+        worker.gpu_available = bool(health.get('gpu_available'))
+        worker.gpu_name = str(health.get('gpu_name') or '')[:200] or None
+        worker.capabilities = health.get('capabilities') or {}
+        worker.last_heartbeat_at = datetime.utcnow()
+        worker.last_error = None
+        worker.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(serialize_worker(worker)), 201 if created else 200
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.warning(
+            'Could not register training worker: %s',
+            type(exc).__name__,
+        )
+        return jsonify({'error': f'Could not connect to worker: {exc}'}), 502
+
+
+@api_bp.route('/training-workers/<int:worker_id>/probe', methods=['POST'])
+def probe_training_worker(worker_id):
+    worker = db.session.get(TrainingWorker, worker_id)
+    if worker is None:
+        return jsonify({'error': 'Training worker not found.'}), 404
+    return jsonify(probe_worker(worker))
+
+
+@api_bp.route('/training-workers/<int:worker_id>', methods=['PUT'])
+def reconnect_training_worker(worker_id):
+    worker = db.session.get(TrainingWorker, worker_id)
+    if worker is None:
+        return jsonify({'error': 'Training worker not found.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        api_url = normalize_worker_api_url(payload.get('api_url'))
+        api_token = str(payload.get('api_token') or '').strip()
+        if not api_token:
+            raise ValueError('api_token is required.')
+        capacity = optional_int(
+            payload.get('capacity', worker.capacity),
+            'capacity',
+            minimum=1,
+        )
+        if capacity is None or capacity > 8:
+            raise ValueError('capacity must be between 1 and 8.')
+
+        duplicate = TrainingWorker.query.filter(
+            TrainingWorker.id != worker.id,
+            TrainingWorker.provider == worker.provider,
+            TrainingWorker.api_url == api_url,
+        ).first()
+        if duplicate is not None:
+            return jsonify({
+                'error': (
+                    'This worker endpoint is already registered as '
+                    f'{duplicate.name}.'
+                ),
+                'worker_id': duplicate.id,
+            }), 409
+
+        health = ColabHttpWorkerAdapter(api_url, api_token).health()
+        maximum_capacity = int(
+            (health.get('capabilities') or {}).get('max_concurrent_jobs') or 1
+        )
+        worker.api_url = api_url
+        worker.token_ciphertext = encrypt_worker_token(api_token)
+        worker.name = str(payload.get('name') or worker.name).strip()[:120]
+        worker.capacity = min(capacity, max(maximum_capacity, 1))
+        worker.enabled = True
+        worker.status = 'online'
+        worker.gpu_available = bool(health.get('gpu_available'))
+        worker.gpu_name = str(health.get('gpu_name') or '')[:200] or None
+        worker.capabilities = health.get('capabilities') or {}
+        worker.last_heartbeat_at = datetime.utcnow()
+        worker.last_error = None
+        worker.updated_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(serialize_worker(worker))
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.warning(
+            'Could not reconnect training worker %s: %s',
+            worker.worker_id,
+            type(exc).__name__,
+        )
+        return jsonify({'error': f'Could not reconnect to worker: {exc}'}), 502
+
+
+@api_bp.route('/training-workers/<int:worker_id>/disable', methods=['POST'])
+def disable_training_worker(worker_id):
+    worker = db.session.get(TrainingWorker, worker_id)
+    if worker is None:
+        return jsonify({'error': 'Training worker not found.'}), 404
+    active_tasks = TrainingQueueTask.query.filter(
+        TrainingQueueTask.assigned_worker_id == worker.id,
+        TrainingQueueTask.status.in_(ACTIVE_TASK_STATUSES | {'worker_lost'}),
+    ).count()
+    if active_tasks:
+        return jsonify({
+            'error': 'Worker has active or recoverable training tasks.',
+            'active_tasks': active_tasks,
+        }), 409
+    worker.enabled = False
+    worker.status = 'disabled'
+    worker.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(serialize_worker(worker))
+
+
+@api_bp.route('/training-workers/<int:worker_id>', methods=['DELETE'])
+def delete_training_worker(worker_id):
+    worker = db.session.get(TrainingWorker, worker_id)
+    if worker is None:
+        return jsonify({'error': 'Training worker not found.'}), 404
+    historical_attempts = TrainingJobAttempt.query.filter_by(
+        worker_id=worker.id
+    ).count()
+    if historical_attempts:
+        return jsonify({
+            'error': (
+                'Worker has audit history and cannot be deleted. '
+                'Disable it instead.'
+            ),
+            'attempts': historical_attempts,
+        }), 409
+    db.session.delete(worker)
+    db.session.commit()
+    return jsonify({'message': 'Training worker deleted.'})
+
+
+@api_bp.route('/training-batches', methods=['GET'])
+def list_training_batches():
+    limit = request.args.get('limit', default=25, type=int)
+    limit = min(max(limit or 25, 1), 100)
+    batches = TrainingBatch.query.order_by(
+        TrainingBatch.created_at.desc(),
+        TrainingBatch.id.desc(),
+    ).limit(limit).all()
+    return jsonify([batch.to_dict() for batch in batches])
+
+
+@api_bp.route('/training-batches', methods=['POST'])
+def create_training_batch_route():
+    payload = request.get_json(silent=True) or {}
+    try:
+        batch, tasks = create_training_batch(payload)
+        response = batch.to_dict()
+        response['tasks'] = [task.to_dict() for task in tasks]
+        return jsonify(response), 201
+    except (TypeError, ValueError) as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Could not create training batch')
+        return jsonify({'error': f'Could not create training batch: {exc}'}), 500
+
+
+@api_bp.route('/training-batches/<int:batch_id>', methods=['GET'])
+def get_training_batch(batch_id):
+    batch = db.session.get(TrainingBatch, batch_id)
+    if batch is None:
+        return jsonify({'error': 'Training batch not found.'}), 404
+    payload = batch.to_dict()
+    tasks = TrainingQueueTask.query.filter_by(batch_id=batch.id).order_by(
+        TrainingQueueTask.priority.desc(),
+        TrainingQueueTask.id.asc(),
+    ).all()
+    payload['tasks'] = [
+        task.to_dict(include_attempts=True, include_events=True)
+        for task in tasks
+    ]
+    return jsonify(payload)
+
+
+@api_bp.route('/training-batches/<int:batch_id>/cancel', methods=['POST'])
+def cancel_training_batch(batch_id):
+    batch = db.session.get(TrainingBatch, batch_id)
+    if batch is None:
+        return jsonify({'error': 'Training batch not found.'}), 404
+    result = cancel_batch(batch)
+    return jsonify({
+        'batch': batch.to_dict(),
+        **result,
+    })
+
+
+@api_bp.route('/training-queue-tasks/<int:task_id>', methods=['GET'])
+def get_training_queue_task(task_id):
+    task = db.session.get(TrainingQueueTask, task_id)
+    if task is None:
+        return jsonify({'error': 'Training queue task not found.'}), 404
+    return jsonify(task.to_dict(include_attempts=True, include_events=True))
+
+
+@api_bp.route('/training-queue-tasks/<int:task_id>/retry', methods=['POST'])
+def retry_training_queue_task(task_id):
+    task = db.session.get(TrainingQueueTask, task_id)
+    if task is None:
+        return jsonify({'error': 'Training queue task not found.'}), 404
+    try:
+        return jsonify(retry_task(task).to_dict(include_attempts=True))
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 409
+
+
+@api_bp.route('/training-control-plane/status', methods=['GET'])
+def get_training_control_plane_status():
+    return jsonify(scheduler_status())
+
+
+@api_bp.route('/training-control-plane/dispatch', methods=['POST'])
+def dispatch_training_control_plane():
+    app = current_app._get_current_object()
+    adapter_factory = current_app.config.get(
+        'TRAINING_ADAPTER_FACTORY',
+        adapter_for_worker,
+    )
+    asynchronous = not current_app.config.get(
+        'TRAINING_DISPATCH_SYNCHRONOUS',
+        False,
+    )
+    try:
+        return jsonify(dispatch_once(
+            app,
+            adapter_factory=adapter_factory,
+            probe=current_app.config.get('TRAINING_PROBE_BEFORE_DISPATCH', True),
+            asynchronous=asynchronous,
+        ))
+    except Exception as exc:
+        current_app.logger.exception('Training control-plane dispatch failed')
+        return jsonify({'error': f'Dispatch failed: {exc}'}), 500
 
 
 # --- AI Models ---
