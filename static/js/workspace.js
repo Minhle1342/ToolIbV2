@@ -3546,7 +3546,7 @@ function renderImageList(container, images, overlapThreshold) {
     cancelImageListRender();
 
     if (images.length === 0) {
-        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">KhÃ´ng cÃ³ áº£nh nÃ o khá»›p vá»›i bá»™ lá»c</div>';
+        container.innerHTML = '<div class="p-4 text-xs text-content-muted italic text-center">No images match the current filters</div>';
         updateTotalImageCountFromImageList();
         return;
     }
@@ -3688,6 +3688,22 @@ function applyAdvancedClassFilter() {
 
     document.getElementById('advancedClassFilterModal').classList.add('hidden');
     loadImages(false);
+}
+
+function clearClassFiltersForStatusChange() {
+    document.querySelectorAll('.class-filter-checkbox').forEach(cb => {
+        cb.checked = false;
+    });
+    document.querySelectorAll('.adv-class-radio').forEach(radio => {
+        radio.checked = false;
+    });
+    advancedClassFilterActive = false;
+    advancedSelectedClasses = [];
+}
+
+function handleFlagFilterChange() {
+    clearClassFiltersForStatusChange();
+    loadImages(true);
 }
 
 function handleViewFilterChange() {

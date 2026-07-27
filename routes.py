@@ -673,7 +673,8 @@ def get_images():
     if view_id:
         query = query.filter_by(view_id=view_id)
     if flag_status:
-        query = query.filter_by(flag_status=flag_status)
+        normalized_flag_status = flag_status.strip().lower()
+        query = query.filter(db.func.lower(Image.flag_status) == normalized_flag_status)
     if has_any_tag is not None and has_any_tag.lower() in ('true', '1', 'yes'):
         query = query.filter(Image.tags.any())
 
