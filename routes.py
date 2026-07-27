@@ -18,6 +18,8 @@ import threading
 import time
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 try:
     from clear_header import validate_and_rename_yolo_dataset
 except ModuleNotFoundError:
@@ -27,6 +29,7 @@ from inference import YOLOInference, ClassificationInference
 # Initialize Inference Engines
 inference_engine = None
 classifier_engine = None
+auto_label_thread_local = threading.local()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 GUIDE_STORAGE_DIR = os.path.join(BASE_DIR, 'project_guides')
 
@@ -129,6 +132,132 @@ def get_classifier_engine():
             if os.path.exists(model_path):
                 classifier_engine = ClassificationInference(model_path)
     return classifier_engine
+
+
+def get_active_detection_model_path():
+    active_model = AIModel.query.filter_by(is_active=True, model_type='detection').first()
+    if active_model:
+        model_path = os.path.join(os.getcwd(), 'models', active_model.filename)
+        if os.path.exists(model_path):
+            return model_path, active_model.name
+
+    model_path = os.path.join(os.getcwd(), 'models', 'yolo12s.onnx')
+    if os.path.exists(model_path):
+        return model_path, 'yolo12s.onnx'
+
+    return None, None
+
+
+def parse_auto_label_settings(payload=None):
+    payload = payload or {}
+    settings = {
+        'conf_threshold': 0.25,
+        'iou_threshold': 0.45,
+        'ioh_threshold': 0.50
+    }
+    for key in settings:
+        if key in payload:
+            try:
+                settings[key] = float(payload[key])
+            except (ValueError, TypeError):
+                pass
+    settings['conf_threshold'] = min(max(settings['conf_threshold'], 0.0), 1.0)
+    settings['iou_threshold'] = min(max(settings['iou_threshold'], 0.0), 1.0)
+    settings['ioh_threshold'] = min(max(settings['ioh_threshold'], 0.0), 1.0)
+    return settings
+
+
+def valid_auto_label_boxes(boxes):
+    accepted = []
+    for box in boxes or []:
+        try:
+            normalized = {
+                'class_id': int(box['class_id']),
+                'x': float(box['x']),
+                'y': float(box['y']),
+                'w': float(box['w']),
+                'h': float(box['h'])
+            }
+        except (KeyError, TypeError, ValueError):
+            continue
+        if normalized['w'] <= 0 or normalized['h'] <= 0:
+            continue
+        accepted.append(normalized)
+    return accepted
+
+
+def apply_auto_label_classifier(project, image_path, result):
+    classifier = get_classifier_engine()
+    if classifier and result.get('success') and result.get('boxes'):
+        import sys
+        sys.stderr.write(f"[AutoLabel] Classifier ACTIVE - Re-classifying {len(result['boxes'])} boxes...\n")
+        sys.stderr.flush()
+        img = utils.imread_with_exif(image_path)
+        if img is not None:
+            img_h, img_w = img.shape[:2]
+
+            for i, box in enumerate(result['boxes']):
+                bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
+                crop = utils.crop_bgr_with_bounds(img, bounds)
+
+                if crop is None:
+                    continue
+
+                cls_result = classifier.predict(crop)
+
+                if 'error' not in cls_result:
+                    old_class_id = box['class_id']
+                    predicted_name = cls_result.get('class_name')
+                    if not predicted_name:
+                        continue
+                    project_classes = utils.get_classes(project)
+                    if predicted_name in project_classes:
+                        project_class_id = project_classes.index(predicted_name)
+                    else:
+                        project_classes_lower = [c.lower() for c in project_classes]
+                        if predicted_name.lower() in project_classes_lower:
+                            project_class_id = project_classes_lower.index(predicted_name.lower())
+                        else:
+                            project_classes.append(predicted_name)
+                            utils.save_classes(project, project_classes)
+                            project_class_id = len(project_classes) - 1
+
+                    box['class_id'] = project_class_id
+                    box['cls_confidence'] = cls_result['confidence']
+                    box['cls_class_name'] = predicted_name
+                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {predicted_name} ({cls_result['confidence']*100:.1f}%)\n")
+            sys.stderr.flush()
+        sys.stderr.write(f"[AutoLabel] Classifier done.\n")
+        sys.stderr.flush()
+    elif not classifier:
+        import sys
+        sys.stderr.write(f"[AutoLabel] No Classifier active - using YOLO classes only.\n")
+        sys.stderr.flush()
+    return result
+
+
+def get_thread_auto_label_engine(model_path):
+    engine = getattr(auto_label_thread_local, 'engine', None)
+    if engine is None or engine.model_path != model_path:
+        engine = YOLOInference(model_path)
+        auto_label_thread_local.engine = engine
+    return engine
+
+
+def run_auto_label_prediction(model_path, target, settings):
+    engine = get_thread_auto_label_engine(model_path)
+    result = engine.predict(
+        target['image_path'],
+        conf_threshold=settings['conf_threshold'],
+        iou_threshold=settings['iou_threshold'],
+        ioh_threshold=settings['ioh_threshold']
+    )
+    return {
+        'image_id': target['image_id'],
+        'filename': target['filename'],
+        'image_path': target['image_path'],
+        'result': result
+    }
 
 
 
@@ -1050,89 +1179,241 @@ def auto_label(image_id):
         return jsonify({'error': 'No active AI model found or model file missing.'}), 400
 
     region = None
-    conf_threshold = 0.25
-    iou_threshold = 0.45
-    ioh_threshold = 0.50
-
+    settings = parse_auto_label_settings(request.get_json(silent=True) if request.is_json else {})
     if request.is_json:
         data = request.get_json() or {}
         if 'region' in data:
             region = data['region']
-        if 'conf_threshold' in data:
-            try:
-                conf_threshold = float(data['conf_threshold'])
-            except (ValueError, TypeError):
-                pass
-        if 'iou_threshold' in data:
-            try:
-                iou_threshold = float(data['iou_threshold'])
-            except (ValueError, TypeError):
-                pass
-        if 'ioh_threshold' in data:
-            try:
-                ioh_threshold = float(data['ioh_threshold'])
-            except (ValueError, TypeError):
-                pass
 
     result = engine.predict(
         image_path,
-        conf_threshold=conf_threshold,
-        iou_threshold=iou_threshold,
-        ioh_threshold=ioh_threshold,
+        conf_threshold=settings['conf_threshold'],
+        iou_threshold=settings['iou_threshold'],
+        ioh_threshold=settings['ioh_threshold'],
         region=region
     )
 
     if 'error' in result:
         return jsonify(result), 400
 
-    # --- Classifier re-labeling ---
-    # If a classifier is active, crop each detected box and re-classify
-    classifier = get_classifier_engine()
-    if classifier and result.get('success') and result.get('boxes'):
-        import cv2, sys
-        sys.stderr.write(f"[AutoLabel] Classifier ACTIVE - Re-classifying {len(result['boxes'])} boxes...\n")
-        sys.stderr.flush()
-        img = utils.imread_with_exif(image_path)
-        if img is not None:
-            img_h, img_w = img.shape[:2]
+    result = apply_auto_label_classifier(project, image_path, result)
+    return jsonify(result)
 
-            for i, box in enumerate(result['boxes']):
-                bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
-                crop = utils.crop_bgr_with_bounds(img, bounds)
 
-                if crop is None:
+AUTO_LABEL_JOB_LOCK = threading.Lock()
+AUTO_LABEL_JOBS = {}
+AUTO_LABEL_ACTIVE_STATUSES = {'queued', 'running'}
+AUTO_LABEL_MAX_WORKERS = 2
+
+
+def update_auto_label_job(job_id, **updates):
+    with AUTO_LABEL_JOB_LOCK:
+        job = AUTO_LABEL_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+        job['updated_at'] = datetime.utcnow().isoformat() + 'Z'
+
+
+def get_active_auto_label_jobs(project_id=None):
+    with AUTO_LABEL_JOB_LOCK:
+        jobs = [
+            dict(job)
+            for job in AUTO_LABEL_JOBS.values()
+            if job.get('status') in AUTO_LABEL_ACTIVE_STATUSES
+        ]
+    if project_id is not None:
+        jobs = [job for job in jobs if job.get('project_id') == project_id]
+    return jobs
+
+
+def run_auto_label_bulk_job(app, job_id, project_id, settings, model_path, model_name):
+    with app.app_context():
+        processed = 0
+        success_count = 0
+        saved_count = 0
+        empty_count = 0
+        skipped_count = 0
+        fail_count = 0
+
+        try:
+            project = Project.query.get(project_id)
+            if not project:
+                update_auto_label_job(job_id, status='failed', error='Project not found', message='Project not found')
+                return
+
+            images = Image.query.filter_by(project_id=project_id).order_by(Image.id.asc()).all()
+            targets = []
+            db_changed = False
+
+            for image in images:
+                has_boxes = len(utils.read_yolo_label(image)) > 0
+                if image.is_labeled != has_boxes:
+                    image.is_labeled = has_boxes
+                    db_changed = True
+                if has_boxes:
                     continue
 
-                cls_result = classifier.predict(crop)
+                image_path = utils.resolve_image_path(project.root_path, image.filename)
+                targets.append({
+                    'image_id': image.id,
+                    'filename': image.filename,
+                    'image_path': image_path
+                })
 
-                if 'error' not in cls_result:
-                    old_class_id = box['class_id']
-                    predicted_name = cls_result.get('class_name')
-                    project_classes = utils.get_classes(project)
-                    if predicted_name in project_classes:
-                        project_class_id = project_classes.index(predicted_name)
-                    else:
-                        project_classes_lower = [c.lower() for c in project_classes]
-                        if predicted_name.lower() in project_classes_lower:
-                            project_class_id = project_classes_lower.index(predicted_name.lower())
+            if db_changed:
+                db.session.commit()
+
+            total_images = len(targets)
+            update_auto_label_job(
+                job_id,
+                status='running',
+                model_name=model_name,
+                total_images=total_images,
+                processed_images=0,
+                message='Starting auto-label job'
+            )
+
+            if total_images == 0:
+                update_auto_label_job(
+                    job_id,
+                    status='completed',
+                    processed_images=0,
+                    current_image='',
+                    message='No images without bounding boxes found',
+                    success_count=0,
+                    saved_count=0,
+                    empty_count=0,
+                    skipped_count=0,
+                    fail_count=0
+                )
+                return
+
+            worker_count = min(AUTO_LABEL_MAX_WORKERS, total_images)
+            update_auto_label_job(job_id, worker_count=worker_count)
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                futures = {
+                    executor.submit(run_auto_label_prediction, model_path, target, settings): target
+                    for target in targets
+                }
+
+                for future in as_completed(futures):
+                    target = futures[future]
+                    update_auto_label_job(job_id, current_image=target['filename'], message=f"Auto-labeling {target['filename']}")
+                    try:
+                        prediction = future.result()
+                        result = prediction.get('result') or {}
+                        image = Image.query.get(target['image_id'])
+                        if not image:
+                            skipped_count += 1
+                        elif len(utils.read_yolo_label(image)) > 0:
+                            image.is_labeled = True
+                            skipped_count += 1
+                            db.session.commit()
+                        elif 'error' in result:
+                            fail_count += 1
+                        elif result.get('success') or 'boxes' in result:
+                            result = apply_auto_label_classifier(project, target['image_path'], result)
+                            boxes = valid_auto_label_boxes(result.get('boxes', []))
+                            if boxes:
+                                saved = utils.save_yolo_label(image, boxes)
+                                image.is_labeled = saved > 0
+                                saved_count += 1 if saved > 0 else 0
+                            else:
+                                image.is_labeled = False
+                                empty_count += 1
+                            success_count += 1
+                            db.session.commit()
                         else:
-                            project_classes.append(predicted_name)
-                            utils.save_classes(project, project_classes)
-                            project_class_id = len(project_classes) - 1
+                            fail_count += 1
+                    except Exception as exc:
+                        fail_count += 1
+                        current_app.logger.exception('Bulk auto-label failed for image %s: %s', target.get('image_id'), exc)
+                    finally:
+                        processed += 1
+                        update_auto_label_job(
+                            job_id,
+                            processed_images=processed,
+                            success_count=success_count,
+                            saved_count=saved_count,
+                            empty_count=empty_count,
+                            skipped_count=skipped_count,
+                            fail_count=fail_count
+                        )
 
-                    box['class_id'] = project_class_id
-                    box['cls_confidence'] = cls_result['confidence']
-                    box['cls_class_name'] = predicted_name
-                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {predicted_name} ({cls_result['confidence']*100:.1f}%)\n")
-            sys.stderr.flush()
-        sys.stderr.write(f"[AutoLabel] Classifier done.\n")
-        sys.stderr.flush()
-    elif not classifier:
-        import sys
-        sys.stderr.write(f"[AutoLabel] No Classifier active - using YOLO classes only.\n")
-        sys.stderr.flush()
+            update_auto_label_job(
+                job_id,
+                status='completed',
+                processed_images=processed,
+                current_image='',
+                message='Completed',
+                success_count=success_count,
+                saved_count=saved_count,
+                empty_count=empty_count,
+                skipped_count=skipped_count,
+                fail_count=fail_count
+            )
+        except Exception as exc:
+            update_auto_label_job(job_id, status='failed', error=str(exc), message='Auto-label job failed')
+        finally:
+            db.session.remove()
 
-    return jsonify(result)
+
+@api_bp.route('/projects/<int:project_id>/autolabel/jobs', methods=['POST'])
+def start_auto_label_bulk_job(project_id):
+    Project.query.get_or_404(project_id)
+    active_jobs = get_active_auto_label_jobs(project_id)
+    if active_jobs:
+        return jsonify({
+            'error': 'An auto-label job is already running for this project.',
+            'active_jobs': active_jobs
+        }), 409
+
+    settings = parse_auto_label_settings(request.get_json(silent=True) if request.is_json else {})
+    model_path, model_name = get_active_detection_model_path()
+    if not model_path:
+        return jsonify({'error': 'No active AI model found or model file missing.'}), 400
+
+    job_id = uuid.uuid4().hex
+    now = datetime.utcnow().isoformat() + 'Z'
+    job = {
+        'job_id': job_id,
+        'project_id': project_id,
+        'status': 'queued',
+        'model_name': model_name,
+        'total_images': 0,
+        'processed_images': 0,
+        'success_count': 0,
+        'saved_count': 0,
+        'empty_count': 0,
+        'skipped_count': 0,
+        'fail_count': 0,
+        'current_image': '',
+        'message': 'Queued',
+        'worker_count': AUTO_LABEL_MAX_WORKERS,
+        'created_at': now,
+        'updated_at': now
+    }
+
+    with AUTO_LABEL_JOB_LOCK:
+        AUTO_LABEL_JOBS[job_id] = job
+
+    thread = threading.Thread(
+        target=run_auto_label_bulk_job,
+        args=(current_app._get_current_object(), job_id, project_id, settings, model_path, model_name),
+        daemon=True
+    )
+    thread.start()
+    return jsonify(job), 202
+
+
+@api_bp.route('/autolabel/jobs/<job_id>', methods=['GET'])
+def get_auto_label_bulk_job(job_id):
+    with AUTO_LABEL_JOB_LOCK:
+        job = AUTO_LABEL_JOBS.get(job_id)
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        return jsonify(dict(job))
 
 @api_bp.route('/classify-boxes', methods=['POST'])
 def classify_boxes():

@@ -106,6 +106,33 @@ class startAPI {
         return await res.json();
     }
 
+    async startAutoLabelBulkJob(projectId, options = {}) {
+        const payload = {
+            ...(options && options.conf_threshold !== undefined ? { conf_threshold: options.conf_threshold } : {}),
+            ...(options && options.iou_threshold !== undefined ? { iou_threshold: options.iou_threshold } : {}),
+            ...(options && options.ioh_threshold !== undefined ? { ioh_threshold: options.ioh_threshold } : {})
+        };
+        const res = await fetch(`/api/projects/${projectId}/autolabel/jobs`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || 'Failed to start bulk auto-labeling');
+        }
+        return data;
+    }
+
+    async getAutoLabelBulkJob(jobId) {
+        const res = await fetch(`/api/autolabel/jobs/${jobId}`);
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || 'Failed to load bulk auto-labeling status');
+        }
+        return data;
+    }
+
     async exportDataset(data) {
         const res = await fetch('/api/export', {
             method: 'POST',
