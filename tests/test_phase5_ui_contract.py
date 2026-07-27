@@ -22,9 +22,40 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'Await reconnect',
         'latestAttempt',
         'latestEvent',
+        'finetunePhase6Panel',
+        'finetuneParentFile',
+        'finetuneParentModel',
+        'finetuneProject',
+        'finetuneParameterSetList',
+        'finetuneParameterSetSelectionSummary',
+        'finetuneParameterSetModal',
+        'openFinetuneParameterSetEditor(',
+        'saveFinetuneParameterSet()',
+        'cloneFinetuneParameterSet(',
+        'archiveFinetuneParameterSet(',
+        'restoreFinetuneParameterSet(',
+        'deleteFinetuneParameterSet(',
+        'uploadFinetuneParentModel()',
+        'async function createFinetuneExperiment()',
+        '/api/finetune-models',
+        '/api/finetune-parameter-sets',
+        '/api/finetune-experiments',
+        'parameter_set_ids: parameterSetIds',
+        'shared dataset #',
+        'Phase 6 ${supportsFinetune ? "ready" : "not supported"}',
     )
     for marker in required_contract:
         assert marker in template
+
+
+def test_colab_manager_uses_database_parameter_sets_not_candidate_counts():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    assert 'finetuneSelectedParameterSetIds' in template
+    assert 'finetuneCandidateCount' not in template
+    assert 'candidate_count:' not in template
 
 
 def test_run_script_starts_and_stops_dedicated_scheduler_process():

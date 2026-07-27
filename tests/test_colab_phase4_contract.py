@@ -40,8 +40,8 @@ def test_notebook_accepts_authenticated_checksum_bound_dataset_snapshots():
 
     for expected in (
         'python-multipart>=0.0.20,<1',
-        'version="0.5.0"',
-        'from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, status',
+        'version="0.6.0"',
+        'from fastapi import (',
         '@app.post("/api/datasets", dependencies=[Depends(require_api_token)])',
         'dataset_id: str = Form(...)',
         'sha256: str = Form(...)',
@@ -50,7 +50,7 @@ def test_notebook_accepts_authenticated_checksum_bound_dataset_snapshots():
         'DRIVE_DATASET_ROOT',
         'resolve_under(DRIVE_DATASET_ROOT, canonical_id)',
         'dataset_id: str | None = None',
-        'data=dataset_info["runtime_yaml"]',
+        '"data": dataset_info["runtime_yaml"]',
         '"dataset_id": dataset_info["dataset_id"]',
     ):
         assert expected in source
@@ -66,7 +66,27 @@ def test_notebook_exposes_phase5_worker_capabilities_and_idempotent_submit():
         'idempotent_replay',
         '"max_concurrent_jobs": 1',
         '"idempotent_submit": True',
-        '"gpu_name": torch.cuda.get_device_name(0)',
+        'torch.cuda.get_device_name(0) if gpu_available else None',
+    ):
+        assert expected in source
+
+
+def test_notebook_exposes_phase6_parent_cache_finetune_and_artifacts():
+    source = notebook_source()
+
+    for expected in (
+        'training_mode: Literal["fresh", "finetune"] = "fresh"',
+        'parent_artifact_id: str | None = None',
+        'parent_sha256: str | None = None',
+        '@app.get(\n    "/api/model-artifacts/{artifact_id}"',
+        '@app.post("/api/model-artifacts", dependencies=[Depends(require_api_token)])',
+        'validate_yolo_checkpoint(local_path)',
+        '"model_artifact_upload": True',
+        '"training_modes": ["fresh", "finetune"]',
+        '"last_pt": (".pt", "last.pt")',
+        'model = YOLO(model_source)',
+        '"lr0": request_data.lr0',
+        'Parent checkpoint classes do not match dataset classes.',
     ):
         assert expected in source
 

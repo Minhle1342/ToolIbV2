@@ -117,9 +117,51 @@ class AIModel(db.Model):
     is_active = db.Column(db.Boolean, default=False)
     activation_ready = db.Column(db.Boolean, nullable=False, default=True)
     model_type = db.Column(db.String(50), default='detection') # 'detection' or 'classification'
+    parent_model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    source_project_id = db.Column(
+        db.Integer,
+        db.ForeignKey('projects.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    training_dataset_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_datasets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    source_kind = db.Column(
+        db.String(40),
+        nullable=False,
+        default='manual_onnx',
+        index=True,
+    )
+    finetune_status = db.Column(
+        db.String(30),
+        nullable=False,
+        default='unavailable',
+        index=True,
+    )
+    class_names = db.Column(db.JSON, nullable=True)
+    validation_error = db.Column(db.Text, nullable=True)
+    validated_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    artifacts = db.relationship(
+        'ModelArtifact',
+        backref='model',
+        lazy=True,
+        cascade='all, delete-orphan',
+        passive_deletes=True,
+    )
+
     def to_dict(self):
+        artifact_payloads = [artifact.to_dict() for artifact in self.artifacts]
         return {
             'id': self.id,
             'name': self.name,
@@ -128,7 +170,84 @@ class AIModel(db.Model):
             'is_active': self.is_active,
             'activation_ready': self.activation_ready,
             'model_type': self.model_type,
+            'parent_model_id': self.parent_model_id,
+            'source_project_id': self.source_project_id,
+            'training_dataset_id': self.training_dataset_id,
+            'source_kind': self.source_kind,
+            'finetune_status': self.finetune_status,
+            'fine_tune_eligible': (
+                self.model_type == 'detection'
+                and self.finetune_status == 'ready'
+                and any(
+                    artifact['kind'] in {'parent_pt', 'best_pt'}
+                    for artifact in artifact_payloads
+                )
+            ),
+            'inference_ready': (
+                self.filename.lower().endswith('.onnx')
+                and self.activation_ready
+            ),
+            'class_names': self.class_names,
+            'validation_error': self.validation_error,
+            'validated_at': (
+                self.validated_at.isoformat() if self.validated_at else None
+            ),
+            'artifacts': artifact_payloads,
             'created_at': self.created_at.isoformat()
+        }
+
+
+class ModelArtifact(db.Model):
+    __tablename__ = 'model_artifacts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    artifact_id = db.Column(
+        db.String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    kind = db.Column(db.String(30), nullable=False, index=True)
+    storage_path = db.Column(db.String(1000), nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False, index=True)
+    size_bytes = db.Column(db.Integer, nullable=False)
+    metadata_json = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'model_id',
+            'kind',
+            name='uq_model_artifact_model_kind',
+        ),
+        db.CheckConstraint(
+            'size_bytes >= 0',
+            name='ck_model_artifact_size_bytes',
+        ),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'artifact_id': self.artifact_id,
+            'model_id': self.model_id,
+            'kind': self.kind,
+            'sha256': self.sha256,
+            'size_bytes': self.size_bytes,
+            'metadata': self.metadata_json or {},
+            'created_at': (
+                self.created_at.isoformat() if self.created_at else None
+            ),
         }
 
 
@@ -181,6 +300,77 @@ class TrainingDataset(db.Model):
         }
 
 
+class FineTuneParameterSet(db.Model):
+    __tablename__ = 'finetune_parameter_sets'
+
+    id = db.Column(db.Integer, primary_key=True)
+    preset_id = db.Column(
+        db.String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    system_key = db.Column(
+        db.String(80),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    model_task = db.Column(
+        db.String(30),
+        nullable=False,
+        default='detect',
+        index=True,
+    )
+    parameters = db.Column(db.JSON, nullable=False)
+    version = db.Column(db.Integer, nullable=False, default=1)
+    is_system = db.Column(db.Boolean, nullable=False, default=False)
+    is_active = db.Column(db.Boolean, nullable=False, default=True, index=True)
+    archived_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    __table_args__ = (
+        db.CheckConstraint(
+            'version >= 1',
+            name='ck_finetune_parameter_set_version',
+        ),
+    )
+
+    def to_dict(self, usage_count=0):
+        usage_count = int(usage_count or 0)
+        return {
+            'id': self.id,
+            'preset_id': self.preset_id,
+            'system_key': self.system_key,
+            'name': self.name,
+            'description': self.description,
+            'model_task': self.model_task,
+            'parameters': self.parameters or {},
+            'version': self.version,
+            'is_system': self.is_system,
+            'is_active': self.is_active,
+            'usage_count': usage_count,
+            'can_delete': usage_count == 0 and not self.is_system,
+            'archived_at': (
+                self.archived_at.isoformat() if self.archived_at else None
+            ),
+            'created_at': (
+                self.created_at.isoformat() if self.created_at else None
+            ),
+            'updated_at': (
+                self.updated_at.isoformat() if self.updated_at else None
+            ),
+        }
+
+
 class TrainingJob(db.Model):
     __tablename__ = 'training_jobs'
 
@@ -208,6 +398,18 @@ class TrainingJob(db.Model):
     remote_api_url = db.Column(db.String(500), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='queued', index=True)
     connection_status = db.Column(db.String(20), nullable=False, default='synced')
+    training_mode = db.Column(
+        db.String(30),
+        nullable=False,
+        default='fresh',
+        index=True,
+    )
+    parent_model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     model = db.Column(db.String(100), nullable=True)
     epochs = db.Column(db.Integer, nullable=True)
     batch = db.Column(db.Integer, nullable=True)
@@ -219,6 +421,7 @@ class TrainingJob(db.Model):
     last_sync_error = db.Column(db.Text, nullable=True)
     request_payload = db.Column(db.JSON, nullable=True)
     artifacts = db.Column(db.JSON, nullable=True)
+    metrics = db.Column(db.JSON, nullable=True)
     remote_created_at = db.Column(db.DateTime, nullable=True)
     started_at = db.Column(db.DateTime, nullable=True)
     finished_at = db.Column(db.DateTime, nullable=True)
@@ -236,6 +439,8 @@ class TrainingJob(db.Model):
             'remote_api_url': self.remote_api_url,
             'status': self.status,
             'connection_status': self.connection_status,
+            'training_mode': self.training_mode,
+            'parent_model_id': self.parent_model_id,
             'model': self.model,
             'epochs': self.epochs,
             'batch': self.batch,
@@ -247,6 +452,7 @@ class TrainingJob(db.Model):
             'last_sync_error': self.last_sync_error,
             'request': self.request_payload,
             'artifacts': self.artifacts,
+            'metrics': self.metrics or {},
             'remote_created_at': self.remote_created_at.isoformat() if self.remote_created_at else None,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'finished_at': self.finished_at.isoformat() if self.finished_at else None,
@@ -330,6 +536,30 @@ class TrainingBatch(db.Model):
     batch_id = db.Column(db.String(36), nullable=False, unique=True, index=True)
     name = db.Column(db.String(160), nullable=False)
     status = db.Column(db.String(30), nullable=False, default='queued', index=True)
+    experiment_type = db.Column(
+        db.String(30),
+        nullable=False,
+        default='fresh',
+        index=True,
+    )
+    parent_model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    training_dataset_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_datasets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    preset_version = db.Column(db.String(50), nullable=True)
+    ranking_metric = db.Column(
+        db.String(80),
+        nullable=True,
+        default='metrics/mAP50-95(B)',
+    )
     total_jobs = db.Column(db.Integer, nullable=False, default=0)
     succeeded_jobs = db.Column(db.Integer, nullable=False, default=0)
     failed_jobs = db.Column(db.Integer, nullable=False, default=0)
@@ -344,6 +574,11 @@ class TrainingBatch(db.Model):
             'batch_id': self.batch_id,
             'name': self.name,
             'status': self.status,
+            'experiment_type': self.experiment_type,
+            'parent_model_id': self.parent_model_id,
+            'training_dataset_id': self.training_dataset_id,
+            'preset_version': self.preset_version,
+            'ranking_metric': self.ranking_metric,
             'total_jobs': self.total_jobs,
             'succeeded_jobs': self.succeeded_jobs,
             'failed_jobs': self.failed_jobs,
@@ -405,6 +640,22 @@ class TrainingQueueTask(db.Model):
         nullable=True,
         index=True,
     )
+    parent_model_id = db.Column(
+        db.Integer,
+        db.ForeignKey('ai_models.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    parameter_set_id = db.Column(
+        db.Integer,
+        db.ForeignKey('finetune_parameter_sets.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    parameter_set_snapshot = db.Column(db.JSON, nullable=True)
+    candidate_name = db.Column(db.String(100), nullable=True)
+    config_hash = db.Column(db.String(64), nullable=True, index=True)
+    metrics = db.Column(db.JSON, nullable=True)
     status = db.Column(db.String(40), nullable=False, default='queued', index=True)
     stage = db.Column(db.String(50), nullable=False, default='queued')
     priority = db.Column(db.Integer, nullable=False, default=0, index=True)
@@ -443,6 +694,12 @@ class TrainingQueueTask(db.Model):
             'training_job_id': self.training_job_id,
             'imported_model_id': self.imported_model_id,
             'assigned_worker_id': self.assigned_worker_id,
+            'parent_model_id': self.parent_model_id,
+            'parameter_set_id': self.parameter_set_id,
+            'parameter_set_snapshot': self.parameter_set_snapshot or None,
+            'candidate_name': self.candidate_name,
+            'config_hash': self.config_hash,
+            'metrics': self.metrics or {},
             'status': self.status,
             'stage': self.stage,
             'priority': self.priority,

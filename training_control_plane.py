@@ -1,4 +1,6 @@
+import csv
 import hashlib
+import json
 import os
 import shutil
 import threading
@@ -13,10 +15,13 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 from flask import current_app
 from requests_toolbelt.multipart.encoder import MultipartEncoder
+from sqlalchemy.exc import IntegrityError
 
 from models import (
     db,
     AIModel,
+    FineTuneParameterSet,
+    ModelArtifact,
     Project,
     TrainingBatch,
     TrainingDataset,
@@ -37,6 +42,7 @@ WORKER_PROVIDERS = {'colab_http'}
 WORKER_STATUSES = {'online', 'offline', 'draining', 'disabled'}
 ACTIVE_TASK_STATUSES = {
     'preparing_dataset',
+    'uploading_parent_model',
     'uploading_dataset',
     'submitting',
     'remote_queued',
@@ -47,6 +53,72 @@ ACTIVE_TASK_STATUSES = {
 DISPATCHABLE_TASK_STATUSES = {'queued', 'waiting_for_worker', 'retry_wait'}
 TERMINAL_TASK_STATUSES = {'succeeded', 'failed', 'cancelled'}
 REMOTE_TERMINAL_STATUSES = {'succeeded', 'failed'}
+FINETUNE_PRESET_VERSION = 'phase6-database-v1'
+FINETUNE_RANKING_METRIC = 'metrics/mAP50-95(B)'
+FINETUNE_ALLOWED_IMAGE_SIZES = (320, 416, 512, 640, 768)
+FINETUNE_PARAMETER_DEFAULTS = {
+    'epochs': 50,
+    'batch': 8,
+    'imgsz': 640,
+    'lr0': 0.0001,
+    'lrf': 0.01,
+    'freeze': 10,
+    'mosaic': 0.5,
+    'scale': 0.8,
+    'close_mosaic': 10,
+    'degrees': 15.0,
+    'translate': 0.2,
+    'mixup': 0.0,
+    'copy_paste': 0.0,
+    'seed': 42,
+}
+FINETUNE_PARAMETER_FIELDS = tuple(FINETUNE_PARAMETER_DEFAULTS)
+DEFAULT_FINETUNE_PARAMETER_SETS = (
+    {
+        'system_key': 'baseline',
+        'name': 'Baseline',
+        'description': 'Balanced starting point for a trusted detection checkpoint.',
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+        },
+    },
+    {
+        'system_key': 'conservative-lr',
+        'name': 'Conservative LR',
+        'description': 'Lower learning rate to preserve more parent-model knowledge.',
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+            'lr0': 0.00005,
+        },
+    },
+    {
+        'system_key': 'adaptive-lr',
+        'name': 'Adaptive LR',
+        'description': 'Higher learning rate for a dataset that differs from the parent.',
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+            'lr0': 0.0002,
+        },
+    },
+    {
+        'system_key': 'shallow-unfreeze',
+        'name': 'Shallow unfreeze',
+        'description': 'Freeze fewer layers so the checkpoint can adapt more deeply.',
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+            'freeze': 5,
+        },
+    },
+    {
+        'system_key': 'resolution-variant',
+        'name': 'Resolution variant',
+        'description': 'Use a larger image size for smaller or more distant objects.',
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+            'imgsz': 768,
+        },
+    },
+)
 
 _executor = ThreadPoolExecutor(
     max_workers=max(int(os.environ.get('TOOLIB_TRAINING_EXECUTOR_SIZE', '8')), 1),
@@ -211,6 +283,7 @@ class LocalArtifactStore:
         allowed = {
             'onnx': 'best.onnx',
             'pt': 'best.pt',
+            'last_pt': 'last.pt',
             'manifest': 'manifest.json',
             'results': 'results.csv',
             'args': 'args.yaml',
@@ -284,10 +357,79 @@ class ColabHttpWorkerAdapter:
                 'dataset_upload': True,
                 'training': True,
                 'artifact_download': ['onnx'],
+                'training_modes': ['fresh'],
+                'model_artifact_upload': False,
                 'max_concurrent_jobs': 1,
                 'idempotent_submit': bool(payload.get('idempotent_submit', False)),
             },
         }
+
+    def upload_model_artifact(self, artifact):
+        artifact_path = Path(artifact.storage_path or '').resolve()
+        if not artifact_path.is_file():
+            raise WorkerApiError('Parent model artifact is missing.')
+        if sha256_path(artifact_path) != artifact.sha256:
+            raise WorkerApiError('Parent model checksum changed before upload.')
+
+        try:
+            cache_response = self.session.get(
+                f'{self.api_url}/api/model-artifacts/{artifact.artifact_id}',
+                headers=self._headers(),
+                params={'sha256': artifact.sha256},
+                timeout=(10, 60),
+                allow_redirects=False,
+            )
+            if cache_response.status_code == 200:
+                payload = self._require_success(
+                    cache_response,
+                    'Parent model cache lookup',
+                )
+                if (
+                    payload.get('artifact_id') == artifact.artifact_id
+                    and payload.get('sha256') == artifact.sha256
+                ):
+                    return payload
+                raise WorkerApiError(
+                    'Worker model cache returned different identity metadata.'
+                )
+            if cache_response.status_code != 404:
+                self._require_success(
+                    cache_response,
+                    'Parent model cache lookup',
+                )
+
+            with artifact_path.open('rb') as artifact_stream:
+                multipart_body = MultipartEncoder(fields={
+                    'artifact_id': artifact.artifact_id,
+                    'sha256': artifact.sha256,
+                    'artifact': (
+                        f'{artifact.artifact_id}.pt',
+                        artifact_stream,
+                        'application/octet-stream',
+                    ),
+                })
+                headers = self._headers()
+                headers['Content-Type'] = multipart_body.content_type
+                response = self.session.post(
+                    f'{self.api_url}/api/model-artifacts',
+                    headers=headers,
+                    data=multipart_body,
+                    timeout=(15, 3600),
+                    allow_redirects=False,
+                )
+        except requests.RequestException as exc:
+            raise WorkerUnavailableError(
+                f'Parent model upload failed: {exc}'
+            ) from exc
+
+        payload = self._require_success(response, 'Parent model upload')
+        if payload.get('artifact_id') != artifact.artifact_id:
+            raise WorkerApiError('Worker returned a different artifact_id.')
+        if payload.get('sha256') != artifact.sha256:
+            raise WorkerApiError('Worker returned a different model checksum.')
+        if payload.get('task') != 'detect':
+            raise WorkerApiError('Only YOLO detection checkpoints are supported.')
+        return payload
 
     def upload_dataset(self, dataset):
         archive_path = Path(dataset.archive_path or '').resolve()
@@ -556,6 +698,323 @@ def probe_all_workers():
     return workers
 
 
+def _normalize_finetune_parameters(raw_job):
+    if not isinstance(raw_job, dict):
+        raise ValueError('Fine-tune parameters must be a JSON object.')
+
+    def numeric(name, converter, default):
+        value = raw_job.get(name, default)
+        if isinstance(value, bool):
+            raise ValueError(f'Fine-tune {name} must be numeric.')
+        try:
+            return converter(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'Fine-tune {name} must be numeric.') from exc
+
+    parameters = {
+        'lr0': numeric('lr0', float, 0.0001),
+        'lrf': numeric('lrf', float, 0.01),
+        'freeze': numeric('freeze', int, 10),
+        'mosaic': numeric('mosaic', float, 0.5),
+        'scale': numeric('scale', float, 0.8),
+        'close_mosaic': numeric('close_mosaic', int, 10),
+        'degrees': numeric('degrees', float, 15.0),
+        'translate': numeric('translate', float, 0.2),
+        'mixup': numeric('mixup', float, 0.0),
+        'copy_paste': numeric('copy_paste', float, 0.0),
+        'seed': numeric('seed', int, 42),
+    }
+    if not 0 < parameters['lr0'] <= 0.1:
+        raise ValueError('Fine-tune lr0 must be greater than 0 and at most 0.1.')
+    if not 0 < parameters['lrf'] <= 1:
+        raise ValueError('Fine-tune lrf must be greater than 0 and at most 1.')
+    if not 0 <= parameters['freeze'] <= 100:
+        raise ValueError('Fine-tune freeze must be between 0 and 100.')
+    for name in ('mosaic', 'mixup', 'copy_paste'):
+        if not 0 <= parameters[name] <= 1:
+            raise ValueError(f'Fine-tune {name} must be between 0 and 1.')
+    if not 0 <= parameters['scale'] <= 2:
+        raise ValueError('Fine-tune scale must be between 0 and 2.')
+    if not 0 <= parameters['translate'] <= 1:
+        raise ValueError('Fine-tune translate must be between 0 and 1.')
+    if not 0 <= parameters['degrees'] <= 180:
+        raise ValueError('Fine-tune degrees must be between 0 and 180.')
+    if not 0 <= parameters['close_mosaic'] <= 100:
+        raise ValueError('Fine-tune close_mosaic must be between 0 and 100.')
+    if not 0 <= parameters['seed'] <= 2**31 - 1:
+        raise ValueError('Fine-tune seed is outside the supported range.')
+    return parameters
+
+
+def normalize_finetune_parameter_set_parameters(raw_parameters):
+    if not isinstance(raw_parameters, dict):
+        raise ValueError('parameters must be a JSON object.')
+    unknown = sorted(
+        set(raw_parameters) - set(FINETUNE_PARAMETER_FIELDS)
+    )
+    if unknown:
+        raise ValueError(
+            'Unsupported fine-tune parameter(s): ' + ', '.join(unknown)
+        )
+
+    merged = {
+        **FINETUNE_PARAMETER_DEFAULTS,
+        **raw_parameters,
+    }
+
+    def integer(name):
+        value = merged[name]
+        if isinstance(value, bool):
+            raise ValueError(f'{name} must be an integer.')
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f'{name} must be an integer.') from exc
+
+    epochs = integer('epochs')
+    batch_size = integer('batch')
+    imgsz = integer('imgsz')
+    if not 1 <= epochs <= 300:
+        raise ValueError('epochs must be between 1 and 300.')
+    if not 1 <= batch_size <= 64:
+        raise ValueError('batch must be between 1 and 64.')
+    if imgsz not in FINETUNE_ALLOWED_IMAGE_SIZES:
+        raise ValueError(
+            f'imgsz must be one of {list(FINETUNE_ALLOWED_IMAGE_SIZES)}.'
+        )
+
+    normalized = {
+        'epochs': epochs,
+        'batch': batch_size,
+        'imgsz': imgsz,
+        **_normalize_finetune_parameters(merged),
+    }
+    normalized['close_mosaic'] = min(
+        normalized['close_mosaic'],
+        max(epochs - 1, 0),
+    )
+    return normalized
+
+
+def _normalize_parameter_set_name(value):
+    name = str(value or '').strip()
+    if not name:
+        raise ValueError('Parameter-set name must not be empty.')
+    if len(name) > 120:
+        raise ValueError('Parameter-set name must contain at most 120 characters.')
+    return name
+
+
+def _active_parameter_set_name_exists(name, exclude_id=None):
+    query = FineTuneParameterSet.query.filter(
+        FineTuneParameterSet.is_active.is_(True),
+        db.func.lower(FineTuneParameterSet.name) == name.lower(),
+    )
+    if exclude_id is not None:
+        query = query.filter(FineTuneParameterSet.id != int(exclude_id))
+    return query.first() is not None
+
+
+def finetune_parameter_set_usage_count(parameter_set_id):
+    return TrainingQueueTask.query.filter_by(
+        parameter_set_id=int(parameter_set_id)
+    ).count()
+
+
+def serialize_finetune_parameter_set(parameter_set):
+    return parameter_set.to_dict(
+        usage_count=finetune_parameter_set_usage_count(parameter_set.id)
+    )
+
+
+def ensure_default_finetune_parameter_sets():
+    existing_keys = {
+        system_key
+        for (system_key,) in db.session.query(
+            FineTuneParameterSet.system_key
+        ).filter(
+            FineTuneParameterSet.system_key.isnot(None)
+        ).all()
+    }
+    created = False
+    for default in DEFAULT_FINETUNE_PARAMETER_SETS:
+        if default['system_key'] in existing_keys:
+            continue
+        db.session.add(FineTuneParameterSet(
+            preset_id=str(uuid.uuid4()),
+            system_key=default['system_key'],
+            name=default['name'],
+            description=default['description'],
+            model_task='detect',
+            parameters=normalize_finetune_parameter_set_parameters(
+                default['parameters']
+            ),
+            version=1,
+            is_system=True,
+            is_active=True,
+        ))
+        created = True
+    if created:
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            missing = [
+                default['system_key']
+                for default in DEFAULT_FINETUNE_PARAMETER_SETS
+                if FineTuneParameterSet.query.filter_by(
+                    system_key=default['system_key']
+                ).first() is None
+            ]
+            if missing:
+                raise
+    return FineTuneParameterSet.query.order_by(
+        FineTuneParameterSet.is_active.desc(),
+        FineTuneParameterSet.is_system.desc(),
+        FineTuneParameterSet.id.asc(),
+    ).all()
+
+
+def list_finetune_parameter_sets(include_archived=False):
+    ensure_default_finetune_parameter_sets()
+    query = FineTuneParameterSet.query
+    if not include_archived:
+        query = query.filter(FineTuneParameterSet.is_active.is_(True))
+    return [
+        serialize_finetune_parameter_set(parameter_set)
+        for parameter_set in query.order_by(
+            FineTuneParameterSet.is_active.desc(),
+            FineTuneParameterSet.is_system.desc(),
+            FineTuneParameterSet.name.asc(),
+            FineTuneParameterSet.id.asc(),
+        ).all()
+    ]
+
+
+def create_finetune_parameter_set(payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Request body must be a JSON object.')
+    name = _normalize_parameter_set_name(payload.get('name'))
+    if _active_parameter_set_name_exists(name):
+        raise ValueError('An active parameter set already uses this name.')
+    description = str(payload.get('description') or '').strip()
+    if len(description) > 500:
+        raise ValueError('description must contain at most 500 characters.')
+    parameter_set = FineTuneParameterSet(
+        preset_id=str(uuid.uuid4()),
+        name=name,
+        description=description or None,
+        model_task='detect',
+        parameters=normalize_finetune_parameter_set_parameters(
+            payload.get('parameters') or {}
+        ),
+        version=1,
+        is_system=False,
+        is_active=True,
+    )
+    db.session.add(parameter_set)
+    db.session.commit()
+    return parameter_set
+
+
+def update_finetune_parameter_set(parameter_set, payload):
+    if not isinstance(payload, dict):
+        raise ValueError('Request body must be a JSON object.')
+    name = _normalize_parameter_set_name(
+        payload.get('name', parameter_set.name)
+    )
+    if (
+        parameter_set.is_active
+        and _active_parameter_set_name_exists(
+            name,
+            exclude_id=parameter_set.id,
+        )
+    ):
+        raise ValueError('An active parameter set already uses this name.')
+    description = str(
+        payload.get('description', parameter_set.description or '') or ''
+    ).strip()
+    if len(description) > 500:
+        raise ValueError('description must contain at most 500 characters.')
+    raw_parameters = payload.get('parameters')
+    if raw_parameters is None:
+        raw_parameters = parameter_set.parameters or {}
+    elif isinstance(raw_parameters, dict):
+        raw_parameters = {
+            **(parameter_set.parameters or {}),
+            **raw_parameters,
+        }
+    parameters = normalize_finetune_parameter_set_parameters(raw_parameters)
+    changed = (
+        name != parameter_set.name
+        or (description or None) != parameter_set.description
+        or parameters != (parameter_set.parameters or {})
+    )
+    if changed:
+        parameter_set.name = name
+        parameter_set.description = description or None
+        parameter_set.parameters = parameters
+        parameter_set.version += 1
+        parameter_set.updated_at = utcnow()
+        db.session.commit()
+    return parameter_set
+
+
+def clone_finetune_parameter_set(parameter_set, payload=None):
+    payload = payload or {}
+    base_name = _normalize_parameter_set_name(
+        payload.get('name') or f'{parameter_set.name} copy'
+    )
+    name = base_name
+    suffix = 2
+    while _active_parameter_set_name_exists(name):
+        suffix_text = f' {suffix}'
+        name = f'{base_name[:120 - len(suffix_text)]}{suffix_text}'
+        suffix += 1
+    return create_finetune_parameter_set({
+        'name': name,
+        'description': payload.get(
+            'description',
+            parameter_set.description or '',
+        ),
+        'parameters': payload.get(
+            'parameters',
+            parameter_set.parameters or {},
+        ),
+    })
+
+
+def set_finetune_parameter_set_active(parameter_set, is_active):
+    is_active = bool(is_active)
+    if is_active and _active_parameter_set_name_exists(
+        parameter_set.name,
+        exclude_id=parameter_set.id,
+    ):
+        raise ValueError(
+            'Another active parameter set already uses this name.'
+        )
+    parameter_set.is_active = is_active
+    parameter_set.archived_at = None if is_active else utcnow()
+    parameter_set.updated_at = utcnow()
+    db.session.commit()
+    return parameter_set
+
+
+def delete_finetune_parameter_set(parameter_set):
+    usage_count = finetune_parameter_set_usage_count(parameter_set.id)
+    if parameter_set.is_system:
+        raise ValueError(
+            'System parameter sets cannot be deleted; archive them instead.'
+        )
+    if usage_count:
+        raise ValueError(
+            'Parameter sets with training history cannot be deleted; '
+            'archive them instead.'
+        )
+    db.session.delete(parameter_set)
+    db.session.commit()
+
+
 def create_training_batch(payload):
     jobs_payload = payload.get('jobs')
     if not isinstance(jobs_payload, list) or not jobs_payload:
@@ -570,10 +1029,43 @@ def create_training_batch(payload):
     if not 1 <= max_attempts_default <= 10:
         raise ValueError('max_attempts must be between 1 and 10.')
 
+    experiment_type = str(
+        payload.get('experiment_type') or 'fresh'
+    ).strip().lower()
+    if experiment_type not in {'fresh', 'finetune_sweep'}:
+        raise ValueError('experiment_type must be fresh or finetune_sweep.')
+
+    batch_parent_model_id = payload.get('parent_model_id')
+    if batch_parent_model_id is not None:
+        try:
+            batch_parent_model_id = int(batch_parent_model_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('parent_model_id must be an integer.') from exc
+        if db.session.get(AIModel, batch_parent_model_id) is None:
+            raise ValueError('parent_model_id does not exist.')
+
+    batch_training_dataset_id = payload.get('training_dataset_id')
+    if batch_training_dataset_id is not None:
+        try:
+            batch_training_dataset_id = int(batch_training_dataset_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError('training_dataset_id must be an integer.') from exc
+        if db.session.get(TrainingDataset, batch_training_dataset_id) is None:
+            raise ValueError('training_dataset_id does not exist.')
+
     batch = TrainingBatch(
         batch_id=str(uuid.uuid4()),
         name=name[:160],
         status='queued',
+        experiment_type=experiment_type,
+        parent_model_id=batch_parent_model_id,
+        training_dataset_id=batch_training_dataset_id,
+        preset_version=(
+            str(payload.get('preset_version') or '')[:50] or None
+        ),
+        ranking_metric=(
+            str(payload.get('ranking_metric') or FINETUNE_RANKING_METRIC)[:80]
+        ),
         total_jobs=len(jobs_payload),
     )
     db.session.add(batch)
@@ -591,7 +1083,82 @@ def create_training_batch(payload):
         if db.session.get(Project, project_id) is None:
             raise ValueError(f'jobs[{index}].project_id does not exist.')
 
-        model = str(raw_job.get('model') or 'yolo11n.pt').strip()
+        training_mode = str(
+            raw_job.get('training_mode')
+            or ('finetune' if experiment_type == 'finetune_sweep' else 'fresh')
+        ).strip().lower()
+        if training_mode not in {'fresh', 'finetune'}:
+            raise ValueError(
+                f'jobs[{index}].training_mode must be fresh or finetune.'
+            )
+
+        parameter_set = None
+        parameter_set_id = raw_job.get('parameter_set_id')
+        if parameter_set_id is not None:
+            if training_mode != 'finetune':
+                raise ValueError(
+                    f'jobs[{index}].parameter_set_id is only valid for fine-tune.'
+                )
+            try:
+                parameter_set_id = int(parameter_set_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'jobs[{index}].parameter_set_id must be an integer.'
+                ) from exc
+            parameter_set = db.session.get(
+                FineTuneParameterSet,
+                parameter_set_id,
+            )
+            if parameter_set is None:
+                raise ValueError(
+                    f'jobs[{index}].parameter_set_id does not exist.'
+                )
+
+        parent_model_id = raw_job.get(
+            'parent_model_id',
+            batch_parent_model_id,
+        )
+        parent_model = None
+        parent_artifact = None
+        if training_mode == 'finetune':
+            try:
+                parent_model_id = int(parent_model_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'jobs[{index}].parent_model_id must be an integer.'
+                ) from exc
+            parent_model = db.session.get(AIModel, parent_model_id)
+            if parent_model is None:
+                raise ValueError(
+                    f'jobs[{index}].parent_model_id does not exist.'
+                )
+            if (
+                parent_model.model_type != 'detection'
+                or parent_model.finetune_status != 'ready'
+            ):
+                raise ValueError(
+                    f'jobs[{index}] parent model is not ready for fine-tune.'
+                )
+            parent_artifact = ModelArtifact.query.filter_by(
+                model_id=parent_model.id,
+                kind='parent_pt',
+            ).first()
+            if parent_artifact is None:
+                parent_artifact = ModelArtifact.query.filter_by(
+                    model_id=parent_model.id,
+                    kind='best_pt',
+                ).first()
+            if parent_artifact is None:
+                raise ValueError(
+                    f'jobs[{index}] parent model has no trainable .pt artifact.'
+                )
+        else:
+            parent_model_id = None
+
+        model = str(
+            raw_job.get('model')
+            or (parent_model.filename if parent_model else 'yolo11n.pt')
+        ).strip()
         epochs = int(raw_job.get('epochs') or 1)
         batch_size = int(raw_job.get('batch') or 16)
         imgsz = int(raw_job.get('imgsz') or 640)
@@ -640,20 +1207,85 @@ def create_training_batch(payload):
         if not 1 <= max_attempts <= 10:
             raise ValueError(f'jobs[{index}].max_attempts must be between 1 and 10.')
 
+        training_dataset_id = raw_job.get(
+            'training_dataset_id',
+            batch_training_dataset_id,
+        )
+        training_dataset = None
+        if training_dataset_id is not None:
+            try:
+                training_dataset_id = int(training_dataset_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f'jobs[{index}].training_dataset_id must be an integer.'
+                ) from exc
+            training_dataset = db.session.get(
+                TrainingDataset,
+                training_dataset_id,
+            )
+            if training_dataset is None:
+                raise ValueError(
+                    f'jobs[{index}].training_dataset_id does not exist.'
+                )
+            if training_dataset.project_id != project_id:
+                raise ValueError(
+                    f'jobs[{index}] dataset does not belong to project_id.'
+                )
+
+        request_payload = {
+            'training_mode': training_mode,
+            'model': model[:100],
+            'epochs': epochs,
+            'batch': batch_size,
+            'imgsz': imgsz,
+        }
+        parameter_set_snapshot = None
+        if training_mode == 'finetune':
+            request_payload.update(_normalize_finetune_parameters(raw_job))
+            request_payload.update({
+                'parent_artifact_id': parent_artifact.artifact_id,
+                'parent_sha256': parent_artifact.sha256,
+            })
+            if parameter_set is not None:
+                parameter_set_snapshot = {
+                    'id': parameter_set.id,
+                    'preset_id': parameter_set.preset_id,
+                    'name': parameter_set.name,
+                    'version': parameter_set.version,
+                    'parameters': {
+                        field: request_payload[field]
+                        for field in FINETUNE_PARAMETER_FIELDS
+                    },
+                }
+        config_hash = hashlib.sha256(
+            json.dumps(
+                request_payload,
+                sort_keys=True,
+                separators=(',', ':'),
+            ).encode('utf-8')
+        ).hexdigest()
+
         task = TrainingQueueTask(
             task_id=task_uuid,
             idempotency_key=idempotency_key,
             batch_id=batch.id,
             project_id=project_id,
+            training_dataset_id=(
+                training_dataset.id if training_dataset else None
+            ),
+            parent_model_id=parent_model_id,
+            parameter_set_id=(
+                parameter_set.id if parameter_set is not None else None
+            ),
+            parameter_set_snapshot=parameter_set_snapshot,
+            candidate_name=(
+                str(raw_job.get('candidate_name') or '')[:100] or None
+            ),
+            config_hash=config_hash,
             status='queued',
             stage='queued',
             priority=int(raw_job.get('priority') or 0),
-            request_payload={
-                'model': model[:100],
-                'epochs': epochs,
-                'batch': batch_size,
-                'imgsz': imgsz,
-            },
+            request_payload=request_payload,
             dataset_config={
                 'splits': normalized_splits,
                 'include_unlabeled': include_unlabeled,
@@ -675,6 +1307,254 @@ def create_training_batch(payload):
 
     db.session.commit()
     return batch, tasks
+
+
+def _canonical_class_names(value):
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, dict):
+        def sort_key(item):
+            key = str(item[0])
+            return (0, int(key)) if key.isdigit() else (1, key)
+
+        return [
+            str(class_name)
+            for _key, class_name in sorted(value.items(), key=sort_key)
+        ]
+    return []
+
+
+def parent_artifact_for_model(model):
+    artifact = ModelArtifact.query.filter_by(
+        model_id=model.id,
+        kind='parent_pt',
+    ).first()
+    if artifact is None:
+        artifact = ModelArtifact.query.filter_by(
+            model_id=model.id,
+            kind='best_pt',
+        ).first()
+    return artifact
+
+
+def worker_supports_finetune(worker):
+    capabilities = worker.capabilities or {}
+    training_modes = capabilities.get('training_modes') or ['fresh']
+    return (
+        bool(capabilities.get('model_artifact_upload'))
+        and 'finetune' in training_modes
+    )
+
+
+def validate_parent_model(model, worker, adapter_factory=adapter_for_worker):
+    if model.model_type != 'detection':
+        raise ValueError('Only detection checkpoints can be fine-tuned.')
+    artifact = parent_artifact_for_model(model)
+    if artifact is None:
+        raise ValueError('Model has no trainable .pt artifact.')
+    if not worker.enabled or worker.status != 'online':
+        raise ValueError('Selected validation worker is not online.')
+    if not worker_supports_finetune(worker):
+        raise ValueError(
+            'Selected worker does not advertise Phase 6 fine-tune support.'
+        )
+
+    payload = adapter_factory(worker).upload_model_artifact(artifact)
+    class_names = _canonical_class_names(payload.get('class_names'))
+    if not class_names:
+        raise WorkerApiError(
+            'Worker could not read class names from the checkpoint.'
+        )
+    model.class_names = class_names
+    model.finetune_status = 'ready'
+    model.validation_error = None
+    model.validated_at = utcnow()
+    artifact.metadata_json = {
+        **(artifact.metadata_json or {}),
+        'task': payload.get('task'),
+        'class_names': class_names,
+        'validated_worker_id': worker.worker_id,
+        'validated_at': model.validated_at.isoformat(),
+    }
+    db.session.commit()
+    return payload
+
+
+def finetune_presets_payload(include_archived=False):
+    return {
+        'version': FINETUNE_PRESET_VERSION,
+        'ranking_metric': FINETUNE_RANKING_METRIC,
+        'allowed_image_sizes': list(FINETUNE_ALLOWED_IMAGE_SIZES),
+        'parameter_defaults': dict(FINETUNE_PARAMETER_DEFAULTS),
+        'parameter_fields': list(FINETUNE_PARAMETER_FIELDS),
+        'parameter_sets': list_finetune_parameter_sets(
+            include_archived=include_archived
+        ),
+    }
+
+
+def create_finetune_experiment(payload):
+    if not current_app.config.get('TOOLIB_FINETUNE_ENABLED', False):
+        raise ValueError('Fine-tune experiments are disabled.')
+
+    try:
+        project_id = int(payload.get('project_id'))
+        parent_model_id = int(payload.get('parent_model_id'))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            'project_id and parent_model_id must be integers.'
+        ) from exc
+    project = db.session.get(Project, project_id)
+    if project is None:
+        raise ValueError('project_id does not exist.')
+    parent_model = db.session.get(AIModel, parent_model_id)
+    if parent_model is None:
+        raise ValueError('parent_model_id does not exist.')
+    if (
+        parent_model.model_type != 'detection'
+        or parent_model.finetune_status != 'ready'
+        or parent_artifact_for_model(parent_model) is None
+    ):
+        raise ValueError('Parent model is not ready for fine-tune.')
+
+    ensure_default_finetune_parameter_sets()
+    raw_parameter_set_ids = payload.get('parameter_set_ids')
+    if (
+        not isinstance(raw_parameter_set_ids, list)
+        or not raw_parameter_set_ids
+    ):
+        raise ValueError(
+            'parameter_set_ids must be a non-empty JSON array.'
+        )
+    if len(raw_parameter_set_ids) > 100:
+        raise ValueError(
+            'A fine-tune experiment can contain at most 100 parameter sets.'
+        )
+    parameter_set_ids = []
+    seen_parameter_set_ids = set()
+    for index, raw_parameter_set_id in enumerate(raw_parameter_set_ids):
+        if isinstance(raw_parameter_set_id, bool):
+            raise ValueError(
+                f'parameter_set_ids[{index}] must be an integer.'
+            )
+        try:
+            parameter_set_id = int(raw_parameter_set_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'parameter_set_ids[{index}] must be an integer.'
+            ) from exc
+        if parameter_set_id in seen_parameter_set_ids:
+            raise ValueError('parameter_set_ids must not contain duplicates.')
+        seen_parameter_set_ids.add(parameter_set_id)
+        parameter_set_ids.append(parameter_set_id)
+
+    parameter_sets_by_id = {
+        parameter_set.id: parameter_set
+        for parameter_set in FineTuneParameterSet.query.filter(
+            FineTuneParameterSet.id.in_(parameter_set_ids)
+        ).all()
+    }
+    missing_parameter_set_ids = [
+        parameter_set_id
+        for parameter_set_id in parameter_set_ids
+        if parameter_set_id not in parameter_sets_by_id
+    ]
+    if missing_parameter_set_ids:
+        raise ValueError(
+            'Unknown parameter_set_ids: '
+            + ', '.join(str(value) for value in missing_parameter_set_ids)
+        )
+    parameter_sets = [
+        parameter_sets_by_id[parameter_set_id]
+        for parameter_set_id in parameter_set_ids
+    ]
+    inactive_parameter_sets = [
+        parameter_set.name
+        for parameter_set in parameter_sets
+        if not parameter_set.is_active
+    ]
+    if inactive_parameter_sets:
+        raise ValueError(
+            'Archived parameter sets cannot start new experiments: '
+            + ', '.join(inactive_parameter_sets)
+        )
+    invalid_tasks = [
+        parameter_set.name
+        for parameter_set in parameter_sets
+        if parameter_set.model_task != 'detect'
+    ]
+    if invalid_tasks:
+        raise ValueError(
+            'Only detect parameter sets are supported: '
+            + ', '.join(invalid_tasks)
+        )
+
+    splits = payload.get('splits') or {'train': 80, 'val': 20, 'test': 0}
+    dataset = prepare_training_dataset_snapshot(
+        project_id=project_id,
+        splits=splits,
+        include_unlabeled=bool(payload.get('include_unlabeled', False)),
+        exclude_flagged=bool(payload.get('exclude_flagged', True)),
+        storage_root=current_app.config.get(
+            'TRAINING_DATASET_ROOT',
+            os.path.join(os.path.dirname(__file__), 'training_datasets'),
+        ),
+        clear_header_callback=current_app.config.get(
+            'TRAINING_CLEAR_HEADER_CALLBACK',
+            default_clear_header_callback,
+        ),
+    )
+    parent_classes = _canonical_class_names(parent_model.class_names)
+    dataset_classes = _canonical_class_names(dataset.class_names)
+    if not parent_classes:
+        raise ValueError('Parent model has no validated class metadata.')
+    if parent_classes != dataset_classes:
+        raise ValueError(
+            'Parent model classes must exactly match the dataset snapshot '
+            f'(model={parent_classes}, dataset={dataset_classes}).'
+        )
+
+    jobs = []
+    for candidate_index, parameter_set in enumerate(parameter_sets, start=1):
+        parameters = normalize_finetune_parameter_set_parameters(
+            parameter_set.parameters or {}
+        )
+        jobs.append({
+            'project_id': project_id,
+            'training_dataset_id': dataset.id,
+            'training_mode': 'finetune',
+            'parent_model_id': parent_model.id,
+            'parameter_set_id': parameter_set.id,
+            'candidate_name': (
+                f'{candidate_index}. {parameter_set.name}'
+            ),
+            'model': parent_model.filename,
+            **parameters,
+            'priority': int(payload.get('priority') or 0),
+            'max_attempts': int(payload.get('max_attempts') or 3),
+            'splits': splits,
+            'include_unlabeled': bool(
+                payload.get('include_unlabeled', False)
+            ),
+            'exclude_flagged': bool(payload.get('exclude_flagged', True)),
+        })
+
+    name = str(payload.get('name') or '').strip()
+    if not name:
+        name = (
+            f'Fine-tune {parent_model.name} on {project.name} '
+            f'({len(parameter_sets)} parameter sets)'
+        )
+    return create_training_batch({
+        'name': name,
+        'experiment_type': 'finetune_sweep',
+        'parent_model_id': parent_model.id,
+        'training_dataset_id': dataset.id,
+        'preset_version': FINETUNE_PRESET_VERSION,
+        'ranking_metric': FINETUNE_RANKING_METRIC,
+        'max_attempts': int(payload.get('max_attempts') or 3),
+        'jobs': jobs,
+    })
 
 
 def _lease_duration():
@@ -760,6 +1640,10 @@ def _sync_local_training_job(task, worker, remote_payload):
     if dataset is not None:
         request_payload['dataset_id'] = dataset.dataset_id
     job.request_payload = request_payload
+    job.training_mode = str(
+        request_payload.get('training_mode') or 'fresh'
+    )[:30]
+    job.parent_model_id = task.parent_model_id
     job.model = str(remote_payload.get('model') or request_payload.get('model') or '')[:100] or None
     job.epochs = int(remote_payload.get('epochs') or request_payload.get('epochs') or 1)
     job.batch = int(remote_payload.get('batch') or request_payload.get('batch') or 1)
@@ -771,6 +1655,10 @@ def _sync_local_training_job(task, worker, remote_payload):
     artifacts = remote_payload.get('artifacts')
     if isinstance(artifacts, dict):
         job.artifacts = artifacts
+    metrics = remote_payload.get('metrics')
+    if isinstance(metrics, dict):
+        job.metrics = metrics
+        task.metrics = metrics
     job.connection_status = 'synced'
     job.last_sync_error = None
     job.last_synced_at = utcnow()
@@ -849,12 +1737,41 @@ def _submission_idempotency_key(task):
     return f'toolib:{task.task_id}:run:{generation}:{key_digest}'
 
 
-def _import_task_model(task, job, onnx_path):
+def _read_training_metrics(results_path):
+    if results_path is None or not Path(results_path).is_file():
+        return {}
+    try:
+        with Path(results_path).open(
+            'r',
+            encoding='utf-8-sig',
+            newline='',
+        ) as stream:
+            rows = list(csv.DictReader(stream))
+    except (OSError, csv.Error):
+        return {}
+    if not rows:
+        return {}
+
+    metrics = {}
+    for raw_key, raw_value in rows[-1].items():
+        key = str(raw_key or '').strip()
+        value = str(raw_value or '').strip()
+        if not key or not value:
+            continue
+        try:
+            metrics[key] = float(value)
+        except ValueError:
+            metrics[key] = value
+    return metrics
+
+
+def _import_task_model(task, job, artifact_paths):
     if task.imported_model_id is not None:
         model = db.session.get(AIModel, task.imported_model_id)
         if model is not None:
             return model
 
+    onnx_path = Path(artifact_paths['onnx']).resolve()
     models_root = Path(
         current_app.config.get(
             'MODEL_STORAGE_ROOT',
@@ -877,17 +1794,75 @@ def _import_task_model(task, job, onnx_path):
         existing = AIModel(
             name=f'Automated {job.model or "YOLO"} - {task.task_id[:8]}',
             description=(
-                f'Phase 5 task {task.task_id}; remote job {job.remote_job_id}; '
+                f'{job.training_mode} task {task.task_id}; '
+                f'remote job {job.remote_job_id}; '
                 f'epochs={job.epochs}; batch={job.batch}; imgsz={job.imgsz}'
             ),
             filename=filename,
             model_type='detection',
             is_active=False,
             activation_ready=False,
+            parent_model_id=task.parent_model_id,
+            source_project_id=task.project_id,
+            training_dataset_id=task.training_dataset_id,
+            source_kind='training',
+            finetune_status=(
+                'ready' if artifact_paths.get('pt') else 'unavailable'
+            ),
         )
+        if task.parent_model_id:
+            parent_model = db.session.get(AIModel, task.parent_model_id)
+            if parent_model is not None:
+                existing.class_names = parent_model.class_names
+        elif task.training_dataset_id:
+            dataset = db.session.get(
+                TrainingDataset,
+                task.training_dataset_id,
+            )
+            if dataset is not None:
+                existing.class_names = dataset.class_names
         db.session.add(existing)
         db.session.flush()
 
+    artifact_kind_mapping = {
+        'onnx': 'onnx',
+        'pt': 'best_pt',
+        'last_pt': 'last_pt',
+        'manifest': 'manifest',
+        'results': 'results',
+        'args': 'args',
+    }
+    for remote_kind, model_kind in artifact_kind_mapping.items():
+        local_path = artifact_paths.get(remote_kind)
+        if local_path is None:
+            continue
+        local_path = Path(local_path).resolve()
+        if not local_path.is_file():
+            continue
+        artifact = ModelArtifact.query.filter_by(
+            model_id=existing.id,
+            kind=model_kind,
+        ).first()
+        if artifact is None:
+            artifact = ModelArtifact(
+                artifact_id=str(uuid.uuid4()),
+                model_id=existing.id,
+                kind=model_kind,
+                storage_path=str(local_path),
+                sha256=sha256_path(local_path),
+                size_bytes=local_path.stat().st_size,
+                metadata_json={
+                    'task_id': task.task_id,
+                    'remote_job_id': job.remote_job_id,
+                },
+            )
+            db.session.add(artifact)
+
+    metrics = dict(job.metrics or {})
+    if not metrics:
+        metrics = _read_training_metrics(artifact_paths.get('results'))
+    task.metrics = metrics or None
+    job.metrics = metrics or None
     task.imported_model_id = existing.id
     job.imported_model_id = existing.id
     return existing
@@ -1046,6 +2021,51 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 )
                 db.session.commit()
             else:
+                training_mode = str(
+                    (task.request_payload or {}).get('training_mode')
+                    or 'fresh'
+                )
+                if training_mode == 'finetune':
+                    parent_model = db.session.get(
+                        AIModel,
+                        task.parent_model_id,
+                    )
+                    if parent_model is None:
+                        raise WorkerApiError(
+                            'Fine-tune parent model no longer exists.'
+                        )
+                    parent_artifact = parent_artifact_for_model(parent_model)
+                    if parent_artifact is None:
+                        raise WorkerApiError(
+                            'Fine-tune parent .pt artifact no longer exists.'
+                        )
+                    transition_task(
+                        task,
+                        'uploading_parent_model',
+                        'uploading_parent_model',
+                        (
+                            f'Caching parent model '
+                            f'{parent_artifact.sha256[:12]} on {worker.name}.'
+                        ),
+                        attempt=attempt,
+                    )
+                    _renew_lease(task, attempt)
+                    db.session.commit()
+                    remote_parent = adapter.upload_model_artifact(
+                        parent_artifact
+                    )
+                    remote_classes = _canonical_class_names(
+                        remote_parent.get('class_names')
+                    )
+                    if (
+                        remote_classes
+                        and remote_classes
+                        != _canonical_class_names(parent_model.class_names)
+                    ):
+                        raise WorkerApiError(
+                            'Worker checkpoint class metadata changed.'
+                        )
+
                 transition_task(
                     task,
                     'uploading_dataset',
@@ -1143,14 +2163,44 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 task,
                 'downloading_artifacts',
                 'downloading_artifacts',
-                'Downloading ONNX artifact into the central artifact store.',
+                'Downloading training artifacts into the central artifact store.',
                 attempt=attempt,
             )
             db.session.commit()
-            onnx_path = artifact_store().artifact_path(task.task_id, 'onnx')
-            adapter.download_artifact(job.remote_job_id, 'onnx', onnx_path)
-            if not onnx_path.is_file() or onnx_path.stat().st_size <= 0:
-                raise WorkerApiError('Downloaded ONNX artifact is empty.')
+            remote_artifacts = (
+                job.artifacts if isinstance(job.artifacts, dict) else {}
+            )
+            mandatory_artifacts = {'onnx'}
+            if job.training_mode == 'finetune':
+                mandatory_artifacts.add('pt')
+            artifact_paths = {}
+            for artifact_kind in (
+                'onnx',
+                'pt',
+                'last_pt',
+                'manifest',
+                'results',
+                'args',
+            ):
+                if (
+                    artifact_kind not in mandatory_artifacts
+                    and artifact_kind not in remote_artifacts
+                ):
+                    continue
+                destination = artifact_store().artifact_path(
+                    task.task_id,
+                    artifact_kind,
+                )
+                adapter.download_artifact(
+                    job.remote_job_id,
+                    artifact_kind,
+                    destination,
+                )
+                if not destination.is_file() or destination.stat().st_size <= 0:
+                    raise WorkerApiError(
+                        f'Downloaded {artifact_kind} artifact is empty.'
+                    )
+                artifact_paths[artifact_kind] = destination
 
             transition_task(
                 task,
@@ -1160,7 +2210,7 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 attempt=attempt,
             )
             db.session.commit()
-            model = _import_task_model(task, job, onnx_path)
+            model = _import_task_model(task, job, artifact_paths)
             attempt.status = 'succeeded'
             attempt.finished_at = utcnow()
             task.error = None
@@ -1173,7 +2223,11 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 details={
                     'model_id': model.id,
                     'remote_job_id': job.remote_job_id,
-                    'onnx_sha256': sha256_path(onnx_path),
+                    'artifact_sha256': {
+                        kind: sha256_path(path)
+                        for kind, path in artifact_paths.items()
+                    },
+                    'metrics': task.metrics or {},
                 },
             )
             refresh_batch_status(task.batch_id)
@@ -1305,6 +2359,15 @@ def _resume_worker_lost_tasks(app, adapter_factory, asynchronous):
     return resumed
 
 
+def _worker_supports_task(worker, task):
+    training_mode = str(
+        (task.request_payload or {}).get('training_mode') or 'fresh'
+    )
+    if training_mode == 'finetune':
+        return worker_supports_finetune(worker)
+    return bool((worker.capabilities or {}).get('training', True))
+
+
 def dispatch_once(
     app,
     *,
@@ -1348,7 +2411,17 @@ def dispatch_once(
             for _ in range(available_slots):
                 if not tasks:
                     break
-                task = tasks.pop(0)
+                compatible_index = next(
+                    (
+                        index
+                        for index, queued_task in enumerate(tasks)
+                        if _worker_supports_task(worker, queued_task)
+                    ),
+                    None,
+                )
+                if compatible_index is None:
+                    break
+                task = tasks.pop(compatible_index)
                 attempt = _claim_task_for_worker(task, worker)
                 if attempt is None:
                     continue

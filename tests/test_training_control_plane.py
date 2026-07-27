@@ -1,4 +1,6 @@
 import os
+import hashlib
+import io
 import threading
 import time
 import uuid
@@ -10,8 +12,11 @@ from cryptography.fernet import Fernet
 from models import (
     db,
     AIModel,
+    FineTuneParameterSet,
+    ModelArtifact,
     Project,
     TrainingBatch,
+    TrainingDataset,
     TrainingJobAttempt,
     TrainingQueueTask,
     TrainingWorker,
@@ -19,6 +24,7 @@ from models import (
 from test_helpers import create_isolated_test_app
 from training_control_plane import (
     WorkerUnavailableError,
+    create_finetune_experiment,
     create_training_batch,
     dispatch_once,
     encrypt_worker_token,
@@ -29,7 +35,9 @@ class FakeWorkerState:
     def __init__(self):
         self.lock = threading.Lock()
         self.submissions = {}
+        self.requests_by_job = {}
         self.submit_count = 0
+        self.model_upload_count = 0
         self.active_uploads = 0
         self.max_active_uploads = 0
         self.fail_status_once = False
@@ -65,6 +73,18 @@ class FakeWorkerAdapter:
         finally:
             self.state.end_upload()
 
+    def upload_model_artifact(self, artifact):
+        with self.state.lock:
+            self.state.model_upload_count += 1
+        return {
+            'status': 'existing',
+            'artifact_id': artifact.artifact_id,
+            'sha256': artifact.sha256,
+            'task': 'detect',
+            'class_names': ['bottle', 'cap'],
+            'drive_path': f'/fake/models/{artifact.artifact_id}/parent.pt',
+        }
+
     def submit_job(self, request_payload, idempotency_key):
         with self.state.lock:
             remote_job_id = self.state.submissions.get(idempotency_key)
@@ -72,6 +92,7 @@ class FakeWorkerAdapter:
                 remote_job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, idempotency_key))
                 self.state.submissions[idempotency_key] = remote_job_id
                 self.state.submit_count += 1
+            self.state.requests_by_job[remote_job_id] = dict(request_payload)
         return {
             'job_id': remote_job_id,
             'status': 'queued',
@@ -84,17 +105,31 @@ class FakeWorkerAdapter:
             if self.state.fail_status_once:
                 self.state.fail_status_once = False
                 raise WorkerUnavailableError('simulated worker disconnect')
+        request_payload = self.state.requests_by_job.get(remote_job_id, {})
+        is_finetune = request_payload.get('training_mode') == 'finetune'
+        artifacts = {'onnx': f'/fake/{remote_job_id}/best.onnx'}
+        metrics = {}
+        if is_finetune:
+            artifacts.update({
+                'pt': f'/fake/{remote_job_id}/best.pt',
+                'last_pt': f'/fake/{remote_job_id}/last.pt',
+                'manifest': f'/fake/{remote_job_id}/manifest.json',
+                'results': f'/fake/{remote_job_id}/results.csv',
+                'args': f'/fake/{remote_job_id}/args.yaml',
+            })
+            metrics = {'metrics/mAP50-95(B)': 0.42}
         return {
             'job_id': remote_job_id,
             'status': 'succeeded',
-            'model': 'yolo11n.pt',
-            'epochs': 1,
-            'batch': 4,
-            'imgsz': 640,
-            'current_epoch': 1,
-            'total_epochs': 1,
+            'model': request_payload.get('model', 'yolo11n.pt'),
+            'epochs': request_payload.get('epochs', 1),
+            'batch': request_payload.get('batch', 4),
+            'imgsz': request_payload.get('imgsz', 640),
+            'current_epoch': request_payload.get('epochs', 1),
+            'total_epochs': request_payload.get('epochs', 1),
             'message': 'Training and ONNX export completed.',
-            'artifacts': {'onnx': f'/fake/{remote_job_id}/best.onnx'},
+            'artifacts': artifacts,
+            'metrics': metrics,
         }
 
     def download_artifact(self, remote_job_id, artifact_kind, destination):
@@ -116,6 +151,7 @@ class TestTrainingControlPlane:
         self.dataset_root = self.root / 'datasets'
         self.artifact_root = self.root / 'artifacts'
         self.model_root = self.root / 'models'
+        self.parent_artifact_root = self.root / 'parent-artifacts'
         self.credential_key = Fernet.generate_key().decode('ascii')
         self.app = create_isolated_test_app(
             str(self.db_path),
@@ -123,6 +159,7 @@ class TestTrainingControlPlane:
             TRAINING_DATASET_ROOT=str(self.dataset_root),
             TRAINING_ARTIFACT_ROOT=str(self.artifact_root),
             MODEL_STORAGE_ROOT=str(self.model_root),
+            MODEL_ARTIFACT_ROOT=str(self.parent_artifact_root),
             TRAINING_REMOTE_POLL_SECONDS=0,
             TRAINING_REMOTE_MAX_SECONDS=60,
             TRAINING_TASK_LEASE_SECONDS=60,
@@ -224,7 +261,21 @@ class TestTrainingControlPlane:
                 capacity=1,
                 gpu_available=True,
                 gpu_name='Fake GPU',
-                capabilities={'max_concurrent_jobs': 1},
+                capabilities={
+                    'training': True,
+                    'training_modes': ['fresh', 'finetune'],
+                    'dataset_upload': True,
+                    'model_artifact_upload': True,
+                    'artifact_download': [
+                        'onnx',
+                        'pt',
+                        'last_pt',
+                        'manifest',
+                        'results',
+                        'args',
+                    ],
+                    'max_concurrent_jobs': 1,
+                },
             )
             db.session.add(worker)
             db.session.commit()
@@ -247,6 +298,381 @@ class TestTrainingControlPlane:
                 ],
             })
             return batch.id
+
+    def create_parent_model(self, class_names=None):
+        class_names = class_names or ['bottle', 'cap']
+        with self.app.app_context():
+            checkpoint_path = self.root / f'parent-{uuid.uuid4().hex}.pt'
+            checkpoint_path.write_bytes(b'trusted-owner-checkpoint')
+            model = AIModel(
+                name='External parent',
+                filename=f'external_{uuid.uuid4().hex[:12]}.pt',
+                model_type='detection',
+                is_active=False,
+                activation_ready=False,
+                source_kind='external_pt',
+                finetune_status='ready',
+                class_names=class_names,
+            )
+            db.session.add(model)
+            db.session.flush()
+            artifact = ModelArtifact(
+                artifact_id=str(uuid.uuid4()),
+                model_id=model.id,
+                kind='parent_pt',
+                storage_path=str(checkpoint_path),
+                sha256=hashlib.sha256(
+                    checkpoint_path.read_bytes()
+                ).hexdigest(),
+                size_bytes=checkpoint_path.stat().st_size,
+            )
+            db.session.add(artifact)
+            db.session.commit()
+            return model.id
+
+    def active_parameter_set_ids(self, count=None):
+        response = self.client.get('/api/finetune/config')
+        assert response.status_code == 200, response.get_data(as_text=True)
+        parameter_sets = [
+            parameter_set
+            for parameter_set in response.get_json()['parameter_sets']
+            if parameter_set['is_active']
+        ]
+        if count is not None:
+            parameter_sets = parameter_sets[:count]
+        return [parameter_set['id'] for parameter_set in parameter_sets]
+
+    def test_external_pt_upload_is_stored_without_web_process_deserialization(self):
+        response = self.client.post(
+            '/api/finetune-models',
+            data={
+                'name': 'Owner checkpoint',
+                'file': (
+                    io.BytesIO(b'trusted-owner-checkpoint'),
+                    'V14.7.pt',
+                ),
+            },
+            content_type='multipart/form-data',
+        )
+        assert response.status_code == 201, response.get_data(as_text=True)
+        imported = response.get_json()
+        assert imported['source_kind'] == 'external_pt'
+        assert imported['finetune_status'] == 'pending_validation'
+        assert imported['activation_ready'] is False
+        assert imported['filename'].endswith('.pt')
+        assert imported['artifacts'][0]['kind'] == 'parent_pt'
+
+        worker_id = self.add_worker('ValidationWorker')
+        artifact = imported['artifacts'][0]
+        with mock.patch(
+            'training_control_plane.ColabHttpWorkerAdapter.upload_model_artifact',
+            return_value={
+                'status': 'uploaded',
+                'artifact_id': artifact['artifact_id'],
+                'sha256': artifact['sha256'],
+                'task': 'detect',
+                'class_names': ['bottle', 'cap'],
+            },
+        ):
+            validated = self.client.post(
+                f"/api/finetune-models/{imported['id']}/validate",
+                json={'worker_id': worker_id},
+            )
+        assert validated.status_code == 200, validated.get_data(as_text=True)
+        body = validated.get_json()
+        assert body['finetune_status'] == 'ready'
+        assert body['fine_tune_eligible'] is True
+        assert body['class_names'] == ['bottle', 'cap']
+
+    def test_finetune_parameter_set_crud_clone_archive_restore_and_delete(self):
+        config = self.client.get('/api/finetune/config')
+        assert config.status_code == 200
+        seeded = config.get_json()['parameter_sets']
+        assert len(seeded) == 5
+        assert all(parameter_set['is_system'] for parameter_set in seeded)
+
+        created_response = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Two epoch smoke',
+                'description': 'Fast end-to-end validation.',
+                'parameters': {
+                    'epochs': 2,
+                    'batch': 4,
+                    'imgsz': 640,
+                    'lr0': 0.00008,
+                    'freeze': 8,
+                },
+            },
+        )
+        assert created_response.status_code == 201
+        created = created_response.get_json()
+        assert created['version'] == 1
+        assert created['parameters']['epochs'] == 2
+        assert created['parameters']['lrf'] == 0.01
+        assert created['can_delete'] is True
+
+        updated_response = self.client.patch(
+            f"/api/finetune-parameter-sets/{created['id']}",
+            json={
+                'parameters': {
+                    'lr0': 0.00004,
+                },
+            },
+        )
+        assert updated_response.status_code == 200
+        updated = updated_response.get_json()
+        assert updated['version'] == 2
+        assert updated['parameters']['lr0'] == 0.00004
+        assert updated['parameters']['epochs'] == 2
+
+        cloned_response = self.client.post(
+            f"/api/finetune-parameter-sets/{created['id']}/clone",
+            json={},
+        )
+        assert cloned_response.status_code == 201
+        cloned = cloned_response.get_json()
+        assert cloned['id'] != created['id']
+        assert cloned['name'].startswith('Two epoch smoke copy')
+        assert cloned['version'] == 1
+
+        archived_response = self.client.post(
+            f"/api/finetune-parameter-sets/{created['id']}/archive",
+            json={},
+        )
+        assert archived_response.status_code == 200
+        assert archived_response.get_json()['is_active'] is False
+
+        restored_response = self.client.post(
+            f"/api/finetune-parameter-sets/{created['id']}/restore",
+            json={},
+        )
+        assert restored_response.status_code == 200
+        assert restored_response.get_json()['is_active'] is True
+
+        deleted_response = self.client.delete(
+            f"/api/finetune-parameter-sets/{cloned['id']}"
+        )
+        assert deleted_response.status_code == 200
+
+        system_delete = self.client.delete(
+            f"/api/finetune-parameter-sets/{seeded[0]['id']}"
+        )
+        assert system_delete.status_code == 409
+
+    def test_parameter_set_snapshot_is_immutable_after_preset_edit(self):
+        created_response = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Immutable preset',
+                'parameters': {
+                    'epochs': 2,
+                    'batch': 4,
+                    'imgsz': 640,
+                    'lr0': 0.00007,
+                },
+            },
+        )
+        assert created_response.status_code == 201
+        created = created_response.get_json()
+        parent_model_id = self.create_parent_model()
+
+        with self.app.app_context():
+            _batch, tasks = create_finetune_experiment({
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': [created['id']],
+            })
+            task_id = tasks[0].id
+            original_request = dict(tasks[0].request_payload)
+            original_snapshot = dict(tasks[0].parameter_set_snapshot)
+
+        updated_response = self.client.patch(
+            f"/api/finetune-parameter-sets/{created['id']}",
+            json={'parameters': {'lr0': 0.00002, 'epochs': 3}},
+        )
+        assert updated_response.status_code == 200
+        assert updated_response.get_json()['version'] == 2
+
+        with self.app.app_context():
+            task = db.session.get(TrainingQueueTask, task_id)
+            assert task.request_payload == original_request
+            assert task.parameter_set_snapshot == original_snapshot
+            assert task.parameter_set_snapshot['version'] == 1
+            assert task.parameter_set_snapshot['parameters']['lr0'] == 0.00007
+
+        archived = self.client.post(
+            f"/api/finetune-parameter-sets/{created['id']}/archive",
+            json={},
+        )
+        assert archived.status_code == 200
+        delete_used = self.client.delete(
+            f"/api/finetune-parameter-sets/{created['id']}"
+        )
+        assert delete_used.status_code == 409
+
+    def test_finetune_experiment_reuses_one_snapshot_and_hashes_candidates(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(5)
+        with self.app.app_context():
+            batch, tasks = create_finetune_experiment({
+                'name': 'Phase 6 sweep',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            assert batch.experiment_type == 'finetune_sweep'
+            assert batch.parent_model_id == parent_model_id
+            assert batch.training_dataset_id is not None
+            assert len(tasks) == 5
+            assert len({task.training_dataset_id for task in tasks}) == 1
+            assert len({task.config_hash for task in tasks}) == 5
+            assert all(task.parent_model_id == parent_model_id for task in tasks)
+            assert all(
+                task.request_payload['training_mode'] == 'finetune'
+                for task in tasks
+            )
+            assert {
+                task.parameter_set_id for task in tasks
+            } == set(parameter_set_ids)
+            assert all(task.parameter_set_snapshot for task in tasks)
+            assert TrainingDataset.query.count() == 1
+
+    def test_finetune_experiment_supports_two_candidate_smoke_test(self):
+        parent_model_id = self.create_parent_model()
+        config = self.client.get('/api/finetune/config').get_json()
+        selected_parameter_sets = list(reversed([
+            parameter_set
+            for parameter_set in config['parameter_sets']
+            if parameter_set['is_active']
+        ][:2]))
+        parameter_set_ids = [
+            parameter_set['id']
+            for parameter_set in selected_parameter_sets
+        ]
+        with self.app.app_context():
+            batch, tasks = create_finetune_experiment({
+                'name': 'Two candidate smoke test',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+
+            assert batch.total_jobs == 2
+            assert len(tasks) == 2
+            assert [task.candidate_name for task in tasks] == [
+                f"{index}. {parameter_set['name']}"
+                for index, parameter_set in enumerate(
+                    selected_parameter_sets,
+                    start=1,
+                )
+            ]
+            assert [
+                task.request_payload['lr0']
+                for task in tasks
+            ] == [
+                parameter_set['parameters']['lr0']
+                for parameter_set in selected_parameter_sets
+            ]
+            assert [
+                task.parameter_set_snapshot['version']
+                for task in tasks
+            ] == [1, 1]
+            assert len({task.training_dataset_id for task in tasks}) == 1
+            assert TrainingDataset.query.count() == 1
+
+    def test_two_workers_process_three_finetune_candidates_with_lineage(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(3)
+        self.add_worker('FineTuneA')
+        self.add_worker('FineTuneB')
+        with self.app.app_context():
+            batch, _tasks = create_finetune_experiment({
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            batch_id = batch.id
+
+        state = FakeWorkerState()
+        factory = lambda worker: FakeWorkerAdapter(worker, state)
+        first = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert first['dispatched'] == 2
+        second = dispatch_once(
+            self.app,
+            adapter_factory=factory,
+            probe=False,
+            asynchronous=False,
+        )
+        assert second['dispatched'] == 1
+
+        with self.app.app_context():
+            batch = db.session.get(TrainingBatch, batch_id)
+            assert batch.status == 'succeeded'
+            tasks = TrainingQueueTask.query.filter_by(
+                batch_id=batch_id
+            ).all()
+            assert len(tasks) == 3
+            assert all(
+                task.metrics['metrics/mAP50-95(B)'] == 0.42
+                for task in tasks
+            )
+            children = AIModel.query.filter_by(
+                parent_model_id=parent_model_id,
+                source_kind='training',
+            ).all()
+            assert len(children) == 3
+            assert all(child.finetune_status == 'ready' for child in children)
+            for child in children:
+                artifact_kinds = {
+                    artifact.kind for artifact in child.artifacts
+                }
+                assert {
+                    'onnx',
+                    'best_pt',
+                    'last_pt',
+                    'manifest',
+                    'results',
+                    'args',
+                }.issubset(artifact_kinds)
+        assert state.model_upload_count == 3
+
+    def test_old_worker_does_not_receive_finetune_task(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(1)
+        worker_id = self.add_worker('LegacyWorker')
+        with self.app.app_context():
+            worker = db.session.get(TrainingWorker, worker_id)
+            worker.capabilities = {
+                'training': True,
+                'training_modes': ['fresh'],
+                'model_artifact_upload': False,
+                'max_concurrent_jobs': 1,
+            }
+            create_finetune_experiment({
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            db.session.commit()
+
+        result = dispatch_once(
+            self.app,
+            adapter_factory=lambda worker: FakeWorkerAdapter(
+                worker,
+                FakeWorkerState(),
+            ),
+            probe=False,
+            asynchronous=False,
+        )
+        assert result['dispatched'] == 0
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'queued'
 
     def wait_for_terminal_count(self, expected, timeout=10):
         deadline = time.monotonic() + timeout

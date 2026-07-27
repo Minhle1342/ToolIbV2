@@ -399,6 +399,122 @@
                         </button>
                     </div>
 
+                    <div id="finetunePhase6Panel" class="bg-surface border border-cyan-500/40 rounded-lg p-3 space-y-3">
+                        <div class="flex items-center justify-between gap-2">
+                            <h4 class="text-xs font-semibold text-cyan-300">
+                                <i class="fa-solid fa-code-branch mr-1"></i>
+                                Phase 6 · Fine-tune từ parent .pt
+                            </h4>
+                            <span id="finetuneFeatureStatus" class="text-[10px] text-amber-300">Đang tải...</span>
+                        </div>
+                        <p class="text-[10px] text-content-muted leading-relaxed">
+                            Upload một checkpoint YOLO detect đáng tin cậy, xác thực bằng Colab worker,
+                            rồi chọn tùy ý các bộ tham số trong database để chạy trên cùng một dataset snapshot.
+                        </p>
+
+                        <div class="border border-border rounded p-2 space-y-2">
+                            <strong class="text-[10px] text-content">1. Import parent checkpoint</strong>
+                            <input id="finetuneParentName" type="text" placeholder="Ví dụ: V14.7 external" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
+                            <input id="finetuneParentFile" type="file" accept=".pt" class="w-full bg-panel border border-border rounded p-2 text-[10px] text-content">
+                            <button id="finetuneParentUploadBtn" type="button" onclick="uploadFinetuneParentModel()" class="w-full bg-cyan-800 hover:bg-cyan-700 text-white rounded px-3 py-2 text-xs font-medium">
+                                <i class="fa-solid fa-shield-halved mr-1"></i>
+                                Upload và xác thực bằng worker
+                            </button>
+                            <div id="finetuneParentUploadStatus" class="text-[10px] text-content-muted"></div>
+                        </div>
+
+                        <div class="border border-border rounded p-2 space-y-2">
+                            <strong class="text-[10px] text-content">2. Tạo fine-tune experiment</strong>
+                            <input id="finetuneExperimentName" type="text" placeholder="Tên experiment (không bắt buộc)" class="w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                            <label class="block text-[10px] text-content-muted">
+                                Parent model
+                                <select id="finetuneParentModel" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                                    <option value="">Chưa có parent model hợp lệ</option>
+                                </select>
+                            </label>
+                            <button id="finetuneParentValidateBtn" type="button" onclick="validateSelectedFinetuneParent()" class="w-full text-cyan-300 border border-cyan-800 rounded px-3 py-1.5 text-[10px] hover:bg-cyan-950/40">
+                                Xác thực lại parent đang chọn
+                            </button>
+                            <label class="block text-[10px] text-content-muted">
+                                Project dataset
+                                <select id="finetuneProject" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                                    <option value="">Đang tải project...</option>
+                                </select>
+                            </label>
+                            <div class="border border-cyan-900/70 rounded p-2 space-y-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <div>
+                                        <strong class="text-[10px] text-content">Thư viện bộ tham số</strong>
+                                        <div id="finetuneParameterSetSelectionSummary" class="text-[10px] text-cyan-300">
+                                            Đang tải...
+                                        </div>
+                                    </div>
+                                    <button id="finetuneParameterSetAddBtn" type="button" onclick="openFinetuneParameterSetEditor()" class="text-[10px] text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
+                                        <i class="fa-solid fa-plus mr-1"></i>Thêm bộ tham số
+                                    </button>
+                                </div>
+                                <div id="finetuneParameterSetList" class="space-y-2"></div>
+                                <details id="finetuneArchivedParameterSetSection" class="hidden border-t border-border pt-2">
+                                    <summary class="text-[10px] text-content-muted cursor-pointer">
+                                        Bộ tham số đã lưu trữ
+                                    </summary>
+                                    <div id="finetuneArchivedParameterSetList" class="space-y-2 mt-2"></div>
+                                </details>
+                            </div>
+                            <button id="finetuneExperimentCreateBtn" type="button" onclick="createFinetuneExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
+                                <i class="fa-solid fa-play mr-1"></i>
+                                Tạo snapshot và queue các bộ đã chọn
+                            </button>
+                        </div>
+
+                        <div id="finetuneParameterSetModal" class="hidden fixed inset-0 z-50 bg-black/70 p-4 overflow-y-auto">
+                            <div class="max-w-2xl mx-auto bg-panel border border-cyan-700 rounded-xl p-4 space-y-3 shadow-2xl">
+                                <div class="flex items-center justify-between">
+                                    <h4 id="finetuneParameterSetModalTitle" class="text-sm font-semibold text-cyan-300">
+                                        Thêm bộ tham số
+                                    </h4>
+                                    <button type="button" onclick="closeFinetuneParameterSetEditor()" class="text-content-muted hover:text-white">
+                                        <i class="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                <input id="finetuneParameterSetEditorId" type="hidden">
+                                <label class="block text-[10px] text-content-muted">
+                                    Tên bộ tham số
+                                    <input id="finetuneParameterSetName" type="text" maxlength="120" class="mt-1 w-full bg-surface border border-border rounded p-2 text-xs text-content">
+                                </label>
+                                <label class="block text-[10px] text-content-muted">
+                                    Mô tả
+                                    <textarea id="finetuneParameterSetDescription" maxlength="500" rows="2" class="mt-1 w-full bg-surface border border-border rounded p-2 text-xs text-content"></textarea>
+                                </label>
+                                <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    <label class="text-[10px] text-content-muted">Epochs<input id="finetuneParamEpochs" type="number" min="1" max="300" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                    <label class="text-[10px] text-content-muted">Batch<input id="finetuneParamBatch" type="number" min="1" max="64" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                    <label class="text-[10px] text-content-muted">Image size<select id="finetuneParamImgsz" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"><option>320</option><option>416</option><option>512</option><option>640</option><option>768</option></select></label>
+                                    <label class="text-[10px] text-content-muted">Learning rate (lr0)<input id="finetuneParamLr0" type="number" min="0.0000001" max="0.1" step="0.00001" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                    <label class="text-[10px] text-content-muted">Final LR factor (lrf)<input id="finetuneParamLrf" type="number" min="0.000001" max="1" step="0.001" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                    <label class="text-[10px] text-content-muted">Freeze layers<input id="finetuneParamFreeze" type="number" min="0" max="100" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                </div>
+                                <details class="border border-border rounded p-2">
+                                    <summary class="text-[10px] text-content cursor-pointer">Thông số nâng cao</summary>
+                                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                                        <label class="text-[10px] text-content-muted">Mosaic<input id="finetuneParamMosaic" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Scale<input id="finetuneParamScale" type="number" min="0" max="2" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Close mosaic<input id="finetuneParamCloseMosaic" type="number" min="0" max="100" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Degrees<input id="finetuneParamDegrees" type="number" min="0" max="180" step="1" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Translate<input id="finetuneParamTranslate" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Mixup<input id="finetuneParamMixup" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Copy-paste<input id="finetuneParamCopyPaste" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                        <label class="text-[10px] text-content-muted">Seed<input id="finetuneParamSeed" type="number" min="0" max="2147483647" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
+                                    </div>
+                                </details>
+                                <div class="flex justify-end gap-2">
+                                    <button type="button" onclick="closeFinetuneParameterSetEditor()" class="text-xs text-content-muted border border-border rounded px-3 py-2">Hủy</button>
+                                    <button id="finetuneParameterSetSaveBtn" type="button" onclick="saveFinetuneParameterSet()" class="text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2">Lưu bộ tham số</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-content">
@@ -1094,6 +1210,11 @@
         let colabPreparedDataset = null;
         let trainingControlPlaneWorkers = [];
         let trainingControlPlaneBatches = [];
+        let finetuneModels = [];
+        let finetuneConfig = null;
+        let finetuneParameterSets = [];
+        let finetuneSelectedParameterSetIds = new Set();
+        let finetuneParameterSetSelectionInitialized = false;
         let trainingControlPlaneRefreshTimer = null;
         let trainingControlPlaneLoading = false;
 
@@ -1667,6 +1788,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     option.textContent = "Chưa có ToolIb project.";
                     selector.appendChild(option);
                 }
+                await loadFinetuneOptions(projects);
             } catch (error) {
                 showColabRemoteError(`Không tải được project cho batch: ${error.message}`);
             }
@@ -1681,10 +1803,555 @@ print("Initialized YOLO-NAS Training Configuration")
             );
         }
 
+        async function loadFinetuneOptions(projects = null) {
+            const [config, models, availableProjects] = await Promise.all([
+                localTrainingApiFetch("/api/finetune/config"),
+                localTrainingApiFetch("/api/models"),
+                projects ? Promise.resolve(projects) : localTrainingApiFetch("/api/projects")
+            ]);
+            finetuneConfig = config;
+            finetuneModels = models;
+            finetuneParameterSets = config.parameter_sets || [];
+            const activeParameterSets = finetuneParameterSets.filter(
+                parameterSet => parameterSet.is_active
+            );
+            if (!finetuneParameterSetSelectionInitialized) {
+                finetuneSelectedParameterSetIds = new Set(
+                    activeParameterSets.slice(0, 2).map(parameterSet => parameterSet.id)
+                );
+                finetuneParameterSetSelectionInitialized = true;
+            } else {
+                const activeIds = new Set(
+                    activeParameterSets.map(parameterSet => parameterSet.id)
+                );
+                finetuneSelectedParameterSetIds = new Set(
+                    [...finetuneSelectedParameterSetIds].filter(id => activeIds.has(id))
+                );
+            }
+            const featureStatus = document.getElementById("finetuneFeatureStatus");
+            const panel = document.getElementById("finetunePhase6Panel");
+            featureStatus.textContent = config.enabled
+                ? `${config.version} · enabled`
+                : "disabled";
+            featureStatus.className = config.enabled
+                ? "text-[10px] text-emerald-300"
+                : "text-[10px] text-rose-300";
+            panel.querySelectorAll("input, select, button").forEach(control => {
+                control.disabled = !config.enabled;
+            });
+
+            const parentSelector = document.getElementById("finetuneParentModel");
+            const previousParent = parentSelector.value;
+            parentSelector.innerHTML = "";
+            const trainableParents = models.filter(model => (
+                model.model_type === "detection"
+                && (model.artifacts || []).some(
+                    artifact => ["parent_pt", "best_pt"].includes(artifact.kind)
+                )
+            ));
+            if (!trainableParents.length) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Chưa có parent .pt đã xác thực";
+                parentSelector.appendChild(option);
+            } else {
+                for (const model of trainableParents) {
+                    const option = document.createElement("option");
+                    option.value = model.id;
+                    option.textContent = (
+                        `${model.name} · ${model.finetune_status} · `
+                        + `${model.class_names?.length || 0} classes`
+                    );
+                    parentSelector.appendChild(option);
+                }
+                if (trainableParents.some(model => String(model.id) === previousParent)) {
+                    parentSelector.value = previousParent;
+                }
+            }
+
+            const projectSelector = document.getElementById("finetuneProject");
+            const previousProject = projectSelector.value;
+            projectSelector.innerHTML = "";
+            for (const project of availableProjects) {
+                const option = document.createElement("option");
+                option.value = project.id;
+                option.textContent = `${project.name} (#${project.id})`;
+                projectSelector.appendChild(option);
+            }
+            if (!availableProjects.length) {
+                const option = document.createElement("option");
+                option.value = "";
+                option.textContent = "Chưa có ToolIb project";
+                projectSelector.appendChild(option);
+            } else if (availableProjects.some(project => String(project.id) === previousProject)) {
+                projectSelector.value = previousProject;
+            }
+            renderFinetuneParameterSets();
+        }
+
+        function finetuneParameterSummary(parameterSet) {
+            const parameters = parameterSet.parameters || {};
+            return (
+                `epochs ${parameters.epochs} · batch ${parameters.batch} · `
+                + `imgsz ${parameters.imgsz} · lr0 ${parameters.lr0} · `
+                + `freeze ${parameters.freeze}`
+            );
+        }
+
+        function finetuneParameterAction(label, className, handler) {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = `text-[10px] border rounded px-2 py-1 ${className}`;
+            button.textContent = label;
+            button.addEventListener("click", handler);
+            return button;
+        }
+
+        function renderFinetuneParameterSets() {
+            const activeList = document.getElementById("finetuneParameterSetList");
+            const archivedList = document.getElementById("finetuneArchivedParameterSetList");
+            const archivedSection = document.getElementById("finetuneArchivedParameterSetSection");
+            const summary = document.getElementById("finetuneParameterSetSelectionSummary");
+            const createButton = document.getElementById("finetuneExperimentCreateBtn");
+            activeList.innerHTML = "";
+            archivedList.innerHTML = "";
+
+            const activeParameterSets = finetuneParameterSets.filter(
+                parameterSet => parameterSet.is_active
+            );
+            const archivedParameterSets = finetuneParameterSets.filter(
+                parameterSet => !parameterSet.is_active
+            );
+
+            if (!activeParameterSets.length) {
+                const empty = document.createElement("div");
+                empty.className = "text-[10px] text-amber-300 border border-amber-900 rounded p-2";
+                empty.textContent = "Chưa có bộ tham số active. Hãy tạo hoặc khôi phục một bộ.";
+                activeList.appendChild(empty);
+            }
+
+            for (const parameterSet of activeParameterSets) {
+                const card = document.createElement("div");
+                card.className = "border border-border rounded p-2 space-y-1 bg-panel";
+
+                const header = document.createElement("div");
+                header.className = "flex items-start justify-between gap-2";
+                const selector = document.createElement("label");
+                selector.className = "flex items-start gap-2 cursor-pointer min-w-0";
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.value = String(parameterSet.id);
+                checkbox.checked = finetuneSelectedParameterSetIds.has(parameterSet.id);
+                checkbox.addEventListener("change", () => {
+                    if (checkbox.checked) {
+                        finetuneSelectedParameterSetIds.add(parameterSet.id);
+                    } else {
+                        finetuneSelectedParameterSetIds.delete(parameterSet.id);
+                    }
+                    renderFinetuneParameterSets();
+                });
+                const title = document.createElement("span");
+                title.className = "text-[11px] text-content font-semibold break-words";
+                title.textContent = `${parameterSet.name} · v${parameterSet.version}`;
+                selector.append(checkbox, title);
+                header.appendChild(selector);
+
+                const badges = document.createElement("span");
+                badges.className = "text-[9px] text-content-muted whitespace-nowrap";
+                badges.textContent = parameterSet.is_system
+                    ? `system · used ${parameterSet.usage_count}`
+                    : `custom · used ${parameterSet.usage_count}`;
+                header.appendChild(badges);
+                card.appendChild(header);
+
+                const details = document.createElement("div");
+                details.className = "text-[10px] text-cyan-200 font-mono break-words";
+                details.textContent = finetuneParameterSummary(parameterSet);
+                card.appendChild(details);
+                if (parameterSet.description) {
+                    const description = document.createElement("div");
+                    description.className = "text-[10px] text-content-muted";
+                    description.textContent = parameterSet.description;
+                    card.appendChild(description);
+                }
+
+                const actions = document.createElement("div");
+                actions.className = "flex flex-wrap gap-1 pt-1";
+                actions.appendChild(finetuneParameterAction(
+                    "Sửa",
+                    "text-sky-300 border-sky-800",
+                    () => openFinetuneParameterSetEditor(parameterSet.id)
+                ));
+                actions.appendChild(finetuneParameterAction(
+                    "Nhân bản",
+                    "text-violet-300 border-violet-800",
+                    () => cloneFinetuneParameterSet(parameterSet.id)
+                ));
+                actions.appendChild(finetuneParameterAction(
+                    "Lưu trữ",
+                    "text-amber-300 border-amber-800",
+                    () => archiveFinetuneParameterSet(parameterSet.id)
+                ));
+                card.appendChild(actions);
+                activeList.appendChild(card);
+            }
+
+            for (const parameterSet of archivedParameterSets) {
+                const card = document.createElement("div");
+                card.className = "border border-border rounded p-2 bg-surface";
+                const title = document.createElement("div");
+                title.className = "text-[10px] text-content";
+                title.textContent = `${parameterSet.name} · v${parameterSet.version} · used ${parameterSet.usage_count}`;
+                card.appendChild(title);
+                const actions = document.createElement("div");
+                actions.className = "flex gap-1 mt-1";
+                actions.appendChild(finetuneParameterAction(
+                    "Khôi phục",
+                    "text-emerald-300 border-emerald-800",
+                    () => restoreFinetuneParameterSet(parameterSet.id)
+                ));
+                if (parameterSet.can_delete) {
+                    actions.appendChild(finetuneParameterAction(
+                        "Xóa",
+                        "text-rose-300 border-rose-800",
+                        () => deleteFinetuneParameterSet(parameterSet.id)
+                    ));
+                }
+                card.appendChild(actions);
+                archivedList.appendChild(card);
+            }
+            archivedSection.classList.toggle("hidden", !archivedParameterSets.length);
+
+            const selectedCount = finetuneSelectedParameterSetIds.size;
+            summary.textContent = selectedCount
+                ? `Đã chọn ${selectedCount} bộ · sẽ tạo ${selectedCount} training jobs`
+                : "Chưa chọn bộ tham số nào";
+            summary.className = selectedCount
+                ? "text-[10px] text-emerald-300"
+                : "text-[10px] text-amber-300";
+            createButton.disabled = !finetuneConfig?.enabled || selectedCount === 0;
+        }
+
+        function finetuneEditorFieldMap() {
+            return {
+                epochs: "finetuneParamEpochs",
+                batch: "finetuneParamBatch",
+                imgsz: "finetuneParamImgsz",
+                lr0: "finetuneParamLr0",
+                lrf: "finetuneParamLrf",
+                freeze: "finetuneParamFreeze",
+                mosaic: "finetuneParamMosaic",
+                scale: "finetuneParamScale",
+                close_mosaic: "finetuneParamCloseMosaic",
+                degrees: "finetuneParamDegrees",
+                translate: "finetuneParamTranslate",
+                mixup: "finetuneParamMixup",
+                copy_paste: "finetuneParamCopyPaste",
+                seed: "finetuneParamSeed"
+            };
+        }
+
+        function openFinetuneParameterSetEditor(parameterSetId = null) {
+            const parameterSet = finetuneParameterSets.find(
+                item => item.id === Number(parameterSetId)
+            );
+            const defaults = finetuneConfig?.parameter_defaults || {};
+            const parameters = parameterSet?.parameters || defaults;
+            document.getElementById("finetuneParameterSetEditorId").value = parameterSet?.id || "";
+            document.getElementById("finetuneParameterSetModalTitle").textContent = parameterSet
+                ? `Sửa bộ tham số · v${parameterSet.version}`
+                : "Thêm bộ tham số";
+            document.getElementById("finetuneParameterSetName").value = parameterSet?.name || "";
+            document.getElementById("finetuneParameterSetDescription").value = parameterSet?.description || "";
+            for (const [parameterName, fieldId] of Object.entries(finetuneEditorFieldMap())) {
+                document.getElementById(fieldId).value = parameters[parameterName];
+            }
+            document.getElementById("finetuneParameterSetModal").classList.remove("hidden");
+        }
+
+        function closeFinetuneParameterSetEditor() {
+            document.getElementById("finetuneParameterSetModal").classList.add("hidden");
+        }
+
+        function readFinetuneParameterSetEditor() {
+            const parameters = {};
+            for (const [parameterName, fieldId] of Object.entries(finetuneEditorFieldMap())) {
+                const value = Number(document.getElementById(fieldId).value);
+                if (!Number.isFinite(value)) {
+                    throw new Error(`${parameterName} phải là số hợp lệ.`);
+                }
+                parameters[parameterName] = value;
+            }
+            const name = document.getElementById("finetuneParameterSetName").value.trim();
+            if (!name) {
+                throw new Error("Tên bộ tham số không được để trống.");
+            }
+            return {
+                name,
+                description: document.getElementById("finetuneParameterSetDescription").value.trim(),
+                parameters
+            };
+        }
+
+        async function saveFinetuneParameterSet() {
+            const button = document.getElementById("finetuneParameterSetSaveBtn");
+            button.disabled = true;
+            try {
+                const payload = readFinetuneParameterSetEditor();
+                const parameterSetId = Number(
+                    document.getElementById("finetuneParameterSetEditorId").value
+                );
+                const saved = await localTrainingApiFetch(
+                    parameterSetId
+                        ? `/api/finetune-parameter-sets/${parameterSetId}`
+                        : "/api/finetune-parameter-sets",
+                    {
+                        method: parameterSetId ? "PATCH" : "POST",
+                        body: payload
+                    }
+                );
+                finetuneSelectedParameterSetIds.add(saved.id);
+                closeFinetuneParameterSetEditor();
+                await loadFinetuneOptions();
+                showToast(`Đã lưu bộ tham số ${saved.name} · v${saved.version}.`);
+            } catch (error) {
+                showColabRemoteError(`Lưu bộ tham số lỗi: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function cloneFinetuneParameterSet(parameterSetId) {
+            try {
+                const clone = await localTrainingApiFetch(
+                    `/api/finetune-parameter-sets/${parameterSetId}/clone`,
+                    { method: "POST", body: {} }
+                );
+                finetuneSelectedParameterSetIds.add(clone.id);
+                await loadFinetuneOptions();
+                openFinetuneParameterSetEditor(clone.id);
+                showToast(`Đã nhân bản thành ${clone.name}.`);
+            } catch (error) {
+                showColabRemoteError(`Nhân bản bộ tham số lỗi: ${error.message}`);
+            }
+        }
+
+        async function archiveFinetuneParameterSet(parameterSetId) {
+            const parameterSet = finetuneParameterSets.find(item => item.id === parameterSetId);
+            if (!window.confirm(`Lưu trữ bộ tham số “${parameterSet?.name || parameterSetId}”?`)) {
+                return;
+            }
+            try {
+                await localTrainingApiFetch(
+                    `/api/finetune-parameter-sets/${parameterSetId}/archive`,
+                    { method: "POST", body: {} }
+                );
+                finetuneSelectedParameterSetIds.delete(parameterSetId);
+                await loadFinetuneOptions();
+            } catch (error) {
+                showColabRemoteError(`Lưu trữ bộ tham số lỗi: ${error.message}`);
+            }
+        }
+
+        async function restoreFinetuneParameterSet(parameterSetId) {
+            try {
+                const restored = await localTrainingApiFetch(
+                    `/api/finetune-parameter-sets/${parameterSetId}/restore`,
+                    { method: "POST", body: {} }
+                );
+                finetuneSelectedParameterSetIds.add(restored.id);
+                await loadFinetuneOptions();
+            } catch (error) {
+                showColabRemoteError(`Khôi phục bộ tham số lỗi: ${error.message}`);
+            }
+        }
+
+        async function deleteFinetuneParameterSet(parameterSetId) {
+            const parameterSet = finetuneParameterSets.find(item => item.id === parameterSetId);
+            if (!window.confirm(`Xóa vĩnh viễn bộ tham số “${parameterSet?.name || parameterSetId}”?`)) {
+                return;
+            }
+            try {
+                await localTrainingApiFetch(
+                    `/api/finetune-parameter-sets/${parameterSetId}`,
+                    { method: "DELETE" }
+                );
+                finetuneSelectedParameterSetIds.delete(parameterSetId);
+                await loadFinetuneOptions();
+            } catch (error) {
+                showColabRemoteError(`Xóa bộ tham số lỗi: ${error.message}`);
+            }
+        }
+
+        async function uploadFinetuneParentModel() {
+            const button = document.getElementById("finetuneParentUploadBtn");
+            const statusBox = document.getElementById("finetuneParentUploadStatus");
+            const name = document.getElementById("finetuneParentName").value.trim();
+            const fileInput = document.getElementById("finetuneParentFile");
+            if (!name || fileInput.files.length !== 1) {
+                showColabRemoteError("Nhập tên và chọn đúng một file parent .pt.");
+                return;
+            }
+            if (!fileInput.files[0].name.toLowerCase().endsWith(".pt")) {
+                showColabRemoteError("Parent model phải là file .pt.");
+                return;
+            }
+
+            const body = new FormData();
+            body.append("name", name);
+            body.append("file", fileInput.files[0]);
+            button.disabled = true;
+            statusBox.textContent = "Đang upload checkpoint vào ToolIb...";
+            try {
+                const response = await fetch("/api/finetune-models", {
+                    method: "POST",
+                    body
+                });
+                const imported = await response.json();
+                if (!response.ok && !imported.model_id) {
+                    throw new Error(imported.error || `HTTP ${response.status}`);
+                }
+                const parentModelId = imported.id || imported.model_id;
+                statusBox.textContent = "Đã lưu checkpoint. Đang gửi sang worker để xác thực...";
+                const validated = await validateFinetuneParentModel(parentModelId);
+                statusBox.textContent = (
+                    `Ready · ${validated.class_names.length} classes · `
+                    + validated.artifacts[0].sha256.slice(0, 12)
+                );
+                document.getElementById("finetuneParentName").value = "";
+                fileInput.value = "";
+                await loadFinetuneOptions();
+                document.getElementById("finetuneParentModel").value = String(validated.id);
+                showToast(`Parent ${validated.name} đã sẵn sàng để fine-tune.`);
+            } catch (error) {
+                statusBox.textContent = `Chưa xác thực: ${error.message}`;
+                showColabRemoteError(`Import parent lỗi: ${error.message}`);
+                await loadFinetuneOptions().catch(() => {});
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function validateFinetuneParentModel(modelId) {
+            const validated = await localTrainingApiFetch(
+                `/api/finetune-models/${modelId}/validate`,
+                { method: "POST", body: {} }
+            );
+            await loadFinetuneOptions();
+            document.getElementById("finetuneParentModel").value = String(modelId);
+            return validated;
+        }
+
+        async function validateSelectedFinetuneParent() {
+            const modelId = Number(
+                document.getElementById("finetuneParentModel").value
+            );
+            if (!modelId) {
+                showColabRemoteError("Chọn một parent model để xác thực.");
+                return;
+            }
+            const button = document.getElementById("finetuneParentValidateBtn");
+            const statusBox = document.getElementById("finetuneParentUploadStatus");
+            button.disabled = true;
+            statusBox.textContent = "Đang xác thực parent bằng Phase 6 worker...";
+            try {
+                const validated = await validateFinetuneParentModel(modelId);
+                statusBox.textContent = (
+                    `Ready · ${validated.class_names.length} classes · `
+                    + validated.artifacts[0].sha256.slice(0, 12)
+                );
+                showToast(`Parent ${validated.name} đã sẵn sàng.`);
+            } catch (error) {
+                statusBox.textContent = `Chưa xác thực: ${error.message}`;
+                showColabRemoteError(`Validate parent lỗi: ${error.message}`);
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function createFinetuneExperiment() {
+            const parentModelId = Number(
+                document.getElementById("finetuneParentModel").value
+            );
+            const projectId = Number(
+                document.getElementById("finetuneProject").value
+            );
+            if (!parentModelId || !projectId) {
+                showColabRemoteError("Chọn parent model đã xác thực và Project dataset.");
+                return;
+            }
+            const selectedParent = finetuneModels.find(
+                model => model.id === parentModelId
+            );
+            if (!selectedParent?.fine_tune_eligible) {
+                showColabRemoteError(
+                    "Parent chưa Ready. Bấm “Xác thực lại parent đang chọn” trước."
+                );
+                return;
+            }
+            const parameterSetIds = [...finetuneSelectedParameterSetIds];
+            if (!parameterSetIds.length) {
+                showColabRemoteError("Chọn ít nhất một bộ tham số trong thư viện.");
+                return;
+            }
+
+            const splits = {
+                train: Number(document.getElementById("colabDatasetTrainSplit").value),
+                val: Number(document.getElementById("colabDatasetValSplit").value),
+                test: Number(document.getElementById("colabDatasetTestSplit").value)
+            };
+            if (
+                !Number.isInteger(splits.train)
+                || !Number.isInteger(splits.val)
+                || !Number.isInteger(splits.test)
+                || splits.train <= 0
+                || splits.val <= 0
+                || splits.train + splits.val + splits.test !== 100
+            ) {
+                showColabRemoteError("Train/Val phải > 0 và tổng split phải bằng 100.");
+                return;
+            }
+
+            const button = document.getElementById("finetuneExperimentCreateBtn");
+            button.disabled = true;
+            try {
+                const experiment = await localTrainingApiFetch(
+                    "/api/finetune-experiments",
+                    {
+                        method: "POST",
+                        body: {
+                            name: document.getElementById("finetuneExperimentName").value.trim(),
+                            parent_model_id: parentModelId,
+                            project_id: projectId,
+                            parameter_set_ids: parameterSetIds,
+                            splits,
+                            exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                            include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked,
+                            max_attempts: Number(
+                                document.getElementById("trainingBatchMaxAttempts").value || 3
+                            ),
+                            priority: Number(
+                                document.getElementById("trainingBatchPriority").value || 0
+                            )
+                        }
+                    }
+                );
+                showToast(
+                    `Đã tạo một snapshot và queue ${experiment.total_jobs} bộ tham số.`
+                );
+                await dispatchTrainingControlPlane(true);
+            } catch (error) {
+                showColabRemoteError(`Tạo fine-tune experiment lỗi: ${error.message}`);
+            } finally {
+                button.disabled = false;
+                await loadTrainingControlPlane(true);
+            }
+        }
+
         function trainingStatusClasses(status) {
             if (status === "online" || status === "succeeded") return "text-emerald-300";
             if (["failed", "offline", "worker_lost"].includes(status)) return "text-rose-300";
-            if (["running", "remote_running", "uploading_dataset", "submitting"].includes(status)) return "text-sky-300";
+            if (["running", "remote_running", "uploading_parent_model", "uploading_dataset", "submitting"].includes(status)) return "text-sky-300";
             return "text-amber-300";
         }
 
@@ -1745,9 +2412,14 @@ print("Initialized YOLO-NAS Training Configuration")
 
                 const detail = document.createElement("div");
                 detail.className = "text-content-muted break-all";
+                const supportsFinetune = (
+                    worker.capabilities?.model_artifact_upload
+                    && (worker.capabilities?.training_modes || []).includes("finetune")
+                );
                 detail.textContent = (
                     `${worker.provider} · GPU ${worker.gpu_name || (worker.gpu_available ? "available" : "unavailable")} · `
-                    + `capacity ${worker.active_leases}/${worker.capacity} · ${worker.api_url}`
+                    + `capacity ${worker.active_leases}/${worker.capacity} · `
+                    + `Phase 6 ${supportsFinetune ? "ready" : "not supported"} · ${worker.api_url}`
                 );
 
                 const actions = document.createElement("div");
@@ -1960,7 +2632,10 @@ print("Initialized YOLO-NAS Training Configuration")
                 header.className = "flex items-center justify-between gap-2";
                 const title = document.createElement("strong");
                 title.className = "text-content";
-                title.textContent = `${batch.name} · ${batch.batch_id.slice(0, 8)}`;
+                const experimentLabel = batch.experiment_type === "finetune_sweep"
+                    ? "Fine-tune sweep"
+                    : "Fresh batch";
+                title.textContent = `${experimentLabel} · ${batch.name} · ${batch.batch_id.slice(0, 8)}`;
                 const status = document.createElement("span");
                 status.className = `${trainingStatusClasses(batch.status)} font-mono`;
                 status.textContent = batch.status;
@@ -1971,22 +2646,62 @@ print("Initialized YOLO-NAS Training Configuration")
                 summary.textContent = (
                     `${batch.succeeded_jobs}/${batch.total_jobs} succeeded · `
                     + `${batch.failed_jobs} failed · ${batch.cancelled_jobs} cancelled`
+                    + (
+                        batch.training_dataset_id
+                            ? ` · shared dataset #${batch.training_dataset_id}`
+                            : ""
+                    )
                 );
 
                 const tasks = document.createElement("div");
                 tasks.className = "space-y-1";
-                for (const task of batch.tasks || []) {
+                const rankingMetric = batch.ranking_metric || "metrics/mAP50-95(B)";
+                const displayedTasks = [...(batch.tasks || [])];
+                if (batch.experiment_type === "finetune_sweep") {
+                    displayedTasks.sort((left, right) => {
+                        const leftScore = Number(left.metrics?.[rankingMetric]);
+                        const rightScore = Number(right.metrics?.[rankingMetric]);
+                        const normalizedLeft = Number.isFinite(leftScore) ? leftScore : -Infinity;
+                        const normalizedRight = Number.isFinite(rightScore) ? rightScore : -Infinity;
+                        return normalizedRight - normalizedLeft;
+                    });
+                }
+                for (const task of displayedTasks) {
                     const row = document.createElement("div");
                     row.className = "flex items-start justify-between gap-2 border-t border-border/70 pt-1.5";
                     const info = document.createElement("div");
                     info.className = "min-w-0";
                     const taskStatus = document.createElement("div");
                     taskStatus.className = `${trainingStatusClasses(task.status)} font-mono`;
-                    taskStatus.textContent = `Project #${task.project_id} · ${task.status} · attempt ${task.attempt_count}/${task.max_attempts}`;
+                    taskStatus.textContent = (
+                        `${task.candidate_name || `Project #${task.project_id}`} · `
+                        + `${task.status} · attempt ${task.attempt_count}/${task.max_attempts}`
+                    );
                     const message = document.createElement("div");
                     message.className = "text-content-muted break-words";
                     message.textContent = task.error || task.message || task.stage;
                     info.append(taskStatus, message);
+
+                    if (task.config_hash) {
+                        const configDetail = document.createElement("div");
+                        configDetail.className = "text-content-muted break-words";
+                        const requestConfig = task.request || {};
+                        configDetail.textContent = (
+                            `Config ${task.config_hash.slice(0, 10)} · `
+                            + `lr0=${requestConfig.lr0 ?? "-"} · freeze=${requestConfig.freeze ?? "-"} · `
+                            + `imgsz=${requestConfig.imgsz}`
+                        );
+                        info.appendChild(configDetail);
+                    }
+
+                    if (task.metrics && task.metrics[rankingMetric] !== undefined) {
+                        const metricDetail = document.createElement("div");
+                        metricDetail.className = "text-emerald-300 font-mono";
+                        metricDetail.textContent = (
+                            `${rankingMetric}: ${Number(task.metrics[rankingMetric]).toFixed(4)}`
+                        );
+                        info.appendChild(metricDetail);
+                    }
 
                     const latestAttempt = (task.attempts || []).at(-1);
                     if (latestAttempt) {

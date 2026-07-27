@@ -8,6 +8,8 @@ from models import (
     View,
     Image,
     AIModel,
+    FineTuneParameterSet,
+    ModelArtifact,
     Tag,
     TrainingBatch,
     TrainingDataset,
@@ -46,18 +48,29 @@ from inference import YOLOInference, ClassificationInference
 from training_control_plane import (
     ACTIVE_TASK_STATUSES,
     ColabHttpWorkerAdapter,
+    WorkerApiError,
     WORKER_PROVIDERS,
     adopt_remote_job,
     adapter_for_worker,
     cancel_batch,
+    clone_finetune_parameter_set,
+    create_finetune_parameter_set,
+    create_finetune_experiment,
     create_training_batch,
+    delete_finetune_parameter_set,
     dispatch_once,
     encrypt_worker_token,
+    finetune_presets_payload,
     normalize_worker_api_url,
     probe_worker,
     retry_task,
     scheduler_status,
+    serialize_finetune_parameter_set,
     serialize_worker,
+    set_finetune_parameter_set_active,
+    update_finetune_parameter_set,
+    validate_parent_model,
+    worker_supports_finetune,
 )
 
 # Initialize Inference Engines
@@ -3313,6 +3326,310 @@ def list_training_batches():
     return jsonify([batch.to_dict() for batch in batches])
 
 
+@api_bp.route('/finetune/config', methods=['GET'])
+def get_finetune_config():
+    payload = finetune_presets_payload(include_archived=True)
+    payload['enabled'] = bool(
+        current_app.config.get('TOOLIB_FINETUNE_ENABLED', False)
+    )
+    return jsonify(payload)
+
+
+def _finetune_parameter_set_or_none(parameter_set_id):
+    return db.session.get(FineTuneParameterSet, parameter_set_id)
+
+
+@api_bp.route('/finetune-parameter-sets', methods=['GET'])
+def list_finetune_parameter_sets_route():
+    include_archived = str(
+        request.args.get('include_archived') or ''
+    ).strip().lower() in {'1', 'true', 'yes', 'on'}
+    payload = finetune_presets_payload(
+        include_archived=include_archived
+    )
+    return jsonify(payload['parameter_sets'])
+
+
+@api_bp.route('/finetune-parameter-sets', methods=['POST'])
+def create_finetune_parameter_set_route():
+    try:
+        parameter_set = create_finetune_parameter_set(
+            request.get_json(silent=True) or {}
+        )
+        return jsonify(
+            serialize_finetune_parameter_set(parameter_set)
+        ), 201
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+
+
+@api_bp.route(
+    '/finetune-parameter-sets/<int:parameter_set_id>',
+    methods=['PATCH'],
+)
+def update_finetune_parameter_set_route(parameter_set_id):
+    parameter_set = _finetune_parameter_set_or_none(parameter_set_id)
+    if parameter_set is None:
+        return jsonify({'error': 'Fine-tune parameter set not found.'}), 404
+    try:
+        parameter_set = update_finetune_parameter_set(
+            parameter_set,
+            request.get_json(silent=True) or {},
+        )
+        return jsonify(serialize_finetune_parameter_set(parameter_set))
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+
+
+@api_bp.route(
+    '/finetune-parameter-sets/<int:parameter_set_id>/clone',
+    methods=['POST'],
+)
+def clone_finetune_parameter_set_route(parameter_set_id):
+    parameter_set = _finetune_parameter_set_or_none(parameter_set_id)
+    if parameter_set is None:
+        return jsonify({'error': 'Fine-tune parameter set not found.'}), 404
+    try:
+        clone = clone_finetune_parameter_set(
+            parameter_set,
+            request.get_json(silent=True) or {},
+        )
+        return jsonify(serialize_finetune_parameter_set(clone)), 201
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+
+
+@api_bp.route(
+    '/finetune-parameter-sets/<int:parameter_set_id>/archive',
+    methods=['POST'],
+)
+def archive_finetune_parameter_set_route(parameter_set_id):
+    parameter_set = _finetune_parameter_set_or_none(parameter_set_id)
+    if parameter_set is None:
+        return jsonify({'error': 'Fine-tune parameter set not found.'}), 404
+    parameter_set = set_finetune_parameter_set_active(
+        parameter_set,
+        False,
+    )
+    return jsonify(serialize_finetune_parameter_set(parameter_set))
+
+
+@api_bp.route(
+    '/finetune-parameter-sets/<int:parameter_set_id>/restore',
+    methods=['POST'],
+)
+def restore_finetune_parameter_set_route(parameter_set_id):
+    parameter_set = _finetune_parameter_set_or_none(parameter_set_id)
+    if parameter_set is None:
+        return jsonify({'error': 'Fine-tune parameter set not found.'}), 404
+    try:
+        parameter_set = set_finetune_parameter_set_active(
+            parameter_set,
+            True,
+        )
+        return jsonify(serialize_finetune_parameter_set(parameter_set))
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+
+
+@api_bp.route(
+    '/finetune-parameter-sets/<int:parameter_set_id>',
+    methods=['DELETE'],
+)
+def delete_finetune_parameter_set_route(parameter_set_id):
+    parameter_set = _finetune_parameter_set_or_none(parameter_set_id)
+    if parameter_set is None:
+        return jsonify({'error': 'Fine-tune parameter set not found.'}), 404
+    try:
+        delete_finetune_parameter_set(parameter_set)
+        return jsonify({'message': 'Fine-tune parameter set deleted.'})
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 409
+
+
+@api_bp.route('/finetune-models', methods=['POST'])
+def add_finetune_parent_model():
+    if not current_app.config.get('TOOLIB_FINETUNE_ENABLED', False):
+        return jsonify({'error': 'Fine-tune experiments are disabled.'}), 404
+
+    from werkzeug.utils import secure_filename
+
+    name = str(request.form.get('name') or '').strip()
+    description = str(request.form.get('description') or '').strip()
+    uploaded = request.files.get('file')
+    if not name:
+        return jsonify({'error': 'Tên parent model không được để trống.'}), 400
+    if uploaded is None or not uploaded.filename:
+        return jsonify({'error': 'Vui lòng chọn file .pt.'}), 400
+    if Path(uploaded.filename).suffix.lower() != '.pt':
+        return jsonify({'error': 'Chỉ chấp nhận checkpoint .pt.'}), 400
+
+    storage_root = Path(
+        current_app.config.get(
+            'MODEL_ARTIFACT_ROOT',
+            os.path.join(BASE_DIR, 'model_artifacts'),
+        )
+    ).resolve()
+    storage_root.mkdir(parents=True, exist_ok=True)
+    temporary_path = (
+        storage_root / f'.parent-{uuid.uuid4().hex}.upload'
+    ).resolve()
+    maximum_bytes = int(
+        current_app.config.get(
+            'MAX_PARENT_MODEL_BYTES',
+            2 * 1024 * 1024 * 1024,
+        )
+    )
+    digest = hashlib.sha256()
+    size_bytes = 0
+    try:
+        with temporary_path.open('wb') as output:
+            while True:
+                chunk = uploaded.stream.read(1024 * 1024)
+                if not chunk:
+                    break
+                size_bytes += len(chunk)
+                if size_bytes > maximum_bytes:
+                    return jsonify({
+                        'error': 'Parent checkpoint exceeds the configured size limit.'
+                    }), 413
+                digest.update(chunk)
+                output.write(chunk)
+        if size_bytes <= 0:
+            return jsonify({'error': 'Parent checkpoint is empty.'}), 400
+
+        checksum = digest.hexdigest()
+        duplicate = ModelArtifact.query.filter_by(
+            kind='parent_pt',
+            sha256=checksum,
+        ).first()
+        if duplicate is not None:
+            return jsonify({
+                'error': 'Checkpoint này đã được import.',
+                'model_id': duplicate.model_id,
+            }), 409
+
+        artifact_directory = (storage_root / checksum).resolve()
+        artifact_directory.relative_to(storage_root)
+        artifact_directory.mkdir(parents=True, exist_ok=True)
+        destination = (artifact_directory / 'parent.pt').resolve()
+        destination.relative_to(artifact_directory)
+        temporary_path.replace(destination)
+
+        display_filename = (
+            f'external_{checksum[:12]}_{uuid.uuid4().hex[:6]}.pt'
+        )
+        model = AIModel(
+            name=name[:100],
+            description=description[:500] or None,
+            filename=display_filename,
+            model_type='detection',
+            is_active=False,
+            activation_ready=False,
+            source_kind='external_pt',
+            finetune_status='pending_validation',
+        )
+        db.session.add(model)
+        db.session.flush()
+        artifact = ModelArtifact(
+            artifact_id=str(uuid.uuid4()),
+            model_id=model.id,
+            kind='parent_pt',
+            storage_path=str(destination),
+            sha256=checksum,
+            size_bytes=size_bytes,
+            metadata_json={
+                'original_filename': secure_filename(uploaded.filename),
+                'trust_scope': 'owner_supplied',
+            },
+        )
+        db.session.add(artifact)
+        db.session.commit()
+        return jsonify(model.to_dict()), 201
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Could not import parent checkpoint')
+        return jsonify({'error': f'Could not import parent checkpoint: {exc}'}), 500
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+        uploaded.close()
+
+
+@api_bp.route('/finetune-models/<int:model_id>/validate', methods=['POST'])
+def validate_finetune_parent_model(model_id):
+    if not current_app.config.get('TOOLIB_FINETUNE_ENABLED', False):
+        return jsonify({'error': 'Fine-tune experiments are disabled.'}), 404
+    model = db.session.get(AIModel, model_id)
+    if model is None:
+        return jsonify({'error': 'Parent model not found.'}), 404
+
+    payload = request.get_json(silent=True) or {}
+    worker_id = payload.get('worker_id')
+    worker = None
+    if worker_id is not None:
+        try:
+            worker = db.session.get(TrainingWorker, int(worker_id))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'worker_id must be an integer.'}), 400
+    if worker is None:
+        candidates = TrainingWorker.query.filter_by(
+            enabled=True,
+            status='online',
+        ).order_by(TrainingWorker.id.asc()).all()
+        worker = next(
+            (
+                candidate
+                for candidate in candidates
+                if worker_supports_finetune(candidate)
+            ),
+            None,
+        )
+    if worker is None:
+        return jsonify({
+            'error': (
+                'Không có Phase 6 worker online. Chạy notebook mới, '
+                'đăng ký/probe worker rồi validate lại.'
+            )
+        }), 409
+
+    try:
+        validate_parent_model(model, worker)
+        return jsonify(model.to_dict())
+    except (ValueError, WorkerApiError) as exc:
+        db.session.rollback()
+        model = db.session.get(AIModel, model_id)
+        if model is not None:
+            model.finetune_status = 'pending_validation'
+            model.validation_error = str(exc)[:8000]
+            db.session.commit()
+        return jsonify({'error': str(exc)}), 502
+
+
+@api_bp.route('/finetune-experiments', methods=['POST'])
+def create_finetune_experiment_route():
+    payload = request.get_json(silent=True) or {}
+    try:
+        batch, tasks = create_finetune_experiment(payload)
+        response = batch.to_dict()
+        response['tasks'] = [task.to_dict() for task in tasks]
+        return jsonify(response), 201
+    except (TypeError, ValueError) as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Could not create fine-tune experiment')
+        return jsonify({
+            'error': f'Could not create fine-tune experiment: {exc}'
+        }), 500
+
+
 @api_bp.route('/training-batches', methods=['POST'])
 def create_training_batch_route():
     payload = request.get_json(silent=True) or {}
@@ -3662,6 +3979,14 @@ def delete_model(model_id):
     try:
         was_active = m.is_active
         was_type = m.model_type
+        external_artifact_paths = [
+            artifact.storage_path
+            for artifact in m.artifacts
+            if (
+                m.source_kind == 'external_pt'
+                and artifact.kind == 'parent_pt'
+            )
+        ]
         models_dir = os.path.join(os.getcwd(), 'models')
         model_path = os.path.join(models_dir, m.filename)
         remaining_classification_models = 0
@@ -3682,6 +4007,23 @@ def delete_model(model_id):
 
         db.session.delete(m)
         db.session.commit()
+        artifact_root = Path(
+            current_app.config.get(
+                'MODEL_ARTIFACT_ROOT',
+                os.path.join(BASE_DIR, 'model_artifacts'),
+            )
+        ).resolve()
+        for raw_path in external_artifact_paths:
+            artifact_path = Path(raw_path).resolve()
+            try:
+                artifact_path.relative_to(artifact_root)
+            except ValueError:
+                continue
+            artifact_path.unlink(missing_ok=True)
+            try:
+                artifact_path.parent.rmdir()
+            except OSError:
+                pass
         if was_active:
             if was_type == 'classification':
                 global classifier_engine
@@ -3698,6 +4040,13 @@ def delete_model(model_id):
 def activate_model(model_id):
     m = AIModel.query.get_or_404(model_id)
     try:
+        if not m.filename.lower().endswith('.onnx'):
+            return jsonify({
+                'error': (
+                    'Parent .pt chỉ dùng để fine-tune. '
+                    'Hãy kích hoạt một model ONNX đã export.'
+                )
+            }), 409
         # Deactivate only models of the same type (detection OR classification)
         # This allows YOLO and Classifier to be active simultaneously
         AIModel.query.filter_by(model_type=m.model_type).update({AIModel.is_active: False})

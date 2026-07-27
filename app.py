@@ -71,6 +71,18 @@ def create_app(config_overrides=None):
         'SQLALCHEMY_TRACK_MODIFICATIONS': False,
         'PREFERRED_URL_SCHEME': 'https',
         'FORCE_HTTPS_REDIRECTS': True,
+        'TOOLIB_FINETUNE_ENABLED': (
+            os.environ.get('TOOLIB_FINETUNE_ENABLED', 'true').strip().lower()
+            in {'1', 'true', 'yes', 'on'}
+        ),
+        'MODEL_ARTIFACT_ROOT': os.environ.get(
+            'TOOLIB_MODEL_ARTIFACT_ROOT',
+            os.path.join(os.path.dirname(__file__), 'model_artifacts'),
+        ),
+        'MAX_PARENT_MODEL_BYTES': int(os.environ.get(
+            'TOOLIB_MAX_PARENT_MODEL_BYTES',
+            2 * 1024 * 1024 * 1024,
+        )),
     })
     
     # Increase maximum upload limit to 10GB for large datasets

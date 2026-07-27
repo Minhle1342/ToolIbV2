@@ -14,6 +14,46 @@ RUNTIME_COLUMNS = (
         'activation_ready BOOLEAN NOT NULL DEFAULT TRUE',
     ),
     (
+        'ai_models',
+        'parent_model_id',
+        'parent_model_id INTEGER',
+    ),
+    (
+        'ai_models',
+        'source_project_id',
+        'source_project_id INTEGER',
+    ),
+    (
+        'ai_models',
+        'training_dataset_id',
+        'training_dataset_id INTEGER',
+    ),
+    (
+        'ai_models',
+        'source_kind',
+        "source_kind VARCHAR(40) NOT NULL DEFAULT 'manual_onnx'",
+    ),
+    (
+        'ai_models',
+        'finetune_status',
+        "finetune_status VARCHAR(30) NOT NULL DEFAULT 'unavailable'",
+    ),
+    (
+        'ai_models',
+        'class_names',
+        'class_names JSON',
+    ),
+    (
+        'ai_models',
+        'validation_error',
+        'validation_error TEXT',
+    ),
+    (
+        'ai_models',
+        'validated_at',
+        'validated_at TIMESTAMP',
+    ),
+    (
         'training_jobs',
         'training_dataset_id',
         'training_dataset_id INTEGER',
@@ -24,9 +64,152 @@ RUNTIME_COLUMNS = (
         'dataset_id VARCHAR(36)',
     ),
     (
+        'training_jobs',
+        'training_mode',
+        "training_mode VARCHAR(30) NOT NULL DEFAULT 'fresh'",
+    ),
+    (
+        'training_jobs',
+        'parent_model_id',
+        'parent_model_id INTEGER',
+    ),
+    (
+        'training_jobs',
+        'metrics',
+        'metrics JSON',
+    ),
+    (
+        'training_batches',
+        'experiment_type',
+        "experiment_type VARCHAR(30) NOT NULL DEFAULT 'fresh'",
+    ),
+    (
+        'training_batches',
+        'parent_model_id',
+        'parent_model_id INTEGER',
+    ),
+    (
+        'training_batches',
+        'training_dataset_id',
+        'training_dataset_id INTEGER',
+    ),
+    (
+        'training_batches',
+        'preset_version',
+        'preset_version VARCHAR(50)',
+    ),
+    (
+        'training_batches',
+        'ranking_metric',
+        "ranking_metric VARCHAR(80) DEFAULT 'metrics/mAP50-95(B)'",
+    ),
+    (
+        'training_queue_tasks',
+        'parent_model_id',
+        'parent_model_id INTEGER',
+    ),
+    (
+        'training_queue_tasks',
+        'parameter_set_id',
+        'parameter_set_id INTEGER',
+    ),
+    (
+        'training_queue_tasks',
+        'parameter_set_snapshot',
+        'parameter_set_snapshot JSON',
+    ),
+    (
+        'training_queue_tasks',
+        'candidate_name',
+        'candidate_name VARCHAR(100)',
+    ),
+    (
+        'training_queue_tasks',
+        'config_hash',
+        'config_hash VARCHAR(64)',
+    ),
+    (
+        'training_queue_tasks',
+        'metrics',
+        'metrics JSON',
+    ),
+    (
         'training_workers',
         'remote_active_job_id',
         'remote_active_job_id VARCHAR(36)',
+    ),
+)
+
+RUNTIME_INDEXES = (
+    (
+        'ai_models',
+        'ix_ai_models_parent_model_id',
+        'parent_model_id',
+    ),
+    (
+        'ai_models',
+        'ix_ai_models_source_project_id',
+        'source_project_id',
+    ),
+    (
+        'ai_models',
+        'ix_ai_models_training_dataset_id',
+        'training_dataset_id',
+    ),
+    (
+        'ai_models',
+        'ix_ai_models_source_kind',
+        'source_kind',
+    ),
+    (
+        'ai_models',
+        'ix_ai_models_finetune_status',
+        'finetune_status',
+    ),
+    (
+        'training_jobs',
+        'ix_training_jobs_training_mode',
+        'training_mode',
+    ),
+    (
+        'training_jobs',
+        'ix_training_jobs_parent_model_id',
+        'parent_model_id',
+    ),
+    (
+        'training_batches',
+        'ix_training_batches_experiment_type',
+        'experiment_type',
+    ),
+    (
+        'training_batches',
+        'ix_training_batches_parent_model_id',
+        'parent_model_id',
+    ),
+    (
+        'training_batches',
+        'ix_training_batches_training_dataset_id',
+        'training_dataset_id',
+    ),
+    (
+        'training_queue_tasks',
+        'ix_training_queue_tasks_parent_model_id',
+        'parent_model_id',
+    ),
+    (
+        'training_queue_tasks',
+        'ix_training_queue_tasks_parameter_set_id',
+        'parameter_set_id',
+    ),
+    (
+        'training_queue_tasks',
+        'ix_training_queue_tasks_config_hash',
+        'config_hash',
+    ),
+    (
+        'training_workers',
+        'ix_training_workers_remote_active_job_id',
+        'remote_active_job_id',
     ),
 )
 
@@ -98,15 +281,13 @@ def ensure_runtime_columns(engine):
             if column_name not in _column_names(engine, table_name):
                 raise
 
-    if (
-        'remote_active_job_id'
-        in _column_names(engine, 'training_workers')
-    ):
+    for table_name, index_name, column_name in RUNTIME_INDEXES:
+        if column_name not in _column_names(engine, table_name):
+            continue
         with engine.begin() as connection:
             connection.execute(text(
-                'CREATE INDEX IF NOT EXISTS '
-                'ix_training_workers_remote_active_job_id '
-                'ON training_workers (remote_active_job_id)'
+                f'CREATE INDEX IF NOT EXISTS {index_name} '
+                f'ON {table_name} ({column_name})'
             ))
 
 

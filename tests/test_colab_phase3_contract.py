@@ -41,10 +41,10 @@ def test_notebook_exposes_authenticated_path_safe_onnx_download():
 
     for expected in (
         'from fastapi.responses import FileResponse, JSONResponse',
-        '"/api/jobs/{job_id}/artifacts/onnx"',
+        '"/api/jobs/{job_id}/artifacts/{artifact_kind}"',
         'dependencies=[Depends(require_api_token)]',
-        'onnx_path.relative_to(artifact_root)',
-        'onnx_path.suffix.lower() != ".onnx"',
+        'artifact_path.relative_to(artifact_root)',
+        'artifact_path.suffix.lower() != expected_suffix',
         'return FileResponse(',
     ):
         assert expected in source
