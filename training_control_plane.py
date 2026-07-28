@@ -2611,6 +2611,58 @@ def _read_training_metrics(results_path):
     return metrics
 
 
+def _build_imported_model_name(task, job, parent_model=None):
+    if parent_model is not None and str(parent_model.name or '').strip():
+        base_name = str(parent_model.name).strip()
+    else:
+        model_name = Path(str(job.model or 'YOLO')).name
+        base_name = (
+            model_name[:-3]
+            if model_name.lower().endswith('.pt')
+            else model_name
+        ).strip() or 'YOLO'
+
+    parameter_snapshot = task.parameter_set_snapshot
+    preset_name = ''
+    if isinstance(parameter_snapshot, dict):
+        preset_name = str(parameter_snapshot.get('name') or '').strip()
+
+    task_suffix = str(task.task_id or '')[:8] or 'training'
+    separator = ' · '
+    max_length = 100
+
+    if not preset_name:
+        legacy_prefix = f'Automated {job.model or "YOLO"} -'
+        prefix_budget = max_length - 1 - len(task_suffix)
+        return (
+            f'{_truncate_display_segment(legacy_prefix, prefix_budget)}'
+            f' {task_suffix}'
+        )
+
+    content_budget = max_length - (2 * len(separator)) - len(task_suffix)
+    base_budget = min(len(base_name), max(20, content_budget // 2))
+    preset_budget = content_budget - base_budget
+    if len(preset_name) < preset_budget:
+        base_budget += preset_budget - len(preset_name)
+    elif len(base_name) < base_budget:
+        preset_budget += base_budget - len(base_name)
+
+    return separator.join((
+        _truncate_display_segment(base_name, base_budget),
+        _truncate_display_segment(preset_name, preset_budget),
+        task_suffix,
+    ))
+
+
+def _truncate_display_segment(value, max_length):
+    value = str(value or '').strip()
+    if len(value) <= max_length:
+        return value
+    if max_length <= 1:
+        return value[:max_length]
+    return f'{value[:max_length - 1].rstrip()}…'
+
+
 def _import_task_model(task, job, artifact_paths, artifact_objects=None):
     artifact_objects = artifact_objects or {}
     if task.imported_model_id is not None:
@@ -2635,11 +2687,16 @@ def _import_task_model(task, job, artifact_paths, artifact_objects=None):
 
     existing = AIModel.query.filter_by(filename=filename).first()
     if existing is None:
+        parent_model = (
+            db.session.get(AIModel, task.parent_model_id)
+            if task.parent_model_id
+            else None
+        )
         temporary_path = destination.with_suffix('.onnx.part')
         shutil.copy2(onnx_path, temporary_path)
         temporary_path.replace(destination)
         existing = AIModel(
-            name=f'Automated {job.model or "YOLO"} - {task.task_id[:8]}',
+            name=_build_imported_model_name(task, job, parent_model),
             description=(
                 f'{job.training_mode} task {task.task_id}; '
                 f'remote job {job.remote_job_id}; '
@@ -2657,10 +2714,8 @@ def _import_task_model(task, job, artifact_paths, artifact_objects=None):
                 'ready' if artifact_paths.get('pt') else 'unavailable'
             ),
         )
-        if task.parent_model_id:
-            parent_model = db.session.get(AIModel, task.parent_model_id)
-            if parent_model is not None:
-                existing.class_names = parent_model.class_names
+        if parent_model is not None:
+            existing.class_names = parent_model.class_names
         elif task.training_dataset_id:
             dataset = db.session.get(
                 TrainingDataset,

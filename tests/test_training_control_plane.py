@@ -851,6 +851,13 @@ class TestTrainingControlPlane:
             ).all()
             assert len(children) == 3
             assert all(child.finetune_status == 'ready' for child in children)
+            for task in tasks:
+                child = db.session.get(AIModel, task.imported_model_id)
+                preset_name = task.parameter_set_snapshot['name']
+                assert child.name.startswith('External parent · ')
+                assert preset_name in child.name
+                assert child.name.endswith(task.task_id[:8])
+                assert len(child.name) <= 100
             for child in children:
                 artifact_kinds = {
                     artifact.kind for artifact in child.artifacts
