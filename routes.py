@@ -3631,10 +3631,22 @@ def validate_finetune_parent_model(model_id):
 def create_finetune_experiment_route():
     payload = request.get_json(silent=True) or {}
     try:
+        header_key = str(
+            request.headers.get('Idempotency-Key') or ''
+        ).strip()
+        body_key = str(payload.get('idempotency_key') or '').strip()
+        if header_key and body_key and header_key != body_key:
+            raise ValueError('Idempotency key header/body mismatch.')
+        if header_key:
+            payload['idempotency_key'] = header_key
         batch, tasks = create_finetune_experiment(payload)
+        idempotent_replay = bool(
+            getattr(batch, '_idempotent_replay', False)
+        )
         response = batch.to_dict()
         response['tasks'] = [task.to_dict() for task in tasks]
-        return jsonify(response), 201
+        response['idempotent_replay'] = idempotent_replay
+        return jsonify(response), (200 if idempotent_replay else 201)
     except (TypeError, ValueError) as exc:
         db.session.rollback()
         return jsonify({'error': str(exc)}), 400

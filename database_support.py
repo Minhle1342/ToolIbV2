@@ -134,9 +134,99 @@ RUNTIME_COLUMNS = (
         'metrics JSON',
     ),
     (
+        'training_queue_tasks',
+        'recovery_generation',
+        'recovery_generation INTEGER NOT NULL DEFAULT 1',
+    ),
+    (
+        'training_queue_tasks',
+        'resume_count',
+        'resume_count INTEGER NOT NULL DEFAULT 0',
+    ),
+    (
+        'training_queue_tasks',
+        'max_resume_count',
+        'max_resume_count INTEGER NOT NULL DEFAULT 3',
+    ),
+    (
+        'training_queue_tasks',
+        'checkpoint_interval',
+        'checkpoint_interval INTEGER NOT NULL DEFAULT 5',
+    ),
+    (
+        'training_queue_tasks',
+        'worker_lost_at',
+        'worker_lost_at TIMESTAMP',
+    ),
+    (
+        'training_queue_tasks',
+        'recovery_deadline_at',
+        'recovery_deadline_at TIMESTAMP',
+    ),
+    (
+        'training_job_attempts',
+        'training_job_id',
+        'training_job_id INTEGER',
+    ),
+    (
+        'training_job_attempts',
+        'attempt_kind',
+        "attempt_kind VARCHAR(20) NOT NULL DEFAULT 'initial'",
+    ),
+    (
+        'training_job_attempts',
+        'generation',
+        'generation INTEGER NOT NULL DEFAULT 1',
+    ),
+    (
+        'training_job_attempts',
+        'resume_checkpoint_id',
+        'resume_checkpoint_id INTEGER',
+    ),
+    (
+        'training_job_attempts',
+        'resumed_from_epoch',
+        'resumed_from_epoch INTEGER',
+    ),
+    (
         'training_workers',
         'remote_active_job_id',
         'remote_active_job_id VARCHAR(36)',
+    ),
+    (
+        'training_datasets',
+        'storage_backend',
+        "storage_backend VARCHAR(30) NOT NULL DEFAULT 'local'",
+    ),
+    (
+        'training_datasets',
+        'object_key',
+        'object_key VARCHAR(1000)',
+    ),
+    (
+        'training_datasets',
+        'object_uploaded_at',
+        'object_uploaded_at TIMESTAMP',
+    ),
+    (
+        'training_datasets',
+        'object_verified_at',
+        'object_verified_at TIMESTAMP',
+    ),
+    (
+        'model_artifacts',
+        'storage_backend',
+        "storage_backend VARCHAR(30) NOT NULL DEFAULT 'local'",
+    ),
+    (
+        'model_artifacts',
+        'object_key',
+        'object_key VARCHAR(1000)',
+    ),
+    (
+        'model_artifacts',
+        'object_verified_at',
+        'object_verified_at TIMESTAMP',
     ),
 )
 
@@ -207,9 +297,54 @@ RUNTIME_INDEXES = (
         'config_hash',
     ),
     (
+        'training_queue_tasks',
+        'ix_training_queue_tasks_worker_lost_at',
+        'worker_lost_at',
+    ),
+    (
+        'training_queue_tasks',
+        'ix_training_queue_tasks_recovery_deadline_at',
+        'recovery_deadline_at',
+    ),
+    (
+        'training_job_attempts',
+        'ix_training_job_attempts_training_job_id',
+        'training_job_id',
+    ),
+    (
+        'training_job_attempts',
+        'ix_training_job_attempts_attempt_kind',
+        'attempt_kind',
+    ),
+    (
+        'training_job_attempts',
+        'ix_training_job_attempts_resume_checkpoint_id',
+        'resume_checkpoint_id',
+    ),
+    (
         'training_workers',
         'ix_training_workers_remote_active_job_id',
         'remote_active_job_id',
+    ),
+    (
+        'training_datasets',
+        'ix_training_datasets_storage_backend',
+        'storage_backend',
+    ),
+    (
+        'training_datasets',
+        'ix_training_datasets_object_key',
+        'object_key',
+    ),
+    (
+        'model_artifacts',
+        'ix_model_artifacts_storage_backend',
+        'storage_backend',
+    ),
+    (
+        'model_artifacts',
+        'ix_model_artifacts_object_key',
+        'object_key',
     ),
 )
 
@@ -267,7 +402,10 @@ def _column_names(engine, table_name):
 
 
 def ensure_runtime_columns(engine):
+    existing_tables = set(inspect(engine).get_table_names())
     for table_name, column_name, column_ddl in RUNTIME_COLUMNS:
+        if table_name not in existing_tables:
+            continue
         if column_name in _column_names(engine, table_name):
             continue
         try:
@@ -282,6 +420,8 @@ def ensure_runtime_columns(engine):
                 raise
 
     for table_name, index_name, column_name in RUNTIME_INDEXES:
+        if table_name not in existing_tables:
+            continue
         if column_name not in _column_names(engine, table_name):
             continue
         with engine.begin() as connection:

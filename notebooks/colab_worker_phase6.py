@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+import requests
 from fastapi import (
     Depends,
     FastAPI,
@@ -36,12 +37,22 @@ from ultralytics import YOLO
 
 MODEL_CACHE_ROOT = WORK_ROOT / "models"
 MODEL_UPLOAD_ROOT = WORK_ROOT / "model_uploads"
+CHECKPOINT_CACHE_ROOT = WORK_ROOT / "checkpoint_cache"
+OBJECT_DOWNLOAD_ROOT = WORK_ROOT / "object_downloads"
+LOCAL_ARTIFACT_ROOT = WORK_ROOT / "artifacts"
 DRIVE_MODEL_ROOT = Path("/content/drive/MyDrive/ToolIb_PoC/models")
 MAX_MODEL_ARTIFACT_BYTES = 2 * 1024**3
-for directory in (MODEL_CACHE_ROOT, MODEL_UPLOAD_ROOT, DRIVE_MODEL_ROOT):
+for directory in (
+    MODEL_CACHE_ROOT,
+    MODEL_UPLOAD_ROOT,
+    CHECKPOINT_CACHE_ROOT,
+    OBJECT_DOWNLOAD_ROOT,
+    LOCAL_ARTIFACT_ROOT,
+    DRIVE_MODEL_ROOT,
+):
     directory.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="ToolIbV2 Colab Training Worker", version="0.6.0")
+app = FastAPI(title="ToolIbV2 Colab Training Worker", version="0.8.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -61,6 +72,10 @@ IDEMPOTENCY_INDEX: dict[str, str] = {}
 MODEL_CACHE: dict[str, dict] = {}
 ACTIVE_JOB_ID: str | None = None
 TRAIN_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="toolib-yolo")
+CHECKPOINT_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="toolib-checkpoint",
+)
 ACTIVE_STATES = {"queued", "running"}
 
 
@@ -100,9 +115,123 @@ def normalize_class_names(value) -> list[str]:
     return []
 
 
+class CheckpointUploadTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_id: str
+    epoch: int = Field(ge=1, le=300)
+    object_key: str = Field(min_length=1, max_length=1000)
+    upload_url: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("checkpoint_id")
+    @classmethod
+    def validate_checkpoint_id(cls, value: str) -> str:
+        return canonical_artifact_id(value)
+
+    @field_validator("upload_url")
+    @classmethod
+    def validate_upload_url(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized.startswith("https://"):
+            raise ValueError("checkpoint upload_url must use HTTPS.")
+        return normalized
+
+
+class ResumeCheckpoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    checkpoint_id: str
+    epoch: int = Field(ge=1, le=300)
+    total_epochs: int = Field(ge=1, le=300)
+    object_key: str = Field(min_length=1, max_length=1000)
+    sha256: str
+    size_bytes: int = Field(gt=0, le=MAX_MODEL_ARTIFACT_BYTES)
+    download_url: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("checkpoint_id")
+    @classmethod
+    def validate_checkpoint_id(cls, value: str) -> str:
+        return canonical_artifact_id(value)
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        return canonical_sha256(value)
+
+    @field_validator("download_url")
+    @classmethod
+    def validate_download_url(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized.startswith("https://"):
+            raise ValueError("checkpoint download_url must use HTTPS.")
+        return normalized
+
+
+class RemoteObjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    object_key: str = Field(min_length=1, max_length=1000)
+    sha256: str
+    size_bytes: int = Field(gt=0, le=MAX_DATASET_ARCHIVE_BYTES)
+    download_url: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("sha256")
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        return canonical_sha256(value)
+
+    @field_validator("download_url")
+    @classmethod
+    def validate_download_url(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized.startswith("https://"):
+            raise ValueError("object download_url must use HTTPS.")
+        return normalized
+
+
+class ParentObjectInput(RemoteObjectInput):
+    artifact_id: str
+
+    @field_validator("artifact_id")
+    @classmethod
+    def validate_artifact_id(cls, value: str) -> str:
+        return canonical_artifact_id(value)
+
+    @model_validator(mode="after")
+    def validate_parent_size(self):
+        if self.size_bytes > MAX_MODEL_ARTIFACT_BYTES:
+            raise ValueError("Parent checkpoint exceeds the size limit.")
+        return self
+
+
+class ArtifactUploadTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[
+        "onnx",
+        "pt",
+        "last_pt",
+        "manifest",
+        "results",
+        "args",
+    ]
+    object_key: str = Field(min_length=1, max_length=1000)
+    upload_url: str = Field(min_length=1, max_length=8000)
+
+    @field_validator("upload_url")
+    @classmethod
+    def validate_upload_url(cls, value: str) -> str:
+        normalized = str(value or "").strip()
+        if not normalized.startswith("https://"):
+            raise ValueError("artifact upload_url must use HTTPS.")
+        return normalized
+
+
 class TrainRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    execution_mode: Literal["initial", "resume"] = "initial"
+    recovery_generation: int = Field(default=1, ge=1, le=100)
     training_mode: Literal["fresh", "finetune"] = "fresh"
     model: str = "yolo11n.pt"
     parent_artifact_id: str | None = None
@@ -122,6 +251,18 @@ class TrainRequest(BaseModel):
     copy_paste: float = Field(default=0.0, ge=0, le=1)
     seed: int = Field(default=42, ge=0, le=2**31 - 1)
     dataset_id: str | None = None
+    dataset_object: RemoteObjectInput | None = None
+    parent_object: ParentObjectInput | None = None
+    artifact_uploads: list[ArtifactUploadTarget] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    checkpoint_interval: int = Field(default=5, ge=1, le=100)
+    checkpoint_uploads: list[CheckpointUploadTarget] = Field(
+        default_factory=list,
+        max_length=64,
+    )
+    resume_checkpoint: ResumeCheckpoint | None = None
     idempotency_key: str | None = Field(
         default=None,
         min_length=1,
@@ -143,6 +284,39 @@ class TrainRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_training_contract(self):
+        artifact_kinds = [target.kind for target in self.artifact_uploads]
+        if len(artifact_kinds) != len(set(artifact_kinds)):
+            raise ValueError("artifact upload kinds must be unique.")
+        if self.dataset_object is not None and self.dataset_id is None:
+            raise ValueError("dataset_object requires dataset_id.")
+
+        target_epochs = [target.epoch for target in self.checkpoint_uploads]
+        if len(target_epochs) != len(set(target_epochs)):
+            raise ValueError("checkpoint upload epochs must be unique.")
+        if any(epoch > self.epochs for epoch in target_epochs):
+            raise ValueError(
+                "checkpoint upload epochs must not exceed total epochs."
+            )
+
+        if self.execution_mode == "resume":
+            if self.resume_checkpoint is None:
+                raise ValueError(
+                    "Resume execution requires resume_checkpoint."
+                )
+            if self.resume_checkpoint.epoch >= self.epochs:
+                raise ValueError(
+                    "Resume checkpoint must be earlier than total epochs."
+                )
+            if self.parent_object is not None:
+                raise ValueError(
+                    "Resume execution must not supply parent_object."
+                )
+            return self
+        if self.resume_checkpoint is not None:
+            raise ValueError(
+                "Initial execution must not supply resume_checkpoint."
+            )
+
         if self.training_mode == "fresh":
             if self.model not in ALLOWED_MODELS:
                 raise ValueError(
@@ -151,6 +325,10 @@ class TrainRequest(BaseModel):
             if self.parent_artifact_id or self.parent_sha256:
                 raise ValueError(
                     "Fresh training must not supply a parent artifact."
+                )
+            if self.parent_object is not None:
+                raise ValueError(
+                    "Fresh training must not supply parent_object."
                 )
             return self
 
@@ -162,7 +340,29 @@ class TrainRequest(BaseModel):
             self.parent_artifact_id
         )
         self.parent_sha256 = canonical_sha256(self.parent_sha256)
+        if self.parent_object is not None:
+            if self.parent_object.artifact_id != self.parent_artifact_id:
+                raise ValueError(
+                    "parent_object artifact_id does not match request."
+                )
+            if self.parent_object.sha256 != self.parent_sha256:
+                raise ValueError(
+                    "parent_object checksum does not match request."
+                )
         return self
+
+
+def public_train_request(request_data: TrainRequest) -> dict:
+    return request_data.model_dump(
+        exclude={
+            "idempotency_key",
+            "checkpoint_uploads",
+            "resume_checkpoint",
+            "dataset_object",
+            "parent_object",
+            "artifact_uploads",
+        }
+    )
 
 
 def utc_now() -> str:
@@ -362,6 +562,121 @@ def validate_yolo_checkpoint(path: Path) -> dict:
     return {"task": task, "class_names": class_names}
 
 
+def download_verified_object(
+    remote_object: RemoteObjectInput,
+    destination: Path,
+    *,
+    max_bytes: int,
+    label: str,
+) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.part")
+    temporary.unlink(missing_ok=True)
+    digest = hashlib.sha256()
+    downloaded_bytes = 0
+    try:
+        with requests.get(
+            remote_object.download_url,
+            stream=True,
+            timeout=(20, 1800),
+        ) as response:
+            response.raise_for_status()
+            with temporary.open("wb") as output:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    downloaded_bytes += len(chunk)
+                    if downloaded_bytes > max_bytes:
+                        raise ValueError(
+                            f"{label} exceeds the worker size limit."
+                        )
+                    digest.update(chunk)
+                    output.write(chunk)
+        if downloaded_bytes != remote_object.size_bytes:
+            raise ValueError(
+                f"{label} size does not match control-plane metadata."
+            )
+        if digest.hexdigest() != remote_object.sha256:
+            raise ValueError(
+                f"{label} checksum does not match control-plane metadata."
+            )
+        temporary.replace(destination)
+        return destination
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def materialize_dataset_object(
+    dataset_id: str,
+    remote_object: RemoteObjectInput,
+) -> dict:
+    canonical_id = canonical_dataset_id(dataset_id)
+    cached = DATASET_CACHE.get(canonical_id)
+    if cached and Path(cached["runtime_yaml"]).is_file():
+        return cached
+
+    object_dir = resolve_under(
+        OBJECT_DOWNLOAD_ROOT,
+        "datasets",
+        remote_object.sha256,
+    )
+    archive_path = object_dir / "dataset.zip"
+    if not (
+        archive_path.is_file()
+        and archive_path.stat().st_size == remote_object.size_bytes
+        and sha256_path(archive_path) == remote_object.sha256
+    ):
+        download_verified_object(
+            remote_object,
+            archive_path,
+            max_bytes=MAX_DATASET_ARCHIVE_BYTES,
+            label="Dataset object",
+        )
+    prepared = prepare_runtime_dataset(canonical_id, archive_path)
+    DATASET_CACHE[canonical_id] = prepared
+    return prepared
+
+
+def materialize_parent_object(
+    remote_object: ParentObjectInput,
+) -> dict:
+    canonical_id = remote_object.artifact_id
+    cached = MODEL_CACHE.get(canonical_id)
+    if (
+        cached
+        and cached.get("sha256") == remote_object.sha256
+        and Path(cached["runtime_path"]).is_file()
+        and sha256_path(Path(cached["runtime_path"])) == remote_object.sha256
+    ):
+        return cached
+
+    local_dir = resolve_under(MODEL_CACHE_ROOT, canonical_id)
+    local_path = local_dir / "parent.pt"
+    if not (
+        local_path.is_file()
+        and local_path.stat().st_size == remote_object.size_bytes
+        and sha256_path(local_path) == remote_object.sha256
+    ):
+        download_verified_object(
+            remote_object,
+            local_path,
+            max_bytes=MAX_MODEL_ARTIFACT_BYTES,
+            label="Parent checkpoint",
+        )
+    metadata = validate_yolo_checkpoint(local_path)
+    resolved = {
+        "artifact_id": canonical_id,
+        "sha256": remote_object.sha256,
+        "runtime_path": str(local_path),
+        "drive_path": None,
+        "object_key": remote_object.object_key,
+        "task": metadata["task"],
+        "class_names": metadata["class_names"],
+    }
+    MODEL_CACHE[canonical_id] = resolved
+    return resolved
+
+
 def ensure_local_model_cache(
     artifact_id: str,
     expected_sha256: str,
@@ -426,6 +741,28 @@ def resolve_parent_artifact(
     }
     MODEL_CACHE[canonical_id] = resolved
     return resolved
+
+
+@app.post(
+    "/api/model-artifacts/resolve",
+    dependencies=[Depends(require_api_token)],
+)
+def resolve_model_artifact_from_object(remote_object: ParentObjectInput):
+    try:
+        resolved = materialize_parent_object(remote_object)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model object rejected: {type(exc).__name__}: {exc}",
+        ) from exc
+    return {
+        "status": "resolved",
+        "artifact_id": resolved["artifact_id"],
+        "sha256": resolved["sha256"],
+        "object_key": resolved["object_key"],
+        "task": resolved["task"],
+        "class_names": resolved["class_names"],
+    }
 
 
 @app.get(
@@ -698,36 +1035,200 @@ async def upload_dataset_snapshot(
         upload_path.unlink(missing_ok=True)
 
 
+def download_resume_checkpoint(
+    job_id: str,
+    checkpoint: ResumeCheckpoint,
+) -> Path:
+    job_cache = CHECKPOINT_CACHE_ROOT / job_id
+    job_cache.mkdir(parents=True, exist_ok=True)
+    destination = job_cache / "resume-last.pt"
+    temporary = job_cache / ".resume-last.pt.part"
+    digest = hashlib.sha256()
+    downloaded_bytes = 0
+    try:
+        with requests.get(
+            checkpoint.download_url,
+            stream=True,
+            timeout=(20, 900),
+        ) as response:
+            response.raise_for_status()
+            with temporary.open("wb") as output:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if not chunk:
+                        continue
+                    downloaded_bytes += len(chunk)
+                    if downloaded_bytes > MAX_MODEL_ARTIFACT_BYTES:
+                        raise ValueError(
+                            "Resume checkpoint exceeds the worker size limit."
+                        )
+                    digest.update(chunk)
+                    output.write(chunk)
+        if downloaded_bytes != checkpoint.size_bytes:
+            raise ValueError(
+                "Resume checkpoint size does not match control-plane metadata."
+            )
+        if digest.hexdigest() != checkpoint.sha256:
+            raise ValueError(
+                "Resume checkpoint checksum does not match control-plane metadata."
+            )
+        temporary.replace(destination)
+        return destination
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def upload_checkpoint_copy(
+    job_id: str,
+    target: CheckpointUploadTarget,
+    source: Path,
+    total_epochs: int,
+    recovery_generation: int,
+) -> None:
+    try:
+        size_bytes = source.stat().st_size
+        sha256 = sha256_path(source)
+        with source.open("rb") as checkpoint_stream:
+            response = requests.put(
+                target.upload_url,
+                data=checkpoint_stream,
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=(20, 900),
+            )
+        response.raise_for_status()
+        checkpoint_payload = {
+            "checkpoint_id": target.checkpoint_id,
+            "epoch": target.epoch,
+            "total_epochs": total_epochs,
+            "generation": recovery_generation,
+            "object_key": target.object_key,
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "uploaded_at": utc_now(),
+        }
+        update_job(
+            job_id,
+            latest_checkpoint=checkpoint_payload,
+            checkpoint_error=None,
+            message=(
+                f"Checkpoint epoch {target.epoch}/{total_epochs} uploaded."
+            ),
+        )
+    except Exception as exc:
+        update_job(
+            job_id,
+            checkpoint_error=f"{type(exc).__name__}: {exc}",
+        )
+    finally:
+        source.unlink(missing_ok=True)
+
+
+def upload_result_artifact(
+    target: ArtifactUploadTarget,
+    source: Path,
+) -> dict:
+    size_bytes = source.stat().st_size
+    sha256 = sha256_path(source)
+    with source.open("rb") as artifact_stream:
+        response = requests.put(
+            target.upload_url,
+            data=artifact_stream,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=(20, 1800),
+        )
+    response.raise_for_status()
+    return {
+        "kind": target.kind,
+        "object_key": target.object_key,
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "uploaded_at": utc_now(),
+    }
+
+
 def run_training_job(
     job_id: str,
     request_data: TrainRequest,
-    dataset_info: dict,
+    dataset_info: dict | None,
 ) -> None:
     global ACTIVE_JOB_ID
 
-    artifact_dir = DRIVE_ARTIFACT_ROOT / job_id
+    artifact_root = (
+        LOCAL_ARTIFACT_ROOT
+        if request_data.artifact_uploads
+        else DRIVE_ARTIFACT_ROOT
+    )
+    artifact_dir = artifact_root / job_id
     try:
         artifact_dir.mkdir(parents=True, exist_ok=False)
+        if dataset_info is None:
+            update_job(
+                job_id,
+                status="running",
+                started_at=utc_now(),
+                message="Downloading dataset snapshot from object storage.",
+            )
+            dataset_info = materialize_dataset_object(
+                request_data.dataset_id,
+                request_data.dataset_object,
+            )
         update_job(
             job_id,
             status="running",
-            started_at=utc_now(),
+            started_at=get_public_job(job_id).get("started_at") or utc_now(),
             message=(
                 f"Loading dataset {dataset_info['dataset_id'][:8]} "
                 "and starting training."
             ),
         )
 
-        if request_data.training_mode == "finetune":
-            parent_info = resolve_parent_artifact(
-                request_data.parent_artifact_id,
-                request_data.parent_sha256,
+        if request_data.execution_mode == "resume":
+            resume_checkpoint = request_data.resume_checkpoint
+            update_job(
+                job_id,
+                message=(
+                    f"Downloading checkpoint at epoch "
+                    f"{resume_checkpoint.epoch}/{request_data.epochs}."
+                ),
             )
+            model_source = download_resume_checkpoint(
+                job_id,
+                resume_checkpoint,
+            )
+            parent_info = None
+        elif request_data.training_mode == "finetune":
+            if request_data.parent_object is not None:
+                update_job(
+                    job_id,
+                    message="Downloading parent checkpoint from object storage.",
+                )
+                parent_info = materialize_parent_object(
+                    request_data.parent_object
+                )
+            else:
+                parent_info = resolve_parent_artifact(
+                    request_data.parent_artifact_id,
+                    request_data.parent_sha256,
+                )
+            if (
+                dataset_info is not None
+                and normalize_class_names(parent_info.get("class_names"))
+                != normalize_class_names(dataset_info.get("class_names"))
+            ):
+                raise ValueError(
+                    "Parent checkpoint classes do not match dataset classes."
+                )
             model_source = parent_info["runtime_path"]
         else:
             parent_info = None
             model_source = request_data.model
         model = YOLO(model_source)
+
+        checkpoint_targets = {
+            target.epoch: target
+            for target in request_data.checkpoint_uploads
+        }
+        scheduled_checkpoint_epochs = set()
+        checkpoint_futures = []
 
         def on_train_epoch_end(trainer) -> None:
             current_epoch = int(getattr(trainer, "epoch", 0)) + 1
@@ -741,7 +1242,49 @@ def run_training_job(
                 message=f"Training epoch {current_epoch}/{total_epochs}.",
             )
 
+        def on_model_save(trainer) -> None:
+            current_epoch = int(getattr(trainer, "epoch", 0)) + 1
+            target = checkpoint_targets.get(current_epoch)
+            if target is None or current_epoch in scheduled_checkpoint_epochs:
+                return
+            last_path = Path(
+                str(
+                    getattr(trainer, "last", "")
+                    or (
+                        Path(str(getattr(trainer, "save_dir")))
+                        / "weights"
+                        / "last.pt"
+                    )
+                )
+            ).resolve()
+            if not last_path.is_file():
+                update_job(
+                    job_id,
+                    checkpoint_error=(
+                        f"last.pt was not found for epoch {current_epoch}."
+                    ),
+                )
+                return
+            checkpoint_dir = CHECKPOINT_CACHE_ROOT / job_id
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            checkpoint_copy = (
+                checkpoint_dir / f"epoch-{current_epoch:04d}.pt"
+            )
+            shutil.copy2(last_path, checkpoint_copy)
+            scheduled_checkpoint_epochs.add(current_epoch)
+            checkpoint_futures.append(
+                CHECKPOINT_EXECUTOR.submit(
+                    upload_checkpoint_copy,
+                    job_id,
+                    target,
+                    checkpoint_copy,
+                    int(getattr(trainer, "epochs", request_data.epochs)),
+                    request_data.recovery_generation,
+                )
+            )
+
         model.add_callback("on_train_epoch_end", on_train_epoch_end)
+        model.add_callback("on_model_save", on_model_save)
         train_kwargs = {
             "data": dataset_info["runtime_yaml"],
             "epochs": request_data.epochs,
@@ -770,7 +1313,13 @@ def run_training_job(
                 "mixup": request_data.mixup,
                 "copy_paste": request_data.copy_paste,
             })
-        model.train(**train_kwargs)
+        if request_data.execution_mode == "resume":
+            model.train(resume=True)
+        else:
+            model.train(**train_kwargs)
+
+        for checkpoint_future in checkpoint_futures:
+            checkpoint_future.result()
 
         trainer = getattr(model, "trainer", None)
         save_dir_value = getattr(trainer, "save_dir", None)
@@ -830,6 +1379,13 @@ def run_training_job(
             "created_at": job_snapshot.get("created_at"),
             "started_at": job_snapshot.get("started_at"),
             "training_mode": request_data.training_mode,
+            "execution_mode": request_data.execution_mode,
+            "recovery_generation": request_data.recovery_generation,
+            "resumed_from_epoch": (
+                request_data.resume_checkpoint.epoch
+                if request_data.resume_checkpoint
+                else None
+            ),
             "model": request_data.model,
             "epochs": request_data.epochs,
             "batch": request_data.batch,
@@ -844,9 +1400,47 @@ def run_training_job(
             "metrics": metrics,
             "artifacts": artifacts,
             "finished_at": utc_now(),
+            "latest_checkpoint": get_public_job(job_id).get(
+                "latest_checkpoint"
+            ),
         }
         write_json(manifest_path, manifest)
         artifacts["manifest"] = str(manifest_path)
+
+        if request_data.artifact_uploads:
+            update_job(
+                job_id,
+                message="Uploading training artifacts to object storage.",
+            )
+            artifact_sources = {
+                "pt": pt_target,
+                "last_pt": last_pt_target,
+                "onnx": onnx_target,
+                "manifest": manifest_path,
+                "results": artifact_dir / "results.csv",
+                "args": artifact_dir / "args.yaml",
+            }
+            object_artifacts = {}
+            for target in request_data.artifact_uploads:
+                source = artifact_sources[target.kind]
+                if not source.is_file():
+                    continue
+                object_artifacts[target.kind] = upload_result_artifact(
+                    target,
+                    source,
+                )
+            if "onnx" not in object_artifacts:
+                raise RuntimeError(
+                    "ONNX artifact was not uploaded to object storage."
+                )
+            if (
+                request_data.training_mode == "finetune"
+                and "pt" not in object_artifacts
+            ):
+                raise RuntimeError(
+                    "Fine-tune checkpoint was not uploaded to object storage."
+                )
+            artifacts["_objects"] = object_artifacts
 
         update_job(
             job_id,
@@ -865,7 +1459,7 @@ def run_training_job(
         failure = {
             "job_id": job_id,
             "status": "failed",
-            "request": request_data.model_dump(),
+            "request": public_train_request(request_data),
             "error": error_message,
             "finished_at": utc_now(),
         }
@@ -906,9 +1500,15 @@ def health() -> dict:
         "idempotent_submit": True,
         "capabilities": {
             "dataset_upload": True,
+            "object_input_download": True,
             "model_artifact_upload": True,
+            "artifact_object_upload": True,
+            "object_transport_protocol_version": 1,
             "training": True,
             "training_modes": ["fresh", "finetune"],
+            "checkpoint_upload": True,
+            "checkpoint_resume": True,
+            "checkpoint_protocol_version": 1,
             "artifact_download": [
                 "onnx",
                 "pt",
@@ -938,8 +1538,16 @@ def start_train(request_data: TrainRequest, request: Request):
     idempotency_key = header_key or body_key
 
     try:
-        dataset_info = resolve_training_dataset(request_data.dataset_id)
-        if request_data.training_mode == "finetune":
+        dataset_info = (
+            None
+            if request_data.dataset_object is not None
+            else resolve_training_dataset(request_data.dataset_id)
+        )
+        if (
+            request_data.execution_mode == "initial"
+            and request_data.training_mode == "finetune"
+            and request_data.parent_object is None
+        ):
             parent_info = resolve_parent_artifact(
                 request_data.parent_artifact_id,
                 request_data.parent_sha256,
@@ -956,11 +1564,16 @@ def start_train(request_data: TrainRequest, request: Request):
         ValueError,
         zipfile.BadZipFile,
         yaml.YAMLError,
-    ) as exc:
+        ) as exc:
         raise HTTPException(
             status_code=400,
             detail=f"Training inputs are not ready: {exc}",
         ) from exc
+    job_dataset_id = (
+        canonical_dataset_id(request_data.dataset_id)
+        if request_data.dataset_id
+        else dataset_info["dataset_id"]
+    )
 
     with JOB_LOCK:
         if idempotency_key and idempotency_key in IDEMPOTENCY_INDEX:
@@ -1000,11 +1613,17 @@ def start_train(request_data: TrainRequest, request: Request):
             "error": None,
             "artifacts": None,
             "metrics": {},
-            "dataset_id": dataset_info["dataset_id"],
-            "idempotency_key": idempotency_key,
-            "request": request_data.model_dump(
-                exclude={"idempotency_key"}
+            "latest_checkpoint": (
+                request_data.resume_checkpoint.model_dump(
+                    exclude={"download_url"}
+                )
+                if request_data.resume_checkpoint
+                else None
             ),
+            "checkpoint_error": None,
+            "dataset_id": job_dataset_id,
+            "idempotency_key": idempotency_key,
+            "request": public_train_request(request_data),
         }
         if idempotency_key:
             IDEMPOTENCY_INDEX[idempotency_key] = job_id
@@ -1035,7 +1654,7 @@ def start_train(request_data: TrainRequest, request: Request):
         content={
             "job_id": job_id,
             "status": "queued",
-            "dataset_id": dataset_info["dataset_id"],
+            "dataset_id": job_dataset_id,
             "idempotent_replay": False,
         },
     )
@@ -1080,15 +1699,19 @@ def download_job_artifact(job_id: str, artifact_kind: str):
             detail=f"{artifact_kind} artifact is not available.",
         )
 
-    artifact_root = (DRIVE_ARTIFACT_ROOT / job_id).resolve()
     artifact_path = Path(str(artifact_value)).resolve()
-    try:
-        artifact_path.relative_to(artifact_root)
-    except ValueError as exc:
+    allowed_roots = [
+        (DRIVE_ARTIFACT_ROOT / job_id).resolve(),
+        (LOCAL_ARTIFACT_ROOT / job_id).resolve(),
+    ]
+    if not any(
+        artifact_path == root or root in artifact_path.parents
+        for root in allowed_roots
+    ):
         raise HTTPException(
             status_code=400,
             detail="Invalid artifact path.",
-        ) from exc
+        )
     expected_suffix, download_name = artifact_spec
     if (
         artifact_path.suffix.lower() != expected_suffix

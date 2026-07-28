@@ -43,7 +43,9 @@ def test_notebook_exposes_authenticated_path_safe_onnx_download():
         'from fastapi.responses import FileResponse, JSONResponse',
         '"/api/jobs/{job_id}/artifacts/{artifact_kind}"',
         'dependencies=[Depends(require_api_token)]',
-        'artifact_path.relative_to(artifact_root)',
+        '(DRIVE_ARTIFACT_ROOT / job_id).resolve()',
+        '(LOCAL_ARTIFACT_ROOT / job_id).resolve()',
+        'root in artifact_path.parents',
         'artifact_path.suffix.lower() != expected_suffix',
         'return FileResponse(',
     ):

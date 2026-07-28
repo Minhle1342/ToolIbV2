@@ -21,6 +21,22 @@ if (Test-Path -LiteralPath $postgresEnvironmentPath) {
     $postgresConfigLoaded = $true
 }
 
+$objectStorageConfigLoaded = $false
+$objectStorageEnvironmentPath = Join-Path $scriptPath '.env.object-storage.local'
+if (Test-Path -LiteralPath $objectStorageEnvironmentPath) {
+    foreach ($line in Get-Content -LiteralPath $objectStorageEnvironmentPath) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed -or $trimmed.StartsWith('#')) {
+            continue
+        }
+        $name, $value = $trimmed -split '=', 2
+        if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+    $objectStorageConfigLoaded = $true
+}
+
 Clear-Host
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host "              TEAM YOLO LABELING HUB                      " -ForegroundColor White -BackgroundColor Blue
@@ -28,6 +44,9 @@ Write-Host "==========================================================" -Foregro
 Write-Host ""
 if ($postgresConfigLoaded) {
     Write-Host "[DATABASE] Da nap cau hinh PostgreSQL local." -ForegroundColor Green
+}
+if ($objectStorageConfigLoaded) {
+    Write-Host "[OBJECT STORE] Da nap cau hinh dataset, model va checkpoint cloud." -ForegroundColor Green
 }
 
 # Kiem tra Virtual Environment (.venv)
@@ -109,6 +128,23 @@ Write-Host "[DATABASE] Dang khoi tao va kiem tra schema truoc khi chay cac proce
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[LOI] Khong the khoi tao database. Scheduler va Flask chua duoc khoi chay." -ForegroundColor Red
     exit $LASTEXITCODE
+}
+& $PythonPath scripts\migrate_phase8_object_transport.py
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "[LOI] Phase 8 object transport schema chua san sang." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+if ($env:TOOLIB_OBJECT_STORE_BACKEND -eq 's3') {
+    & $PythonPath -c "import boto3" 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[PIP] Dang cai boto3 cho object storage..." -ForegroundColor Cyan
+        & $PythonPath -m pip install "boto3>=1.35,<2"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[LOI] Khong the cai boto3. Object storage chua san sang." -ForegroundColor Red
+            exit $LASTEXITCODE
+        }
+    }
 }
 Write-Host "[DATABASE] Schema da san sang." -ForegroundColor Green
 Write-Host "[SCHEDULER] Dang khoi chay training control plane rieng..." -ForegroundColor Cyan

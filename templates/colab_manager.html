@@ -461,10 +461,11 @@
                                     <div id="finetuneArchivedParameterSetList" class="space-y-2 mt-2"></div>
                                 </details>
                             </div>
-                            <button id="finetuneExperimentCreateBtn" type="button" onclick="createFinetuneExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
+                            <button id="finetuneExperimentCreateBtn" type="button" onclick="createFinetuneExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-wait text-white rounded px-3 py-2 text-xs font-medium">
                                 <i class="fa-solid fa-play mr-1"></i>
                                 Tạo snapshot và queue các bộ đã chọn
                             </button>
+                            <div id="finetuneExperimentSubmitStatus" class="hidden rounded border border-sky-800 bg-sky-950/30 px-3 py-2 text-[10px] text-sky-200" role="status" aria-live="polite"></div>
                         </div>
 
                         <div id="finetuneParameterSetModal" class="hidden fixed inset-0 z-50 bg-black/70 p-4 overflow-y-auto">
@@ -525,10 +526,11 @@
                                 Dispatch now
                             </button>
                         </div>
-                        <div id="trainingControlPlaneStatus" class="grid grid-cols-3 gap-2 text-[10px]">
+                        <div id="trainingControlPlaneStatus" class="grid grid-cols-4 gap-2 text-[10px]">
                             <div class="border border-border rounded p-2"><span class="text-content-muted">Workers:</span> <strong id="trainingStatusWorkers">0/0</strong></div>
                             <div class="border border-border rounded p-2"><span class="text-content-muted">Queued:</span> <strong id="trainingStatusQueued">0</strong></div>
                             <div class="border border-border rounded p-2"><span class="text-content-muted">Active:</span> <strong id="trainingStatusActive">0</strong></div>
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Object store:</span> <strong id="trainingStatusObjectStore">disabled</strong></div>
                         </div>
                         <div id="trainingBatchEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
                             Chưa có automated batch.
@@ -1215,6 +1217,8 @@
         let finetuneParameterSets = [];
         let finetuneSelectedParameterSetIds = new Set();
         let finetuneParameterSetSelectionInitialized = false;
+        let finetuneExperimentSubmitting = false;
+        let finetunePendingSubmission = null;
         let trainingControlPlaneRefreshTimer = null;
         let trainingControlPlaneLoading = false;
 
@@ -1756,8 +1760,14 @@ print("Initialized YOLO-NAS Training Configuration")
             return text ? { error: text } : {};
         }
 
-        async function localTrainingApiFetch(path, { method = "GET", body = null } = {}) {
-            const headers = { "Accept": "application/json" };
+        async function localTrainingApiFetch(
+            path,
+            { method = "GET", body = null, headers: extraHeaders = {} } = {}
+        ) {
+            const headers = {
+                "Accept": "application/json",
+                ...extraHeaders
+            };
             if (body !== null) headers["Content-Type"] = "application/json";
             const response = await fetch(path, {
                 method,
@@ -2270,6 +2280,9 @@ print("Initialized YOLO-NAS Training Configuration")
         }
 
         async function createFinetuneExperiment() {
+            if (finetuneExperimentSubmitting) {
+                return;
+            }
             const parentModelId = Number(
                 document.getElementById("finetuneParentModel").value
             );
@@ -2312,39 +2325,109 @@ print("Initialized YOLO-NAS Training Configuration")
                 return;
             }
 
+            const requestBody = {
+                name: document.getElementById("finetuneExperimentName").value.trim(),
+                parent_model_id: parentModelId,
+                project_id: projectId,
+                parameter_set_ids: parameterSetIds,
+                splits,
+                exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked,
+                max_attempts: Number(
+                    document.getElementById("trainingBatchMaxAttempts").value || 3
+                ),
+                priority: Number(
+                    document.getElementById("trainingBatchPriority").value || 0
+                )
+            };
+            const requestFingerprint = JSON.stringify(requestBody);
+            if (
+                !finetunePendingSubmission
+                || finetunePendingSubmission.fingerprint !== requestFingerprint
+            ) {
+                finetunePendingSubmission = {
+                    fingerprint: requestFingerprint,
+                    idempotencyKey: window.crypto.randomUUID()
+                };
+            }
+            requestBody.idempotency_key =
+                finetunePendingSubmission.idempotencyKey;
+
             const button = document.getElementById("finetuneExperimentCreateBtn");
+            const submitStatus = document.getElementById(
+                "finetuneExperimentSubmitStatus"
+            );
+            const idleButtonHtml = button.dataset.idleHtml || button.innerHTML;
+            button.dataset.idleHtml = idleButtonHtml;
+            finetuneExperimentSubmitting = true;
             button.disabled = true;
+            button.setAttribute("aria-busy", "true");
+            button.innerHTML = (
+                '<i class="fa-solid fa-spinner fa-spin mr-1"></i>'
+                + 'Đã nhận click · đang tạo và nén snapshot...'
+            );
+            submitStatus.className = (
+                "rounded border border-sky-800 bg-sky-950/30 "
+                + "px-3 py-2 text-[10px] text-sky-200"
+            );
+            submitStatus.textContent = (
+                "Đã nhận yêu cầu. ToolIb đang tạo và nén snapshot; "
+                + "không cần bấm lại."
+            );
+            let createdBatchId = null;
             try {
                 const experiment = await localTrainingApiFetch(
                     "/api/finetune-experiments",
                     {
                         method: "POST",
-                        body: {
-                            name: document.getElementById("finetuneExperimentName").value.trim(),
-                            parent_model_id: parentModelId,
-                            project_id: projectId,
-                            parameter_set_ids: parameterSetIds,
-                            splits,
-                            exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
-                            include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked,
-                            max_attempts: Number(
-                                document.getElementById("trainingBatchMaxAttempts").value || 3
-                            ),
-                            priority: Number(
-                                document.getElementById("trainingBatchPriority").value || 0
-                            )
-                        }
+                        headers: {
+                            "Idempotency-Key":
+                                finetunePendingSubmission.idempotencyKey
+                        },
+                        body: requestBody
                     }
                 );
+                createdBatchId = experiment.id;
+                const replayText = experiment.idempotent_replay
+                    ? "Yêu cầu này đã được nhận trước đó; đang mở lại batch cũ."
+                    : (
+                        `Snapshot đã xong. Đã queue ${experiment.total_jobs} `
+                        + "bộ tham số."
+                    );
+                submitStatus.className = (
+                    "rounded border border-emerald-800 bg-emerald-950/30 "
+                    + "px-3 py-2 text-[10px] text-emerald-200"
+                );
+                submitStatus.textContent = replayText;
                 showToast(
                     `Đã tạo một snapshot và queue ${experiment.total_jobs} bộ tham số.`
                 );
+                if (experiment.idempotent_replay) {
+                    showToast(
+                        `Đã mở lại batch ${experiment.batch_id.slice(0, 8)}.`
+                    );
+                }
+                finetunePendingSubmission = null;
                 await dispatchTrainingControlPlane(true);
             } catch (error) {
+                submitStatus.className = (
+                    "rounded border border-rose-800 bg-rose-950/30 "
+                    + "px-3 py-2 text-[10px] text-rose-200"
+                );
+                submitStatus.textContent = (
+                    `Yêu cầu chưa hoàn tất: ${error.message}. `
+                    + "Bấm lại sẽ dùng cùng mã an toàn, không tạo batch trùng."
+                );
                 showColabRemoteError(`Tạo fine-tune experiment lỗi: ${error.message}`);
             } finally {
-                button.disabled = false;
                 await loadTrainingControlPlane(true);
+                if (createdBatchId !== null) {
+                    scrollToTrainingBatch(createdBatchId);
+                }
+                finetuneExperimentSubmitting = false;
+                button.disabled = false;
+                button.removeAttribute("aria-busy");
+                button.innerHTML = idleButtonHtml;
             }
         }
 
@@ -2376,6 +2459,14 @@ print("Initialized YOLO-NAS Training Configuration")
                 document.getElementById("trainingStatusQueued").textContent = status.tasks.queued;
                 document.getElementById("trainingStatusActive").textContent =
                     status.tasks.active + status.tasks.worker_lost;
+                const objectStoreStatus = document.getElementById("trainingStatusObjectStore");
+                objectStoreStatus.textContent = status.object_store?.enabled
+                    ? status.object_store.backend
+                    : (status.object_store?.backend || "disabled");
+                objectStoreStatus.className = status.object_store?.enabled
+                    ? "text-emerald-300"
+                    : (status.object_store?.error ? "text-rose-300" : "text-amber-300");
+                objectStoreStatus.title = status.object_store?.error || "";
             } catch (error) {
                 if (!silent) {
                     showColabRemoteError(`Control plane: ${error.message}`);
@@ -2618,6 +2709,20 @@ print("Initialized YOLO-NAS Training Configuration")
             }
         }
 
+        function scrollToTrainingBatch(batchId, attempt = 0) {
+            const card = document.getElementById(`training-batch-${batchId}`);
+            if (card) {
+                card.scrollIntoView({ behavior: "smooth", block: "center" });
+                return;
+            }
+            if (attempt < 10) {
+                window.setTimeout(
+                    () => scrollToTrainingBatch(batchId, attempt + 1),
+                    200
+                );
+            }
+        }
+
         function renderTrainingBatches() {
             const list = document.getElementById("trainingBatchList");
             const empty = document.getElementById("trainingBatchEmpty");
@@ -2626,6 +2731,8 @@ print("Initialized YOLO-NAS Training Configuration")
 
             for (const batch of trainingControlPlaneBatches) {
                 const card = document.createElement("div");
+                card.id = `training-batch-${batch.id}`;
+                card.dataset.batchId = batch.batch_id;
                 card.className = "border border-border rounded-lg p-2.5 text-[10px] space-y-2";
 
                 const header = document.createElement("div");
@@ -2703,12 +2810,32 @@ print("Initialized YOLO-NAS Training Configuration")
                         info.appendChild(metricDetail);
                     }
 
+                    if (task.latest_checkpoint) {
+                        const checkpoint = task.latest_checkpoint;
+                        const checkpointDetail = document.createElement("div");
+                        checkpointDetail.className = "text-sky-300 font-mono break-words";
+                        checkpointDetail.textContent = (
+                            `Checkpoint epoch ${checkpoint.epoch}/${checkpoint.total_epochs}`
+                            + ` · generation ${checkpoint.generation}`
+                            + ` · ${(Number(checkpoint.size_bytes || 0) / (1024 * 1024)).toFixed(1)} MB`
+                            + ` · resume ${task.resume_count}/${task.max_resume_count}`
+                        );
+                        info.appendChild(checkpointDetail);
+                    }
+
                     const latestAttempt = (task.attempts || []).at(-1);
                     if (latestAttempt) {
                         const attemptDetail = document.createElement("div");
                         attemptDetail.className = "text-content-muted break-all";
                         attemptDetail.textContent = (
                             `Attempt #${latestAttempt.attempt_number}`
+                            + ` · ${latestAttempt.attempt_kind || "initial"}`
+                            + ` · generation ${latestAttempt.generation || 1}`
+                            + (
+                                latestAttempt.resumed_from_epoch
+                                    ? ` · from epoch ${latestAttempt.resumed_from_epoch}`
+                                    : ""
+                            )
                             + ` · worker ${latestAttempt.worker_id || "unassigned"}`
                             + ` · remote ${latestAttempt.remote_job_id || "not submitted"}`
                             + ` · ${latestAttempt.status}`
@@ -2734,8 +2861,12 @@ print("Initialized YOLO-NAS Training Configuration")
                     } else if (task.status === "worker_lost") {
                         const reconnectHint = document.createElement("span");
                         reconnectHint.className = "shrink-0 text-amber-300";
-                        reconnectHint.textContent = "Await reconnect";
-                        reconnectHint.title = "Reconnect and probe the same worker to resume its existing remote job.";
+                        reconnectHint.textContent = task.latest_checkpoint
+                            ? "Await failover"
+                            : "Await reconnect";
+                        reconnectHint.title = task.latest_checkpoint
+                            ? "The scheduler first waits for the original worker, then resumes from this checkpoint on another compatible worker."
+                            : "No verified cloud checkpoint is available; reconnect and probe the same worker to resume its existing remote job.";
                         row.appendChild(reconnectHint);
                     }
                     tasks.appendChild(row);

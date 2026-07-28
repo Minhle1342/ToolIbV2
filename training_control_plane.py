@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -15,8 +16,13 @@ import requests
 from cryptography.fernet import Fernet, InvalidToken
 from flask import current_app
 from requests_toolbelt.multipart.encoder import MultipartEncoder
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from artifact_object_store import (
+    ObjectStoreError,
+    object_store_from_config,
+)
 from models import (
     db,
     AIModel,
@@ -24,6 +30,7 @@ from models import (
     ModelArtifact,
     Project,
     TrainingBatch,
+    TrainingCheckpoint,
     TrainingDataset,
     TrainingJob,
     TrainingJobAttempt,
@@ -51,11 +58,20 @@ ACTIVE_TASK_STATUSES = {
     'importing_model',
 }
 DISPATCHABLE_TASK_STATUSES = {'queued', 'waiting_for_worker', 'retry_wait'}
+DISPATCHABLE_TASK_STATUSES.add('resume_pending')
 TERMINAL_TASK_STATUSES = {'succeeded', 'failed', 'cancelled'}
 REMOTE_TERMINAL_STATUSES = {'succeeded', 'failed'}
 FINETUNE_PRESET_VERSION = 'phase6-database-v1'
 FINETUNE_RANKING_METRIC = 'metrics/mAP50-95(B)'
 FINETUNE_ALLOWED_IMAGE_SIZES = (320, 416, 512, 640, 768)
+OBJECT_ARTIFACT_FILENAMES = {
+    'onnx': 'best.onnx',
+    'pt': 'best.pt',
+    'last_pt': 'last.pt',
+    'manifest': 'manifest.json',
+    'results': 'results.csv',
+    'args': 'args.yaml',
+}
 FINETUNE_PARAMETER_DEFAULTS = {
     'epochs': 50,
     'batch': 8,
@@ -126,6 +142,12 @@ _executor = ThreadPoolExecutor(
 )
 _running_task_ids = set()
 _running_task_lock = threading.Lock()
+_object_store_instances = {}
+_object_store_lock = threading.Lock()
+_object_publish_locks = {}
+_object_publish_locks_guard = threading.Lock()
+_finetune_submission_locks = {}
+_finetune_submission_locks_guard = threading.Lock()
 
 
 class WorkerApiError(RuntimeError):
@@ -151,6 +173,145 @@ class RemoteTrainingFailedError(WorkerApiError):
 
 def utcnow():
     return datetime.utcnow()
+
+
+def _normalize_finetune_submission_id(payload):
+    raw_value = str(payload.get('idempotency_key') or '').strip()
+    if not raw_value:
+        return None
+    try:
+        return str(uuid.UUID(raw_value))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError(
+            'idempotency_key must be a valid UUID.'
+        ) from exc
+
+
+@contextmanager
+def _finetune_submission_guard(submission_id):
+    with _finetune_submission_locks_guard:
+        entry = _finetune_submission_locks.get(submission_id)
+        if entry is None:
+            entry = {'lock': threading.Lock(), 'users': 0}
+            _finetune_submission_locks[submission_id] = entry
+        entry['users'] += 1
+    entry['lock'].acquire()
+    advisory_connection = None
+    advisory_lock_id = int.from_bytes(
+        uuid.UUID(submission_id).bytes[:8],
+        byteorder='big',
+        signed=True,
+    )
+    try:
+        if db.engine.dialect.name == 'postgresql':
+            advisory_connection = db.engine.connect()
+            advisory_connection.execute(
+                text('SELECT pg_advisory_lock(:lock_id)'),
+                {'lock_id': advisory_lock_id},
+            )
+        yield
+    finally:
+        if advisory_connection is not None:
+            try:
+                advisory_connection.execute(
+                    text('SELECT pg_advisory_unlock(:lock_id)'),
+                    {'lock_id': advisory_lock_id},
+                )
+            finally:
+                advisory_connection.close()
+        entry['lock'].release()
+        with _finetune_submission_locks_guard:
+            entry['users'] -= 1
+            if (
+                entry['users'] == 0
+                and _finetune_submission_locks.get(submission_id) is entry
+            ):
+                _finetune_submission_locks.pop(submission_id, None)
+
+
+@contextmanager
+def _object_publish_guard(
+    object_key,
+    *,
+    on_wait=None,
+    on_heartbeat=None,
+):
+    with _object_publish_locks_guard:
+        entry = _object_publish_locks.get(object_key)
+        if entry is None:
+            entry = {'lock': threading.Lock(), 'users': 0}
+            _object_publish_locks[object_key] = entry
+        entry['users'] += 1
+
+    local_acquired = False
+    advisory_connection = None
+    advisory_acquired = False
+    wait_announced = False
+    advisory_lock_id = int.from_bytes(
+        hashlib.blake2b(
+            object_key.encode('utf-8'),
+            digest_size=8,
+        ).digest(),
+        byteorder='big',
+        signed=True,
+    )
+
+    def announce_wait():
+        nonlocal wait_announced
+        if not wait_announced and on_wait is not None:
+            on_wait()
+        wait_announced = True
+
+    def heartbeat():
+        if on_heartbeat is not None:
+            on_heartbeat()
+
+    try:
+        if not entry['lock'].acquire(blocking=False):
+            announce_wait()
+            while not entry['lock'].acquire(timeout=5):
+                heartbeat()
+        local_acquired = True
+
+        if db.engine.dialect.name == 'postgresql':
+            advisory_connection = db.engine.connect()
+            advisory_acquired = bool(
+                advisory_connection.execute(
+                    text('SELECT pg_try_advisory_lock(:lock_id)'),
+                    {'lock_id': advisory_lock_id},
+                ).scalar()
+            )
+            if not advisory_acquired:
+                announce_wait()
+                while not advisory_acquired:
+                    time.sleep(5)
+                    heartbeat()
+                    advisory_acquired = bool(
+                        advisory_connection.execute(
+                            text('SELECT pg_try_advisory_lock(:lock_id)'),
+                            {'lock_id': advisory_lock_id},
+                        ).scalar()
+                    )
+        yield
+    finally:
+        if advisory_connection is not None:
+            try:
+                if advisory_acquired:
+                    advisory_connection.execute(
+                        text('SELECT pg_advisory_unlock(:lock_id)'),
+                        {'lock_id': advisory_lock_id},
+                    )
+            finally:
+                advisory_connection.close()
+        if local_acquired:
+            entry['lock'].release()
+        with _object_publish_locks_guard:
+            entry['users'] -= 1
+            if (
+                entry['users'] == 0
+                and _object_publish_locks.get(object_key) is entry
+            ):
+                _object_publish_locks.pop(object_key, None)
 
 
 def normalize_remote_job_id(value, *, required=True):
@@ -302,6 +463,191 @@ def artifact_store():
     return LocalArtifactStore(root)
 
 
+def checkpoint_store():
+    app = current_app._get_current_object()
+    cache_key = (
+        id(app),
+        str(
+            app.config.get('TOOLIB_OBJECT_STORE_BACKEND')
+            or os.environ.get('TOOLIB_OBJECT_STORE_BACKEND')
+            or 'disabled'
+        ),
+        str(
+            app.config.get('TOOLIB_OBJECT_STORE_ENDPOINT')
+            or os.environ.get('TOOLIB_OBJECT_STORE_ENDPOINT')
+            or ''
+        ),
+        str(
+            app.config.get('TOOLIB_OBJECT_STORE_BUCKET')
+            or os.environ.get('TOOLIB_OBJECT_STORE_BUCKET')
+            or ''
+        ),
+        str(
+            app.config.get('TOOLIB_OBJECT_STORE_PREFIX')
+            or os.environ.get('TOOLIB_OBJECT_STORE_PREFIX')
+            or 'toolib'
+        ),
+    )
+    with _object_store_lock:
+        store = _object_store_instances.get(cache_key)
+        if store is None:
+            store = object_store_from_config(app.config)
+            _object_store_instances[cache_key] = store
+        return store
+
+
+def _worker_supports_object_inputs(worker):
+    return bool((worker.capabilities or {}).get('object_input_download'))
+
+
+def _worker_supports_object_artifacts(worker):
+    return bool((worker.capabilities or {}).get('artifact_object_upload'))
+
+
+def _ensure_file_in_object_store(
+    store,
+    source,
+    object_key,
+    expected_size,
+    *,
+    on_wait=None,
+    on_heartbeat=None,
+):
+    source = Path(source).resolve()
+    if not source.is_file():
+        raise ObjectStoreError(f'Object upload source does not exist: {source}')
+
+    def existing_object():
+        try:
+            stored_object = store.head(object_key)
+        except ObjectStoreError:
+            return None
+        if stored_object.size_bytes != int(expected_size):
+            raise ObjectStoreError(
+                f'Object {object_key} exists with an unexpected size.'
+            )
+        return stored_object
+
+    stored = existing_object()
+    if stored is not None:
+        return stored, True
+
+    with _object_publish_guard(
+        object_key,
+        on_wait=on_wait,
+        on_heartbeat=on_heartbeat,
+    ):
+        stored = existing_object()
+        if stored is not None:
+            return stored, True
+        stored = store.upload_file(source, object_key)
+        if stored.size_bytes != int(expected_size):
+            raise ObjectStoreError(
+                f'Uploaded object {object_key} failed size verification.'
+            )
+        return stored, False
+
+
+def _ensure_dataset_object(
+    dataset,
+    store,
+    *,
+    on_wait=None,
+    on_heartbeat=None,
+):
+    archive_path = Path(dataset.archive_path or '').resolve()
+    if not archive_path.is_file():
+        raise WorkerApiError('Prepared dataset archive is missing.')
+    actual_sha256 = sha256_path(archive_path)
+    if actual_sha256 != dataset.archive_sha256:
+        raise WorkerApiError('Prepared dataset checksum changed before storage.')
+    object_key = store.object_key(
+        'datasets',
+        dataset.archive_sha256,
+        'dataset.zip',
+    )
+    _stored, reused = _ensure_file_in_object_store(
+        store,
+        archive_path,
+        object_key,
+        dataset.archive_size,
+        on_wait=on_wait,
+        on_heartbeat=on_heartbeat,
+    )
+    now = utcnow()
+    dataset.storage_backend = store.backend_name
+    dataset.object_key = object_key
+    dataset.object_uploaded_at = dataset.object_uploaded_at or now
+    dataset.object_verified_at = now
+    return object_key, reused
+
+
+def _ensure_parent_object(artifact, store):
+    artifact_path = Path(artifact.storage_path or '').resolve()
+    if not artifact_path.is_file():
+        raise WorkerApiError('Parent model artifact is missing.')
+    actual_sha256 = sha256_path(artifact_path)
+    if actual_sha256 != artifact.sha256:
+        raise WorkerApiError('Parent model checksum changed before storage.')
+    object_key = store.object_key(
+        'parents',
+        artifact.sha256,
+        'parent.pt',
+    )
+    _ensure_file_in_object_store(
+        store,
+        artifact_path,
+        object_key,
+        artifact.size_bytes,
+    )
+    artifact.storage_backend = store.backend_name
+    artifact.object_key = object_key
+    artifact.object_verified_at = utcnow()
+    return object_key
+
+
+def _object_download_payload(store, *, object_key, sha256, size_bytes):
+    return {
+        'object_key': object_key,
+        'sha256': sha256,
+        'size_bytes': int(size_bytes),
+        'download_url': store.presign_download(object_key),
+    }
+
+
+def _artifact_object_key(store, task, attempt, artifact_kind):
+    filename = OBJECT_ARTIFACT_FILENAMES[artifact_kind]
+    return store.object_key(
+        'artifacts',
+        task.task_id,
+        f'generation-{attempt.generation}',
+        filename,
+    )
+
+
+def _artifact_upload_targets(store, task, attempt):
+    return [
+        {
+            'kind': artifact_kind,
+            'object_key': _artifact_object_key(
+                store,
+                task,
+                attempt,
+                artifact_kind,
+            ),
+            'upload_url': store.presign_upload(
+                _artifact_object_key(
+                    store,
+                    task,
+                    attempt,
+                    artifact_kind,
+                )
+            ),
+        }
+        for artifact_kind in OBJECT_ARTIFACT_FILENAMES
+    ]
+
+
 class ColabHttpWorkerAdapter:
     provider = 'colab_http'
 
@@ -430,6 +776,35 @@ class ColabHttpWorkerAdapter:
         if payload.get('task') != 'detect':
             raise WorkerApiError('Only YOLO detection checkpoints are supported.')
         return payload
+
+    def resolve_model_artifact(self, artifact, object_payload):
+        payload = {
+            'artifact_id': artifact.artifact_id,
+            **object_payload,
+        }
+        try:
+            response = self.session.post(
+                f'{self.api_url}/api/model-artifacts/resolve',
+                headers=self._headers(),
+                json=payload,
+                timeout=(15, 1800),
+                allow_redirects=False,
+            )
+        except requests.RequestException as exc:
+            raise WorkerUnavailableError(
+                f'Parent model object resolution failed: {exc}'
+            ) from exc
+        resolved = self._require_success(
+            response,
+            'Parent model object resolution',
+        )
+        if resolved.get('artifact_id') != artifact.artifact_id:
+            raise WorkerApiError('Worker returned a different artifact_id.')
+        if resolved.get('sha256') != artifact.sha256:
+            raise WorkerApiError('Worker returned a different model checksum.')
+        if resolved.get('task') != 'detect':
+            raise WorkerApiError('Only YOLO detection checkpoints are supported.')
+        return resolved
 
     def upload_dataset(self, dataset):
         archive_path = Path(dataset.archive_path or '').resolve()
@@ -1041,12 +1416,33 @@ def create_training_batch(payload):
     if len(jobs_payload) > 100:
         raise ValueError('A training batch can contain at most 100 jobs.')
 
+    supplied_batch_id = str(payload.get('batch_id') or '').strip()
+    if supplied_batch_id:
+        try:
+            batch_uuid = str(uuid.UUID(supplied_batch_id))
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ValueError('batch_id must be a valid UUID.') from exc
+    else:
+        batch_uuid = str(uuid.uuid4())
+
     name = str(payload.get('name') or '').strip()
     if not name:
         name = f'Training batch {datetime.now().strftime("%Y-%m-%d %H:%M")}'
     max_attempts_default = int(payload.get('max_attempts') or 3)
     if not 1 <= max_attempts_default <= 10:
         raise ValueError('max_attempts must be between 1 and 10.')
+    max_resume_count_default = int(
+        payload.get('max_resume_count')
+        if payload.get('max_resume_count') is not None
+        else 3
+    )
+    if not 0 <= max_resume_count_default <= 10:
+        raise ValueError('max_resume_count must be between 0 and 10.')
+    checkpoint_interval_default = int(
+        payload.get('checkpoint_interval') or 5
+    )
+    if not 5 <= checkpoint_interval_default <= 100:
+        raise ValueError('checkpoint_interval must be between 5 and 100.')
 
     experiment_type = str(
         payload.get('experiment_type') or 'fresh'
@@ -1073,7 +1469,7 @@ def create_training_batch(payload):
             raise ValueError('training_dataset_id does not exist.')
 
     batch = TrainingBatch(
-        batch_id=str(uuid.uuid4()),
+        batch_id=batch_uuid,
         name=name[:160],
         status='queued',
         experiment_type=experiment_type,
@@ -1225,6 +1621,23 @@ def create_training_batch(payload):
         max_attempts = int(raw_job.get('max_attempts') or max_attempts_default)
         if not 1 <= max_attempts <= 10:
             raise ValueError(f'jobs[{index}].max_attempts must be between 1 and 10.')
+        max_resume_count = int(
+            raw_job.get('max_resume_count')
+            if raw_job.get('max_resume_count') is not None
+            else max_resume_count_default
+        )
+        if not 0 <= max_resume_count <= 10:
+            raise ValueError(
+                f'jobs[{index}].max_resume_count must be between 0 and 10.'
+            )
+        checkpoint_interval = int(
+            raw_job.get('checkpoint_interval')
+            or checkpoint_interval_default
+        )
+        if not 5 <= checkpoint_interval <= 100:
+            raise ValueError(
+                f'jobs[{index}].checkpoint_interval must be between 5 and 100.'
+            )
 
         training_dataset_id = raw_job.get(
             'training_dataset_id',
@@ -1311,6 +1724,8 @@ def create_training_batch(payload):
                 'exclude_flagged': exclude_flagged,
             },
             max_attempts=max_attempts,
+            max_resume_count=max_resume_count,
+            checkpoint_interval=checkpoint_interval,
             message='Waiting for scheduler.',
         )
         db.session.add(task)
@@ -1378,7 +1793,22 @@ def validate_parent_model(model, worker, adapter_factory=adapter_for_worker):
             'Selected worker does not advertise Phase 6 fine-tune support.'
         )
 
-    payload = adapter_factory(worker).upload_model_artifact(artifact)
+    adapter = adapter_factory(worker)
+    store = checkpoint_store()
+    if store.enabled and _worker_supports_object_inputs(worker):
+        _ensure_parent_object(artifact, store)
+        db.session.commit()
+        payload = adapter.resolve_model_artifact(
+            artifact,
+            _object_download_payload(
+                store,
+                object_key=artifact.object_key,
+                sha256=artifact.sha256,
+                size_bytes=artifact.size_bytes,
+            ),
+        )
+    else:
+        payload = adapter.upload_model_artifact(artifact)
     class_names = _canonical_class_names(payload.get('class_names'))
     if not class_names:
         raise WorkerApiError(
@@ -1412,7 +1842,90 @@ def finetune_presets_payload(include_archived=False):
     }
 
 
+def _finetune_replay_matches_payload(batch, tasks, payload):
+    try:
+        project_id = int(payload.get('project_id'))
+        parent_model_id = int(payload.get('parent_model_id'))
+        parameter_set_ids = [
+            int(value)
+            for value in (payload.get('parameter_set_ids') or [])
+        ]
+        requested_splits = payload.get('splits') or {
+            'train': 80,
+            'val': 20,
+            'test': 0,
+        }
+        normalized_splits = {
+            split: int(requested_splits.get(split, 0) or 0)
+            for split in ('train', 'val', 'test')
+        }
+        max_attempts = int(payload.get('max_attempts') or 3)
+        priority = int(payload.get('priority') or 0)
+    except (TypeError, ValueError, AttributeError):
+        return False
+    ordered_tasks = sorted(tasks, key=lambda task: task.id)
+    if (
+        batch.experiment_type != 'finetune_sweep'
+        or batch.parent_model_id != parent_model_id
+        or len(ordered_tasks) != len(parameter_set_ids)
+        or [task.project_id for task in ordered_tasks]
+        != [project_id] * len(ordered_tasks)
+        or [task.parameter_set_id for task in ordered_tasks]
+        != parameter_set_ids
+    ):
+        return False
+    requested_name = str(payload.get('name') or '').strip()
+    if requested_name and batch.name != requested_name[:160]:
+        return False
+    expected_dataset_config = {
+        'splits': normalized_splits,
+        'include_unlabeled': bool(payload.get('include_unlabeled', False)),
+        'exclude_flagged': bool(payload.get('exclude_flagged', True)),
+    }
+    return all(
+        (task.dataset_config or {}) == expected_dataset_config
+        and task.max_attempts == max_attempts
+        and task.priority == priority
+        for task in ordered_tasks
+    )
+
+
 def create_finetune_experiment(payload):
+    submission_id = _normalize_finetune_submission_id(payload)
+    if submission_id is None:
+        batch, tasks = _create_finetune_experiment_once(payload)
+        batch._idempotent_replay = False
+        return batch, tasks
+
+    with _finetune_submission_guard(submission_id):
+        existing_batch = TrainingBatch.query.filter_by(
+            batch_id=submission_id
+        ).first()
+        if existing_batch is not None:
+            existing_tasks = TrainingQueueTask.query.filter_by(
+                batch_id=existing_batch.id
+            ).order_by(TrainingQueueTask.id.asc()).all()
+            if not _finetune_replay_matches_payload(
+                existing_batch,
+                existing_tasks,
+                payload,
+            ):
+                raise ValueError(
+                    'idempotency_key was already used for a different '
+                    'fine-tune request.'
+                )
+            existing_batch._idempotent_replay = True
+            return existing_batch, existing_tasks
+
+        batch, tasks = _create_finetune_experiment_once(
+            payload,
+            batch_id=submission_id,
+        )
+        batch._idempotent_replay = False
+        return batch, tasks
+
+
+def _create_finetune_experiment_once(payload, batch_id=None):
     if not current_app.config.get('TOOLIB_FINETUNE_ENABLED', False):
         raise ValueError('Fine-tune experiments are disabled.')
 
@@ -1565,6 +2078,7 @@ def create_finetune_experiment(payload):
             f'({len(parameter_sets)} parameter sets)'
         )
     return create_training_batch({
+        'batch_id': batch_id,
         'name': name,
         'experiment_type': 'finetune_sweep',
         'parent_model_id': parent_model.id,
@@ -1589,6 +2103,295 @@ def _retry_delay(attempt_count):
     )
 
 
+def _worker_loss_grace():
+    seconds = int(
+        current_app.config.get('TRAINING_WORKER_LOSS_GRACE_SECONDS', 120)
+    )
+    return timedelta(seconds=max(seconds, 30))
+
+
+def _latest_ready_checkpoint(task_id):
+    return TrainingCheckpoint.query.filter_by(
+        task_id=task_id,
+        status='ready',
+    ).order_by(
+        TrainingCheckpoint.generation.desc(),
+        TrainingCheckpoint.epoch.desc(),
+        TrainingCheckpoint.id.desc(),
+    ).first()
+
+
+def _latest_resumable_checkpoint(task):
+    total_epochs = int((task.request_payload or {}).get('epochs') or 1)
+    return TrainingCheckpoint.query.filter(
+        TrainingCheckpoint.task_id == task.id,
+        TrainingCheckpoint.status == 'ready',
+        TrainingCheckpoint.epoch < total_epochs,
+    ).order_by(
+        TrainingCheckpoint.generation.desc(),
+        TrainingCheckpoint.epoch.desc(),
+        TrainingCheckpoint.id.desc(),
+    ).first()
+
+
+def _checkpoint_object_key(store, task, generation, epoch):
+    return store.object_key(
+        'training',
+        task.task_id,
+        'checkpoints',
+        f'generation-{int(generation):03d}',
+        f'epoch-{int(epoch):04d}.pt',
+    )
+
+
+def _sync_training_checkpoint(task, worker, remote_payload):
+    checkpoint_payload = remote_payload.get('latest_checkpoint')
+    if not isinstance(checkpoint_payload, dict):
+        return None
+    store = checkpoint_store()
+    if not store.enabled:
+        return None
+
+    try:
+        checkpoint_id = str(
+            uuid.UUID(str(checkpoint_payload.get('checkpoint_id') or ''))
+        )
+        generation = int(checkpoint_payload.get('generation'))
+        epoch = int(checkpoint_payload.get('epoch'))
+        total_epochs = int(checkpoint_payload.get('total_epochs'))
+        size_bytes = int(checkpoint_payload.get('size_bytes'))
+        sha256 = str(checkpoint_payload.get('sha256') or '').strip().lower()
+    except (TypeError, ValueError, AttributeError):
+        return None
+    if (
+        generation != task.recovery_generation
+        or epoch < 1
+        or total_epochs < epoch
+        or size_bytes <= 0
+        or len(sha256) != 64
+    ):
+        return None
+    try:
+        int(sha256, 16)
+    except ValueError:
+        return None
+
+    expected_key = _checkpoint_object_key(
+        store,
+        task,
+        generation,
+        epoch,
+    )
+    object_key = str(checkpoint_payload.get('object_key') or '')
+    if object_key != expected_key:
+        return None
+    try:
+        stored_object = store.head(object_key)
+    except ObjectStoreError:
+        current_app.logger.warning(
+            'Checkpoint metadata arrived before object verification',
+            extra={
+                'task_id': task.task_id,
+                'checkpoint_id': checkpoint_id,
+            },
+        )
+        return None
+    if stored_object.size_bytes != size_bytes:
+        return None
+
+    checkpoint = TrainingCheckpoint.query.filter_by(
+        task_id=task.id,
+        generation=generation,
+        epoch=epoch,
+    ).first()
+    if checkpoint is None:
+        checkpoint = TrainingCheckpoint(
+            checkpoint_id=checkpoint_id,
+            task_id=task.id,
+            generation=generation,
+            epoch=epoch,
+            total_epochs=total_epochs,
+            status='ready',
+            storage_backend=store.backend_name,
+            object_key=object_key,
+            sha256=sha256,
+            size_bytes=size_bytes,
+        )
+        db.session.add(checkpoint)
+    elif (
+        checkpoint.checkpoint_id != checkpoint_id
+        or checkpoint.sha256 != sha256
+        or checkpoint.size_bytes != size_bytes
+    ):
+        raise WorkerApiError(
+            'Worker reported conflicting checkpoint identity metadata.'
+        )
+    checkpoint.attempt_id = (
+        TrainingJobAttempt.query.filter_by(
+            task_id=task.id,
+            attempt_number=task.attempt_count,
+        ).with_entities(TrainingJobAttempt.id).scalar()
+    )
+    checkpoint.worker_id = worker.id
+    checkpoint.status = 'ready'
+    checkpoint.verified_at = utcnow()
+    checkpoint.metadata_json = {
+        'etag': stored_object.etag,
+        'uploaded_at': checkpoint_payload.get('uploaded_at'),
+    }
+    db.session.flush()
+
+    ready_checkpoints = TrainingCheckpoint.query.filter_by(
+        task_id=task.id,
+        status='ready',
+    ).order_by(
+        TrainingCheckpoint.generation.desc(),
+        TrainingCheckpoint.epoch.desc(),
+        TrainingCheckpoint.id.desc(),
+    ).all()
+    for stale_checkpoint in ready_checkpoints[2:]:
+        stale_checkpoint.status = 'superseded'
+        try:
+            store.delete(stale_checkpoint.object_key)
+        except ObjectStoreError:
+            current_app.logger.warning(
+                'Could not delete superseded checkpoint object',
+                extra={
+                    'task_id': task.task_id,
+                    'checkpoint_id': stale_checkpoint.checkpoint_id,
+                },
+            )
+    return checkpoint
+
+
+def _build_checkpoint_uploads(task, attempt, worker, store):
+    capabilities = worker.capabilities or {}
+    if not store.enabled or not capabilities.get('checkpoint_upload'):
+        return []
+    total_epochs = int((task.request_payload or {}).get('epochs') or 1)
+    start_epoch = int(attempt.resumed_from_epoch or 0)
+    interval = max(int(task.checkpoint_interval or 5), 1)
+    first_epoch = ((start_epoch // interval) + 1) * interval
+    epochs = list(range(first_epoch, total_epochs + 1, interval))
+    if total_epochs > start_epoch and total_epochs not in epochs:
+        epochs.append(total_epochs)
+    if len(epochs) > 64:
+        raise WorkerApiError(
+            'Checkpoint policy creates more than 64 upload targets.'
+        )
+    return [
+        {
+            'checkpoint_id': str(uuid.uuid4()),
+            'epoch': epoch,
+            'object_key': _checkpoint_object_key(
+                store,
+                task,
+                attempt.generation,
+                epoch,
+            ),
+        }
+        for epoch in epochs
+    ]
+
+
+def _build_remote_training_request(task, attempt, worker, dataset):
+    payload = dict(task.request_payload or {})
+    payload['dataset_id'] = dataset.dataset_id
+    capabilities = worker.capabilities or {}
+    store = checkpoint_store()
+    if store.enabled and _worker_supports_object_inputs(worker):
+        if not dataset.object_key:
+            raise WorkerApiError(
+                'Dataset object metadata is missing before submission.'
+            )
+        payload['dataset_object'] = _object_download_payload(
+            store,
+            object_key=dataset.object_key,
+            sha256=dataset.archive_sha256,
+            size_bytes=dataset.archive_size,
+        )
+        training_mode = str(payload.get('training_mode') or 'fresh')
+        if training_mode == 'finetune' and attempt.attempt_kind != 'resume':
+            parent_model = db.session.get(AIModel, task.parent_model_id)
+            parent_artifact = (
+                parent_artifact_for_model(parent_model)
+                if parent_model is not None else None
+            )
+            if parent_artifact is None or not parent_artifact.object_key:
+                raise WorkerApiError(
+                    'Parent object metadata is missing before submission.'
+                )
+            payload['parent_object'] = {
+                'artifact_id': parent_artifact.artifact_id,
+                **_object_download_payload(
+                    store,
+                    object_key=parent_artifact.object_key,
+                    sha256=parent_artifact.sha256,
+                    size_bytes=parent_artifact.size_bytes,
+                ),
+            }
+    if store.enabled and _worker_supports_object_artifacts(worker):
+        payload['artifact_uploads'] = _artifact_upload_targets(
+            store,
+            task,
+            attempt,
+        )
+    supports_checkpoint_protocol = bool(
+        capabilities.get('checkpoint_upload')
+        and capabilities.get('checkpoint_resume')
+    )
+    if not supports_checkpoint_protocol or not store.enabled:
+        if attempt.attempt_kind == 'resume':
+            raise WorkerApiError(
+                'Resume attempt requires checkpoint-capable worker and object storage.'
+            )
+        return payload
+
+    upload_targets = _build_checkpoint_uploads(
+        task,
+        attempt,
+        worker,
+        store,
+    )
+    for target in upload_targets:
+        target['upload_url'] = store.presign_upload(target['object_key'])
+    payload.update({
+        'execution_mode': attempt.attempt_kind,
+        'recovery_generation': attempt.generation,
+        'checkpoint_interval': task.checkpoint_interval,
+        'checkpoint_uploads': upload_targets,
+    })
+    if attempt.attempt_kind == 'resume':
+        checkpoint = db.session.get(
+            TrainingCheckpoint,
+            attempt.resume_checkpoint_id,
+        )
+        if checkpoint is None or checkpoint.status != 'ready':
+            raise WorkerApiError('Resume checkpoint is no longer available.')
+        stored_object = store.head(checkpoint.object_key)
+        if stored_object.size_bytes != checkpoint.size_bytes:
+            raise WorkerApiError('Resume checkpoint size verification failed.')
+        payload['resume_checkpoint'] = {
+            'checkpoint_id': checkpoint.checkpoint_id,
+            'epoch': checkpoint.epoch,
+            'total_epochs': checkpoint.total_epochs,
+            'object_key': checkpoint.object_key,
+            'sha256': checkpoint.sha256,
+            'size_bytes': checkpoint.size_bytes,
+            'download_url': store.presign_download(checkpoint.object_key),
+        }
+    return payload
+
+
+def _attempt_is_current(task, attempt):
+    return bool(
+        task.lease_token
+        and task.lease_token == attempt.lease_token
+        and task.assigned_worker_id == attempt.worker_id
+        and task.recovery_generation == attempt.generation
+    )
+
+
 def _claim_task_for_worker(task, worker):
     if task.status not in DISPATCHABLE_TASK_STATUSES:
         return None
@@ -1597,6 +2400,12 @@ def _claim_task_for_worker(task, worker):
     if _active_lease_count(worker.id) >= worker.capacity:
         return None
 
+    is_resume = task.status == 'resume_pending'
+    resume_checkpoint = (
+        _latest_resumable_checkpoint(task) if is_resume else None
+    )
+    if is_resume and resume_checkpoint is None:
+        return None
     lease_token = str(uuid.uuid4())
     task.attempt_count += 1
     task.assigned_worker_id = worker.id
@@ -1616,6 +2425,14 @@ def _claim_task_for_worker(task, worker):
         task_id=task.id,
         worker_id=worker.id,
         attempt_number=task.attempt_count,
+        attempt_kind='resume' if is_resume else 'initial',
+        generation=task.recovery_generation,
+        resume_checkpoint_id=(
+            resume_checkpoint.id if resume_checkpoint else None
+        ),
+        resumed_from_epoch=(
+            resume_checkpoint.epoch if resume_checkpoint else None
+        ),
         status='leased',
         lease_token=lease_token,
         heartbeat_at=utcnow(),
@@ -1693,6 +2510,13 @@ def _sync_local_training_job(task, worker, remote_payload):
             f'task {linked_task.task_id}.'
         )
     task.training_job_id = job.id
+    current_attempt = TrainingJobAttempt.query.filter_by(
+        task_id=task.id,
+        attempt_number=task.attempt_count,
+    ).first()
+    if current_attempt is not None:
+        current_attempt.training_job_id = job.id
+    _sync_training_checkpoint(task, worker, remote_payload)
     if job.status in REMOTE_TERMINAL_STATUSES:
         if worker.remote_active_job_id == remote_job_id:
             worker.remote_active_job_id = None
@@ -1749,7 +2573,10 @@ def _submission_idempotency_key(task):
             TrainingJob.remote_job_id.in_(remote_job_ids),
             TrainingJob.status == 'failed',
         ).count()
-    generation = failed_remote_jobs + 1
+    generation = max(
+        failed_remote_jobs + 1,
+        int(task.recovery_generation or 1),
+    )
     key_digest = hashlib.sha256(
         task.idempotency_key.encode('utf-8')
     ).hexdigest()[:16]
@@ -1784,7 +2611,8 @@ def _read_training_metrics(results_path):
     return metrics
 
 
-def _import_task_model(task, job, artifact_paths):
+def _import_task_model(task, job, artifact_paths, artifact_objects=None):
+    artifact_objects = artifact_objects or {}
     if task.imported_model_id is not None:
         model = db.session.get(AIModel, task.imported_model_id)
         if model is not None:
@@ -1863,19 +2691,35 @@ def _import_task_model(task, job, artifact_paths):
             kind=model_kind,
         ).first()
         if artifact is None:
+            object_metadata = artifact_objects.get(remote_kind) or {}
             artifact = ModelArtifact(
                 artifact_id=str(uuid.uuid4()),
                 model_id=existing.id,
                 kind=model_kind,
                 storage_path=str(local_path),
+                storage_backend=(
+                    's3' if object_metadata.get('object_key') else 'local'
+                ),
+                object_key=object_metadata.get('object_key'),
+                object_verified_at=(
+                    utcnow() if object_metadata.get('object_key') else None
+                ),
                 sha256=sha256_path(local_path),
                 size_bytes=local_path.stat().st_size,
                 metadata_json={
                     'task_id': task.task_id,
                     'remote_job_id': job.remote_job_id,
+                    'object_transport': bool(
+                        object_metadata.get('object_key')
+                    ),
                 },
             )
             db.session.add(artifact)
+        elif artifact_objects.get(remote_kind):
+            object_metadata = artifact_objects[remote_kind]
+            artifact.storage_backend = 's3'
+            artifact.object_key = object_metadata.get('object_key')
+            artifact.object_verified_at = utcnow()
 
     metrics = dict(job.metrics or {})
     if not metrics:
@@ -1993,7 +2837,13 @@ def _handle_pipeline_failure(task, attempt, exc):
         attempt.remote_job_id
         and not isinstance(exc, RemoteTrainingFailedError)
     ):
+        lost_at = utcnow()
         attempt.status = 'worker_lost'
+        task.worker_lost_at = task.worker_lost_at or lost_at
+        task.recovery_deadline_at = (
+            task.recovery_deadline_at
+            or lost_at + _worker_loss_grace()
+        )
         transition_task(
             task,
             'worker_lost',
@@ -2006,6 +2856,8 @@ def _handle_pipeline_failure(task, attempt, exc):
     elif task.attempt_count < task.max_attempts:
         attempt.status = 'failed'
         task.assigned_worker_id = None
+        task.worker_lost_at = None
+        task.recovery_deadline_at = None
         task.next_attempt_at = utcnow() + _retry_delay(task.attempt_count)
         transition_task(
             task,
@@ -2017,6 +2869,8 @@ def _handle_pipeline_failure(task, attempt, exc):
         )
     else:
         attempt.status = 'failed'
+        task.worker_lost_at = None
+        task.recovery_deadline_at = None
         transition_task(
             task,
             'failed',
@@ -2039,6 +2893,8 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
             worker = db.session.get(TrainingWorker, attempt.worker_id)
             if worker is None or not worker.enabled:
                 raise WorkerUnavailableError('Assigned worker is unavailable.')
+            if not _attempt_is_current(task, attempt):
+                return
             adapter = adapter_factory(worker)
 
             dataset = (
@@ -2108,7 +2964,15 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                     (task.request_payload or {}).get('training_mode')
                     or 'fresh'
                 )
-                if training_mode == 'finetune':
+                store = checkpoint_store()
+                use_object_inputs = (
+                    store.enabled
+                    and _worker_supports_object_inputs(worker)
+                )
+                if (
+                    training_mode == 'finetune'
+                    and attempt.attempt_kind != 'resume'
+                ):
                     parent_model = db.session.get(
                         AIModel,
                         task.parent_model_id,
@@ -2127,6 +2991,9 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                         'uploading_parent_model',
                         'uploading_parent_model',
                         (
+                            f'Publishing parent model '
+                            f'{parent_artifact.sha256[:12]} for {worker.name}.'
+                            if use_object_inputs else
                             f'Caching parent model '
                             f'{parent_artifact.sha256[:12]} on {worker.name}.'
                         ),
@@ -2134,33 +3001,91 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                     )
                     _renew_lease(task, attempt)
                     db.session.commit()
-                    remote_parent = adapter.upload_model_artifact(
-                        parent_artifact
-                    )
-                    remote_classes = _canonical_class_names(
-                        remote_parent.get('class_names')
-                    )
-                    if (
-                        remote_classes
-                        and remote_classes
-                        != _canonical_class_names(parent_model.class_names)
-                    ):
-                        raise WorkerApiError(
-                            'Worker checkpoint class metadata changed.'
+                    if use_object_inputs:
+                        _ensure_parent_object(parent_artifact, store)
+                        db.session.commit()
+                    else:
+                        remote_parent = adapter.upload_model_artifact(
+                            parent_artifact
                         )
+                        remote_classes = _canonical_class_names(
+                            remote_parent.get('class_names')
+                        )
+                        if (
+                            remote_classes
+                            and remote_classes
+                            != _canonical_class_names(parent_model.class_names)
+                        ):
+                            raise WorkerApiError(
+                                'Worker checkpoint class metadata changed.'
+                            )
 
                 transition_task(
                     task,
                     'uploading_dataset',
                     'uploading_dataset',
-                    f'Uploading dataset {dataset.dataset_id} to {worker.name}.',
+                    (
+                        f'Publishing dataset {dataset.dataset_id} to object storage.'
+                        if use_object_inputs else
+                        f'Uploading dataset {dataset.dataset_id} to {worker.name}.'
+                    ),
                     attempt=attempt,
                 )
                 _renew_lease(task, attempt)
                 db.session.commit()
-                remote_dataset = adapter.upload_dataset(dataset)
+                if use_object_inputs:
+                    def mark_waiting_for_shared_dataset():
+                        transition_task(
+                            task,
+                            'uploading_dataset',
+                            'waiting_shared_dataset',
+                            (
+                                f'Waiting for shared dataset '
+                                f'{dataset.dataset_id} to finish publishing.'
+                            ),
+                            attempt=attempt,
+                        )
+                        _renew_lease(task, attempt)
+                        db.session.commit()
+
+                    def heartbeat_shared_dataset_wait():
+                        _renew_lease(task, attempt)
+                        db.session.commit()
+
+                    _object_key, reused_dataset = _ensure_dataset_object(
+                        dataset,
+                        store,
+                        on_wait=mark_waiting_for_shared_dataset,
+                        on_heartbeat=heartbeat_shared_dataset_wait,
+                    )
+                    transition_task(
+                        task,
+                        'uploading_dataset',
+                        (
+                            'reusing_shared_dataset'
+                            if reused_dataset else
+                            'published_shared_dataset'
+                        ),
+                        (
+                            f'Reusing shared dataset object '
+                            f'{dataset.archive_sha256[:12]}.'
+                            if reused_dataset else
+                            f'Published shared dataset object '
+                            f'{dataset.archive_sha256[:12]}.'
+                        ),
+                        attempt=attempt,
+                    )
+                    _renew_lease(task, attempt)
+                    remote_dataset = {
+                        'object_key': dataset.object_key,
+                        'storage_backend': dataset.storage_backend,
+                    }
+                else:
+                    remote_dataset = adapter.upload_dataset(dataset)
                 dataset.status = 'uploaded'
-                dataset.remote_api_url = worker.api_url
+                dataset.remote_api_url = (
+                    None if use_object_inputs else worker.api_url
+                )
                 dataset.remote_drive_path = (
                     str(remote_dataset.get('drive_path') or '')[:1000] or None
                 )
@@ -2177,8 +3102,12 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 )
                 _renew_lease(task, attempt)
                 db.session.commit()
-                submit_payload = dict(task.request_payload or {})
-                submit_payload['dataset_id'] = dataset.dataset_id
+                submit_payload = _build_remote_training_request(
+                    task,
+                    attempt,
+                    worker,
+                    dataset,
+                )
                 submission_key = _submission_idempotency_key(task)
                 remote = adapter.submit_job(submit_payload, submission_key)
                 _persist_remote_acceptance(task, attempt, worker, remote)
@@ -2202,6 +3131,10 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
             )
             polling_started = time.monotonic()
             while True:
+                if not _attempt_is_current(task, attempt):
+                    raise WorkerUnavailableError(
+                        'Attempt was superseded by a newer recovery generation.'
+                    )
                 if time.monotonic() - polling_started > maximum_runtime:
                     raise WorkerUnavailableError(
                         'Remote training exceeded the configured polling lifetime.'
@@ -2241,6 +3174,10 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 raise RemoteTrainingFailedError(
                     job.error or job.message or 'Remote training failed.'
                 )
+            if not _attempt_is_current(task, attempt):
+                raise WorkerUnavailableError(
+                    'Stale worker result was fenced before artifact import.'
+                )
 
             transition_task(
                 task,
@@ -2253,6 +3190,11 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
             db.session.commit()
             remote_artifacts = (
                 job.artifacts if isinstance(job.artifacts, dict) else {}
+            )
+            artifact_objects = (
+                remote_artifacts.get('_objects')
+                if isinstance(remote_artifacts.get('_objects'), dict)
+                else {}
             )
             mandatory_artifacts = {'onnx'}
             if job.training_mode == 'finetune':
@@ -2318,12 +3260,55 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                     progress_state['reported_at'] = now
 
                 with _TaskLeaseHeartbeat(app, task, attempt):
-                    adapter.download_artifact(
-                        job.remote_job_id,
-                        artifact_kind,
-                        destination,
-                        progress_callback=report_artifact_progress,
-                    )
+                    object_metadata = artifact_objects.get(artifact_kind)
+                    if object_metadata:
+                        store = checkpoint_store()
+                        if not store.enabled:
+                            raise WorkerApiError(
+                                'Worker returned object artifacts while storage is disabled.'
+                            )
+                        expected_key = _artifact_object_key(
+                            store,
+                            task,
+                            attempt,
+                            artifact_kind,
+                        )
+                        if object_metadata.get('object_key') != expected_key:
+                            raise WorkerApiError(
+                                f'{artifact_kind} artifact object key is not task-scoped.'
+                            )
+                        stored_object = store.head(expected_key)
+                        expected_size = int(
+                            object_metadata.get('size_bytes') or 0
+                        )
+                        if (
+                            expected_size <= 0
+                            or stored_object.size_bytes != expected_size
+                        ):
+                            raise WorkerApiError(
+                                f'{artifact_kind} artifact size verification failed.'
+                            )
+                        task.message = (
+                            f'Downloading {artifact_kind.upper()} directly '
+                            'from object storage.'
+                        )
+                        db.session.commit()
+                        store.download_file(expected_key, destination)
+                        if (
+                            sha256_path(destination)
+                            != object_metadata.get('sha256')
+                        ):
+                            destination.unlink(missing_ok=True)
+                            raise WorkerApiError(
+                                f'{artifact_kind} artifact checksum verification failed.'
+                            )
+                    else:
+                        adapter.download_artifact(
+                            job.remote_job_id,
+                            artifact_kind,
+                            destination,
+                            progress_callback=report_artifact_progress,
+                        )
                 if not destination.is_file() or destination.stat().st_size <= 0:
                     raise WorkerApiError(
                         f'Downloaded {artifact_kind} artifact is empty.'
@@ -2338,10 +3323,17 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 attempt=attempt,
             )
             db.session.commit()
-            model = _import_task_model(task, job, artifact_paths)
+            model = _import_task_model(
+                task,
+                job,
+                artifact_paths,
+                artifact_objects=artifact_objects,
+            )
             attempt.status = 'succeeded'
             attempt.finished_at = utcnow()
             task.error = None
+            task.worker_lost_at = None
+            task.recovery_deadline_at = None
             transition_task(
                 task,
                 'succeeded',
@@ -2366,6 +3358,14 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
             task = db.session.get(TrainingQueueTask, task_id)
             attempt = db.session.get(TrainingJobAttempt, attempt_id)
             if task is not None and attempt is not None:
+                if not _attempt_is_current(task, attempt):
+                    attempt.status = 'superseded'
+                    attempt.finished_at = attempt.finished_at or utcnow()
+                    attempt.error = (
+                        'Attempt result ignored after recovery generation changed.'
+                    )
+                    db.session.commit()
+                    return
                 current_app.logger.exception(
                     'Training task pipeline failed',
                     extra={
@@ -2414,6 +3414,11 @@ def recover_expired_leases():
             continue
         if attempt.remote_job_id:
             attempt.status = 'worker_lost'
+            task.worker_lost_at = task.worker_lost_at or now
+            task.recovery_deadline_at = (
+                task.recovery_deadline_at
+                or now + _worker_loss_grace()
+            )
             transition_task(
                 task,
                 'worker_lost',
@@ -2451,43 +3456,123 @@ def recover_expired_leases():
 
 def _resume_worker_lost_tasks(app, adapter_factory, asynchronous):
     resumed = 0
+    now = utcnow()
     tasks = TrainingQueueTask.query.filter_by(status='worker_lost').order_by(
         TrainingQueueTask.id.asc()
     ).all()
     for task in tasks:
-        worker = db.session.get(TrainingWorker, task.assigned_worker_id)
-        if worker is None or worker.status != 'online' or not worker.enabled:
-            continue
         attempt = TrainingJobAttempt.query.filter_by(
             task_id=task.id,
             attempt_number=task.attempt_count,
         ).first()
         if attempt is None or not attempt.remote_job_id:
             continue
-        task.lease_token = attempt.lease_token
-        task.lease_expires_at = utcnow() + _lease_duration()
-        attempt.status = 'running'
-        attempt.finished_at = None
+        worker = db.session.get(TrainingWorker, task.assigned_worker_id)
+        if (
+            worker is not None
+            and worker.status == 'online'
+            and worker.enabled
+        ):
+            task.lease_token = attempt.lease_token
+            task.lease_expires_at = now + _lease_duration()
+            task.worker_lost_at = None
+            task.recovery_deadline_at = None
+            attempt.status = 'running'
+            attempt.finished_at = None
+            transition_task(
+                task,
+                'remote_running',
+                'remote_running',
+                'Worker reconnected; resuming remote job polling.',
+                attempt=attempt,
+            )
+            db.session.commit()
+            if _submit_task_pipeline(
+                app,
+                task,
+                attempt,
+                adapter_factory,
+                asynchronous,
+            ):
+                resumed += 1
+            continue
+
+        if (
+            task.recovery_deadline_at is None
+            or task.recovery_deadline_at > now
+            or task.resume_count >= task.max_resume_count
+        ):
+            continue
+        try:
+            store = checkpoint_store()
+        except ObjectStoreError:
+            continue
+        checkpoint = _latest_resumable_checkpoint(task)
+        if not store.enabled or checkpoint is None:
+            continue
+        try:
+            stored_object = store.head(checkpoint.object_key)
+        except ObjectStoreError:
+            continue
+        if stored_object.size_bytes != checkpoint.size_bytes:
+            continue
+
+        attempt.training_job_id = (
+            attempt.training_job_id or task.training_job_id
+        )
+        attempt.status = 'abandoned'
+        attempt.finished_at = now
+        attempt.error = (
+            'Original worker did not reconnect before the recovery deadline.'
+        )
+        task.resume_count += 1
+        task.recovery_generation += 1
+        task.max_attempts = max(
+            task.max_attempts,
+            task.attempt_count + 1,
+        )
+        task.assigned_worker_id = None
+        task.training_job_id = None
+        task.lease_token = None
+        task.lease_expires_at = None
+        task.worker_lost_at = None
+        task.recovery_deadline_at = None
+        task.next_attempt_at = now
+        task.error = None
         transition_task(
             task,
-            'remote_running',
-            'remote_running',
-            'Worker reconnected; resuming remote job polling.',
+            'resume_pending',
+            'resume_pending',
+            (
+                f'Checkpoint epoch {checkpoint.epoch}/'
+                f'{checkpoint.total_epochs} is ready for another worker.'
+            ),
             attempt=attempt,
+            details={
+                'checkpoint_id': checkpoint.checkpoint_id,
+                'checkpoint_epoch': checkpoint.epoch,
+                'recovery_generation': task.recovery_generation,
+            },
         )
+        refresh_batch_status(task.batch_id)
         db.session.commit()
-        if _submit_task_pipeline(
-            app,
-            task,
-            attempt,
-            adapter_factory,
-            asynchronous,
-        ):
-            resumed += 1
+        resumed += 1
     return resumed
 
 
 def _worker_supports_task(worker, task):
+    if task.status == 'resume_pending':
+        capabilities = worker.capabilities or {}
+        try:
+            store_enabled = checkpoint_store().enabled
+        except ObjectStoreError:
+            store_enabled = False
+        if not (
+            store_enabled
+            and capabilities.get('checkpoint_upload')
+            and capabilities.get('checkpoint_resume')
+        ):
+            return False
     training_mode = str(
         (task.request_payload or {}).get('training_mode') or 'fresh'
     )
@@ -2706,7 +3791,21 @@ def adopt_remote_job(
 
 
 def scheduler_status():
+    try:
+        store = checkpoint_store()
+        object_store_status = {
+            'backend': store.backend_name,
+            'enabled': bool(store.enabled),
+            'error': None,
+        }
+    except ObjectStoreError as exc:
+        object_store_status = {
+            'backend': 'error',
+            'enabled': False,
+            'error': str(exc),
+        }
     return {
+        'object_store': object_store_status,
         'workers': {
             'total': TrainingWorker.query.count(),
             'online': TrainingWorker.query.filter_by(

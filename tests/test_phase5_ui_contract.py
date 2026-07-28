@@ -58,6 +58,31 @@ def test_colab_manager_uses_database_parameter_sets_not_candidate_counts():
     assert 'candidate_count:' not in template
 
 
+def test_finetune_submit_has_immediate_feedback_and_idempotency_guard():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    for marker in (
+        'id="finetuneExperimentSubmitStatus"',
+        'aria-live="polite"',
+        'let finetuneExperimentSubmitting = false;',
+        'let finetunePendingSubmission = null;',
+        'if (finetuneExperimentSubmitting)',
+        'finetuneExperimentSubmitting = true;',
+        'window.crypto.randomUUID()',
+        '"Idempotency-Key":',
+        'requestBody.idempotency_key',
+        'button.setAttribute("aria-busy", "true")',
+        'fa-spinner fa-spin',
+        'không cần bấm lại',
+        'experiment.idempotent_replay',
+        'scrollIntoView({',
+        'card.id = `training-batch-${batch.id}`',
+    ):
+        assert marker in template
+
+
 def test_run_script_starts_and_stops_dedicated_scheduler_process():
     run_script = (REPOSITORY_ROOT / 'run.ps1').read_text(encoding='utf-8')
 

@@ -10,6 +10,7 @@ from unittest import mock
 
 from cryptography.fernet import Fernet
 
+from artifact_object_store import ObjectStoreError
 from models import (
     db,
     AIModel,
@@ -17,13 +18,17 @@ from models import (
     ModelArtifact,
     Project,
     TrainingBatch,
+    TrainingCheckpoint,
     TrainingDataset,
+    TrainingJob,
     TrainingJobAttempt,
+    TrainingJobEvent,
     TrainingQueueTask,
     TrainingWorker,
 )
 from test_helpers import create_isolated_test_app
 from training_control_plane import (
+    _attempt_is_current,
     ColabHttpWorkerAdapter,
     WorkerUnavailableError,
     create_finetune_experiment,
@@ -152,6 +157,104 @@ class FakeWorkerAdapter:
         if progress_callback is not None:
             progress_callback(len(content), len(content))
         return destination
+
+
+class FakeStoredObject:
+    def __init__(self, size_bytes):
+        self.size_bytes = size_bytes
+        self.etag = 'fake-etag'
+
+
+class FakeObjectStore:
+    backend_name = 's3'
+    enabled = True
+
+    def __init__(self):
+        self.objects = {}
+        self.upload_counts = {}
+
+    def object_key(self, *parts):
+        return 'toolib/' + '/'.join(str(part) for part in parts)
+
+    def presign_upload(self, object_key):
+        return f'https://objects.example/upload/{object_key}'
+
+    def presign_download(self, object_key):
+        return f'https://objects.example/download/{object_key}'
+
+    def head(self, object_key):
+        if object_key not in self.objects:
+            raise ObjectStoreError(f'Object does not exist: {object_key}')
+        return FakeStoredObject(len(self.objects[object_key]))
+
+    def upload_file(self, source, object_key):
+        self.objects[object_key] = Path(source).read_bytes()
+        self.upload_counts[object_key] = (
+            self.upload_counts.get(object_key, 0) + 1
+        )
+        return self.head(object_key)
+
+    def download_file(self, object_key, destination):
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(self.objects[object_key])
+        return destination
+
+
+class ObjectTransportWorkerAdapter(FakeWorkerAdapter):
+    def __init__(self, worker, state, object_store):
+        super().__init__(worker, state)
+        self.object_store = object_store
+
+    def upload_dataset(self, dataset):
+        raise AssertionError('Dataset must not pass through the tunnel.')
+
+    def upload_model_artifact(self, artifact):
+        raise AssertionError('Parent model must not pass through the tunnel.')
+
+    def download_artifact(
+        self,
+        remote_job_id,
+        artifact_kind,
+        destination,
+        progress_callback=None,
+    ):
+        raise AssertionError('Artifact must be downloaded from object storage.')
+
+    def get_job(self, remote_job_id):
+        request_payload = self.state.requests_by_job[remote_job_id]
+        object_artifacts = {}
+        artifacts = {}
+        for target in request_payload['artifact_uploads']:
+            content = (
+                f'{remote_job_id}:{target["kind"]}:object'
+            ).encode('utf-8')
+            self.object_store.objects[target['object_key']] = content
+            object_artifacts[target['kind']] = {
+                'kind': target['kind'],
+                'object_key': target['object_key'],
+                'sha256': hashlib.sha256(content).hexdigest(),
+                'size_bytes': len(content),
+                'uploaded_at': '2026-07-28T00:00:00+00:00',
+            }
+            artifacts[target['kind']] = (
+                f'/content/toolib_poc/artifacts/{remote_job_id}/'
+                f'{target["kind"]}'
+            )
+        artifacts['_objects'] = object_artifacts
+        return {
+            'job_id': remote_job_id,
+            'status': 'succeeded',
+            'model': request_payload.get('model', 'yolo11n.pt'),
+            'epochs': request_payload.get('epochs', 1),
+            'batch': request_payload.get('batch', 4),
+            'imgsz': request_payload.get('imgsz', 640),
+            'current_epoch': request_payload.get('epochs', 1),
+            'total_epochs': request_payload.get('epochs', 1),
+            'message': 'Training and object upload completed.',
+            'artifacts': artifacts,
+            'metrics': {'metrics/mAP50-95(B)': 0.51},
+        }
 
 
 class TestTrainingControlPlane:
@@ -596,6 +699,111 @@ class TestTrainingControlPlane:
             assert len({task.training_dataset_id for task in tasks}) == 1
             assert TrainingDataset.query.count() == 1
 
+    def test_finetune_submit_idempotency_replays_without_new_snapshot(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(2)
+        submission_id = str(uuid.uuid4())
+        payload = {
+            'name': 'Idempotent two-candidate smoke test',
+            'project_id': self.project_ids[0],
+            'parent_model_id': parent_model_id,
+            'parameter_set_ids': parameter_set_ids,
+            'splits': {'train': 80, 'val': 20, 'test': 0},
+            'exclude_flagged': True,
+            'include_unlabeled': False,
+            'max_attempts': 3,
+            'priority': 0,
+        }
+        headers = {'Idempotency-Key': submission_id}
+
+        first = self.client.post(
+            '/api/finetune-experiments',
+            json=payload,
+            headers=headers,
+        )
+        second = self.client.post(
+            '/api/finetune-experiments',
+            json=payload,
+            headers=headers,
+        )
+
+        assert first.status_code == 201, first.get_data(as_text=True)
+        assert second.status_code == 200, second.get_data(as_text=True)
+        first_body = first.get_json()
+        second_body = second.get_json()
+        assert first_body['batch_id'] == submission_id
+        assert second_body['batch_id'] == submission_id
+        assert first_body['idempotent_replay'] is False
+        assert second_body['idempotent_replay'] is True
+        assert len(first_body['tasks']) == 2
+        assert len(second_body['tasks']) == 2
+        with self.app.app_context():
+            assert TrainingBatch.query.count() == 1
+            assert TrainingDataset.query.count() == 1
+            assert TrainingQueueTask.query.count() == 2
+
+        conflicting = self.client.post(
+            '/api/finetune-experiments',
+            json={**payload, 'name': 'Different request'},
+            headers=headers,
+        )
+        assert conflicting.status_code == 400
+        assert 'different fine-tune request' in (
+            conflicting.get_json()['error']
+        )
+        with self.app.app_context():
+            assert TrainingBatch.query.count() == 1
+            assert TrainingDataset.query.count() == 1
+
+    def test_concurrent_finetune_submit_creates_one_batch_and_snapshot(self):
+        parent_model_id = self.create_parent_model()
+        submission_id = str(uuid.uuid4())
+        payload = {
+            'name': 'Concurrent idempotent smoke test',
+            'project_id': self.project_ids[0],
+            'parent_model_id': parent_model_id,
+            'parameter_set_ids': self.active_parameter_set_ids(2),
+            'splits': {'train': 80, 'val': 20, 'test': 0},
+        }
+        start_barrier = threading.Barrier(2)
+        responses = []
+        response_lock = threading.Lock()
+
+        def submit():
+            start_barrier.wait(timeout=5)
+            with self.app.test_client() as client:
+                response = client.post(
+                    '/api/finetune-experiments',
+                    json=payload,
+                    headers={'Idempotency-Key': submission_id},
+                )
+                result = (response.status_code, response.get_json())
+            with response_lock:
+                responses.append(result)
+
+        first_thread = threading.Thread(target=submit)
+        second_thread = threading.Thread(target=submit)
+        first_thread.start()
+        second_thread.start()
+        first_thread.join(timeout=10)
+        second_thread.join(timeout=10)
+
+        assert not first_thread.is_alive()
+        assert not second_thread.is_alive()
+        assert sorted(status for status, _body in responses) == [200, 201]
+        assert {
+            body['batch_id']
+            for _status, body in responses
+        } == {submission_id}
+        assert sorted(
+            body['idempotent_replay']
+            for _status, body in responses
+        ) == [False, True]
+        with self.app.app_context():
+            assert TrainingBatch.query.count() == 1
+            assert TrainingDataset.query.count() == 1
+            assert TrainingQueueTask.query.count() == 2
+
     def test_two_workers_process_three_finetune_candidates_with_lineage(self):
         parent_model_id = self.create_parent_model()
         parameter_set_ids = self.active_parameter_set_ids(3)
@@ -656,6 +864,367 @@ class TestTrainingControlPlane:
                     'args',
                 }.issubset(artifact_kinds)
         assert state.model_upload_count == 3
+
+    def test_object_transport_reuses_inputs_and_bypasses_tunnel_transfers(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(2)
+        worker_id = self.add_worker('ObjectTransportWorker')
+        with self.app.app_context():
+            worker = db.session.get(TrainingWorker, worker_id)
+            worker.capabilities = {
+                **(worker.capabilities or {}),
+                'object_input_download': True,
+                'artifact_object_upload': True,
+                'object_transport_protocol_version': 1,
+            }
+            batch, _tasks = create_finetune_experiment({
+                'name': 'Two candidates over object storage',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            batch_id = batch.id
+            db.session.commit()
+
+        state = FakeWorkerState()
+        object_store = FakeObjectStore()
+        factory = lambda worker: ObjectTransportWorkerAdapter(
+            worker,
+            state,
+            object_store,
+        )
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            first = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=False,
+            )
+            second = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=False,
+            )
+
+        assert first['dispatched'] == 1
+        assert second['dispatched'] == 1
+        assert state.model_upload_count == 0
+        assert state.max_active_uploads == 0
+        requests = list(state.requests_by_job.values())
+        assert len(requests) == 2
+        assert len({
+            request['dataset_object']['object_key']
+            for request in requests
+        }) == 1
+        assert len({
+            request['parent_object']['object_key']
+            for request in requests
+        }) == 1
+        assert all(
+            len(request['artifact_uploads']) == 6
+            for request in requests
+        )
+        assert all(
+            request['dataset_object']['download_url'].startswith(
+                'https://objects.example/download/'
+            )
+            for request in requests
+        )
+
+        input_uploads = {
+            key: count
+            for key, count in object_store.upload_counts.items()
+            if '/datasets/' in key or '/parents/' in key
+        }
+        assert len(input_uploads) == 2
+        assert set(input_uploads.values()) == {1}
+
+        with self.app.app_context():
+            batch = db.session.get(TrainingBatch, batch_id)
+            assert batch.status == 'succeeded'
+            dataset = TrainingDataset.query.one()
+            assert dataset.storage_backend == 's3'
+            assert dataset.object_key
+
+    def test_parallel_object_transport_publishes_shared_dataset_once(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(2)
+        for worker_name in ('ObjectWorkerA', 'ObjectWorkerB'):
+            worker_id = self.add_worker(worker_name)
+            with self.app.app_context():
+                worker = db.session.get(TrainingWorker, worker_id)
+                worker.capabilities = {
+                    **(worker.capabilities or {}),
+                    'object_input_download': True,
+                    'artifact_object_upload': True,
+                    'object_transport_protocol_version': 1,
+                }
+                db.session.commit()
+
+        with self.app.app_context():
+            batch, _tasks = create_finetune_experiment({
+                'name': 'Parallel shared dataset publish',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            batch_id = batch.id
+            db.session.commit()
+
+        class BlockingObjectStore(FakeObjectStore):
+            def __init__(self):
+                super().__init__()
+                self.dataset_upload_started = threading.Event()
+                self.release_dataset_upload = threading.Event()
+                self.dataset_upload_attempts = 0
+                self.dataset_upload_lock = threading.Lock()
+
+            def upload_file(self, source, object_key):
+                if '/datasets/' in object_key:
+                    with self.dataset_upload_lock:
+                        self.dataset_upload_attempts += 1
+                    self.dataset_upload_started.set()
+                    if not self.release_dataset_upload.wait(timeout=5):
+                        raise AssertionError(
+                            'Timed out waiting to release dataset upload.'
+                        )
+                return super().upload_file(source, object_key)
+
+        state = FakeWorkerState()
+        object_store = BlockingObjectStore()
+        factory = lambda worker: ObjectTransportWorkerAdapter(
+            worker,
+            state,
+            object_store,
+        )
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            result = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=True,
+            )
+            assert result['dispatched'] == 2
+            assert object_store.dataset_upload_started.wait(timeout=5)
+
+            waiting_seen = False
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with self.app.app_context():
+                    waiting_seen = (
+                        TrainingQueueTask.query.filter_by(
+                            stage='waiting_shared_dataset'
+                        ).count()
+                        == 1
+                    )
+                if waiting_seen:
+                    break
+                time.sleep(0.05)
+
+            object_store.release_dataset_upload.set()
+            assert waiting_seen
+            self.wait_for_terminal_count(2)
+
+        dataset_uploads = {
+            key: count
+            for key, count in object_store.upload_counts.items()
+            if '/datasets/' in key
+        }
+        assert object_store.dataset_upload_attempts == 1
+        assert len(dataset_uploads) == 1
+        assert set(dataset_uploads.values()) == {1}
+        assert len({
+            request['dataset_object']['object_key']
+            for request in state.requests_by_job.values()
+        }) == 1
+
+        with self.app.app_context():
+            batch = db.session.get(TrainingBatch, batch_id)
+            assert batch.status == 'succeeded'
+            event_messages = [
+                event.message or ''
+                for event in TrainingJobEvent.query.order_by(
+                    TrainingJobEvent.id.asc()
+                ).all()
+            ]
+            assert any(
+                'Waiting for shared dataset' in message
+                for message in event_messages
+            )
+            assert any(
+                'Reusing shared dataset object' in message
+                for message in event_messages
+            )
+
+    def test_waiting_task_takes_over_failed_shared_dataset_publish(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(2)
+        for worker_name in ('TakeoverWorkerA', 'TakeoverWorkerB'):
+            worker_id = self.add_worker(worker_name)
+            with self.app.app_context():
+                worker = db.session.get(TrainingWorker, worker_id)
+                worker.capabilities = {
+                    **(worker.capabilities or {}),
+                    'object_input_download': True,
+                    'artifact_object_upload': True,
+                    'object_transport_protocol_version': 1,
+                }
+                db.session.commit()
+
+        with self.app.app_context():
+            batch, _tasks = create_finetune_experiment({
+                'name': 'Failed shared publish takeover',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+            batch_id = batch.id
+            db.session.commit()
+
+        class FailOnceObjectStore(FakeObjectStore):
+            def __init__(self):
+                super().__init__()
+                self.dataset_upload_started = threading.Event()
+                self.release_failed_upload = threading.Event()
+                self.dataset_upload_attempts = 0
+                self.dataset_upload_lock = threading.Lock()
+
+            def upload_file(self, source, object_key):
+                if '/datasets/' in object_key:
+                    with self.dataset_upload_lock:
+                        self.dataset_upload_attempts += 1
+                        attempt_number = self.dataset_upload_attempts
+                    if attempt_number == 1:
+                        self.dataset_upload_started.set()
+                        if not self.release_failed_upload.wait(timeout=5):
+                            raise AssertionError(
+                                'Timed out waiting to fail dataset upload.'
+                            )
+                        raise ObjectStoreError(
+                            'Simulated first dataset publish failure.'
+                        )
+                return super().upload_file(source, object_key)
+
+        state = FakeWorkerState()
+        object_store = FailOnceObjectStore()
+        factory = lambda worker: ObjectTransportWorkerAdapter(
+            worker,
+            state,
+            object_store,
+        )
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            first_dispatch = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=True,
+            )
+            assert first_dispatch['dispatched'] == 2
+            assert object_store.dataset_upload_started.wait(timeout=5)
+
+            waiting_seen = False
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with self.app.app_context():
+                    waiting_seen = (
+                        TrainingQueueTask.query.filter_by(
+                            stage='waiting_shared_dataset'
+                        ).count()
+                        == 1
+                    )
+                if waiting_seen:
+                    break
+                time.sleep(0.05)
+
+            object_store.release_failed_upload.set()
+            assert waiting_seen
+            self.wait_for_terminal_count(1)
+
+            retry_ready = False
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with self.app.app_context():
+                    retry_ready = (
+                        TrainingQueueTask.query.filter_by(
+                            status='retry_wait'
+                        ).count()
+                        == 1
+                    )
+                if retry_ready:
+                    break
+                time.sleep(0.05)
+            assert retry_ready
+
+            second_dispatch = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=True,
+            )
+            assert second_dispatch['dispatched'] == 1
+            self.wait_for_terminal_count(2)
+
+        dataset_uploads = {
+            key: count
+            for key, count in object_store.upload_counts.items()
+            if '/datasets/' in key
+        }
+        assert object_store.dataset_upload_attempts == 2
+        assert len(dataset_uploads) == 1
+        assert set(dataset_uploads.values()) == {1}
+
+        with self.app.app_context():
+            batch = db.session.get(TrainingBatch, batch_id)
+            assert batch.status == 'succeeded'
+            tasks = TrainingQueueTask.query.filter_by(
+                batch_id=batch_id
+            ).all()
+            assert sorted(task.attempt_count for task in tasks) == [1, 2]
+            event_messages = [
+                event.message or ''
+                for event in TrainingJobEvent.query.order_by(
+                    TrainingJobEvent.id.asc()
+                ).all()
+            ]
+            assert any(
+                'Simulated first dataset publish failure'
+                in (attempt.error or '')
+                for attempt in TrainingJobAttempt.query.all()
+            )
+            assert sum(
+                'Reusing shared dataset object' in message
+                for message in event_messages
+            ) >= 1
+            parent_artifact = (
+                ModelArtifact.query
+                .filter_by(model_id=parent_model_id, kind='parent_pt')
+                .one()
+            )
+            assert parent_artifact.storage_backend == 's3'
+            assert parent_artifact.object_key
+            children = AIModel.query.filter_by(
+                parent_model_id=parent_model_id,
+                source_kind='training',
+            ).all()
+            assert len(children) == 2
+            for child in children:
+                assert child.finetune_status == 'ready'
+                assert all(
+                    artifact.storage_backend == 's3'
+                    and artifact.object_key
+                    and Path(artifact.storage_path).is_file()
+                    for artifact in child.artifacts
+                )
 
     def test_old_worker_does_not_receive_finetune_task(self):
         parent_model_id = self.create_parent_model()
@@ -932,6 +1501,184 @@ class TestTrainingControlPlane:
         with self.app.app_context():
             assert TrainingQueueTask.query.one().status == 'succeeded'
             assert TrainingJobAttempt.query.one().status == 'succeeded'
+
+    def test_checkpoint_failover_resumes_on_another_worker_generation(self):
+        worker_a_id = self.add_worker('ResumeWorkerA')
+        worker_b_id = self.add_worker('ResumeWorkerB')
+        with self.app.app_context():
+            for worker_id in (worker_a_id, worker_b_id):
+                worker = db.session.get(TrainingWorker, worker_id)
+                worker.capabilities = {
+                    **(worker.capabilities or {}),
+                    'checkpoint_upload': True,
+                    'checkpoint_resume': True,
+                    'checkpoint_protocol_version': 1,
+                }
+            batch, tasks = create_training_batch({
+                'name': 'Checkpoint failover',
+                'checkpoint_interval': 5,
+                'max_resume_count': 3,
+                'jobs': [{
+                    'project_id': self.project_ids[0],
+                    'model': 'yolo11n.pt',
+                    'epochs': 10,
+                    'batch': 4,
+                    'imgsz': 640,
+                }],
+            })
+            task_id = tasks[0].id
+            batch_id = batch.id
+            db.session.commit()
+
+        class FakeStoredObject:
+            def __init__(self, size_bytes):
+                self.size_bytes = size_bytes
+                self.etag = 'fake-etag'
+
+        class FakeCheckpointStore:
+            backend_name = 's3'
+            enabled = True
+
+            def __init__(self):
+                self.objects = {}
+                self.deleted = []
+
+            def object_key(self, *parts):
+                return 'toolib/' + '/'.join(str(part) for part in parts)
+
+            def presign_upload(self, object_key):
+                return f'https://objects.example/upload/{object_key}'
+
+            def presign_download(self, object_key):
+                return f'https://objects.example/download/{object_key}'
+
+            def head(self, object_key):
+                return FakeStoredObject(self.objects[object_key])
+
+            def delete(self, object_key):
+                self.deleted.append(object_key)
+                self.objects.pop(object_key, None)
+
+        checkpoint_store = FakeCheckpointStore()
+        state = FakeWorkerState()
+        state.status_calls = {}
+
+        class CheckpointFailoverAdapter(FakeWorkerAdapter):
+            def get_job(self, remote_job_id):
+                request_payload = self.state.requests_by_job[remote_job_id]
+                worker_name = self.worker.name
+                call_key = (worker_name, remote_job_id)
+                call_count = self.state.status_calls.get(call_key, 0) + 1
+                self.state.status_calls[call_key] = call_count
+                upload_target = request_payload['checkpoint_uploads'][0]
+                checkpoint_store.objects[upload_target['object_key']] = 128
+                latest_checkpoint = {
+                    'checkpoint_id': upload_target['checkpoint_id'],
+                    'epoch': upload_target['epoch'],
+                    'total_epochs': request_payload['epochs'],
+                    'generation': request_payload['recovery_generation'],
+                    'object_key': upload_target['object_key'],
+                    'sha256': 'a' * 64,
+                    'size_bytes': 128,
+                    'uploaded_at': '2026-07-28T00:00:00+00:00',
+                }
+                if worker_name == 'ResumeWorkerA':
+                    if call_count > 1:
+                        raise WorkerUnavailableError(
+                            'simulated Colab runtime loss'
+                        )
+                    return {
+                        'job_id': remote_job_id,
+                        'status': 'running',
+                        'current_epoch': 5,
+                        'total_epochs': 10,
+                        'message': 'Checkpoint epoch 5 uploaded.',
+                        'latest_checkpoint': latest_checkpoint,
+                    }
+                completed = super().get_job(remote_job_id)
+                completed['latest_checkpoint'] = latest_checkpoint
+                return completed
+
+        def adapter_factory(worker):
+            return CheckpointFailoverAdapter(worker, state)
+
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=checkpoint_store,
+        ):
+            first_dispatch = dispatch_once(
+                self.app,
+                adapter_factory=adapter_factory,
+                probe=False,
+                asynchronous=False,
+            )
+            assert first_dispatch['dispatched'] == 1
+
+            with self.app.app_context():
+                task = db.session.get(TrainingQueueTask, task_id)
+                assert task.status == 'worker_lost'
+                checkpoint = TrainingCheckpoint.query.one()
+                assert checkpoint.epoch == 5
+                assert checkpoint.generation == 1
+                task.recovery_deadline_at = utcnow() - timedelta(seconds=1)
+                db.session.get(TrainingWorker, worker_a_id).status = 'offline'
+                db.session.commit()
+
+            second_dispatch = dispatch_once(
+                self.app,
+                adapter_factory=adapter_factory,
+                probe=False,
+                asynchronous=False,
+            )
+            assert second_dispatch['resumed'] == 1
+            assert second_dispatch['dispatched'] == 1
+
+        with self.app.app_context():
+            task = db.session.get(TrainingQueueTask, task_id)
+            assert task.batch_id == batch_id
+            assert task.status == 'succeeded'
+            assert task.resume_count == 1
+            assert task.recovery_generation == 2
+            attempts = TrainingJobAttempt.query.filter_by(
+                task_id=task.id,
+            ).order_by(TrainingJobAttempt.attempt_number.asc()).all()
+            assert [attempt.attempt_kind for attempt in attempts] == [
+                'initial',
+                'resume',
+            ]
+            assert [attempt.generation for attempt in attempts] == [1, 2]
+            assert attempts[0].status == 'abandoned'
+            assert attempts[1].status == 'succeeded'
+            assert attempts[1].resumed_from_epoch == 5
+            assert attempts[0].training_job_id is not None
+            assert attempts[1].training_job_id is not None
+            assert attempts[0].training_job_id != attempts[1].training_job_id
+            assert _attempt_is_current(task, attempts[0]) is False
+
+            resume_requests = [
+                request_payload
+                for request_payload in state.requests_by_job.values()
+                if request_payload.get('execution_mode') == 'resume'
+            ]
+            assert len(resume_requests) == 1
+            resume_request = resume_requests[0]
+            assert resume_request['recovery_generation'] == 2
+            assert resume_request['resume_checkpoint']['epoch'] == 5
+            assert resume_request['resume_checkpoint']['sha256'] == 'a' * 64
+            assert resume_request['checkpoint_uploads'][0]['epoch'] == 10
+            assert len(TrainingCheckpoint.query.all()) == 2
+            persisted_payload = str(task.to_dict(
+                include_attempts=True,
+                include_events=True,
+            ))
+            persisted_jobs = str([
+                job.to_dict()
+                for job in TrainingJob.query.order_by(TrainingJob.id.asc()).all()
+            ])
+            assert 'upload_url' not in persisted_payload
+            assert 'download_url' not in persisted_payload
+            assert 'upload_url' not in persisted_jobs
+            assert 'download_url' not in persisted_jobs
 
     def test_parallel_artifact_downloads_use_isolated_partial_files(self):
         destination = self.artifact_root / 'parallel' / 'best.onnx'

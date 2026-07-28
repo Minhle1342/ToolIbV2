@@ -215,6 +215,14 @@ class ModelArtifact(db.Model):
     )
     kind = db.Column(db.String(30), nullable=False, index=True)
     storage_path = db.Column(db.String(1000), nullable=False)
+    storage_backend = db.Column(
+        db.String(30),
+        nullable=False,
+        default='local',
+        index=True,
+    )
+    object_key = db.Column(db.String(1000), nullable=True, index=True)
+    object_verified_at = db.Column(db.DateTime, nullable=True)
     sha256 = db.Column(db.String(64), nullable=False, index=True)
     size_bytes = db.Column(db.Integer, nullable=False)
     metadata_json = db.Column(db.JSON, nullable=True)
@@ -242,8 +250,14 @@ class ModelArtifact(db.Model):
             'artifact_id': self.artifact_id,
             'model_id': self.model_id,
             'kind': self.kind,
+            'storage_backend': self.storage_backend,
+            'object_key': self.object_key,
             'sha256': self.sha256,
             'size_bytes': self.size_bytes,
+            'object_verified_at': (
+                self.object_verified_at.isoformat()
+                if self.object_verified_at else None
+            ),
             'metadata': self.metadata_json or {},
             'created_at': (
                 self.created_at.isoformat() if self.created_at else None
@@ -266,6 +280,15 @@ class TrainingDataset(db.Model):
     archive_path = db.Column(db.String(1000), nullable=True)
     archive_sha256 = db.Column(db.String(64), nullable=True)
     archive_size = db.Column(db.Integer, nullable=True)
+    storage_backend = db.Column(
+        db.String(30),
+        nullable=False,
+        default='local',
+        index=True,
+    )
+    object_key = db.Column(db.String(1000), nullable=True, index=True)
+    object_uploaded_at = db.Column(db.DateTime, nullable=True)
+    object_verified_at = db.Column(db.DateTime, nullable=True)
     train_count = db.Column(db.Integer, nullable=False, default=0)
     val_count = db.Column(db.Integer, nullable=False, default=0)
     test_count = db.Column(db.Integer, nullable=False, default=0)
@@ -286,6 +309,16 @@ class TrainingDataset(db.Model):
             'status': self.status,
             'archive_sha256': self.archive_sha256,
             'archive_size': self.archive_size,
+            'storage_backend': self.storage_backend,
+            'object_key': self.object_key,
+            'object_uploaded_at': (
+                self.object_uploaded_at.isoformat()
+                if self.object_uploaded_at else None
+            ),
+            'object_verified_at': (
+                self.object_verified_at.isoformat()
+                if self.object_verified_at else None
+            ),
             'train_count': self.train_count,
             'val_count': self.val_count,
             'test_count': self.test_count,
@@ -663,6 +696,12 @@ class TrainingQueueTask(db.Model):
     dataset_config = db.Column(db.JSON, nullable=False)
     attempt_count = db.Column(db.Integer, nullable=False, default=0)
     max_attempts = db.Column(db.Integer, nullable=False, default=3)
+    recovery_generation = db.Column(db.Integer, nullable=False, default=1)
+    resume_count = db.Column(db.Integer, nullable=False, default=0)
+    max_resume_count = db.Column(db.Integer, nullable=False, default=3)
+    checkpoint_interval = db.Column(db.Integer, nullable=False, default=5)
+    worker_lost_at = db.Column(db.DateTime, nullable=True, index=True)
+    recovery_deadline_at = db.Column(db.DateTime, nullable=True, index=True)
     lease_token = db.Column(db.String(36), nullable=True, unique=True, index=True)
     lease_expires_at = db.Column(db.DateTime, nullable=True, index=True)
     next_attempt_at = db.Column(db.DateTime, nullable=True, index=True)
@@ -681,9 +720,30 @@ class TrainingQueueTask(db.Model):
     __table_args__ = (
         db.CheckConstraint('attempt_count >= 0', name='ck_training_task_attempt_count'),
         db.CheckConstraint('max_attempts >= 1', name='ck_training_task_max_attempts'),
+        db.CheckConstraint(
+            'recovery_generation >= 1',
+            name='ck_training_task_recovery_generation',
+        ),
+        db.CheckConstraint('resume_count >= 0', name='ck_training_task_resume_count'),
+        db.CheckConstraint(
+            'max_resume_count >= 0',
+            name='ck_training_task_max_resume_count',
+        ),
+        db.CheckConstraint(
+            'checkpoint_interval >= 1',
+            name='ck_training_task_checkpoint_interval',
+        ),
     )
 
     def to_dict(self, include_attempts=False, include_events=False):
+        latest_checkpoint = TrainingCheckpoint.query.filter_by(
+            task_id=self.id,
+            status='ready',
+        ).order_by(
+            TrainingCheckpoint.generation.desc(),
+            TrainingCheckpoint.epoch.desc(),
+            TrainingCheckpoint.id.desc(),
+        ).first()
         payload = {
             'id': self.id,
             'task_id': self.task_id,
@@ -707,6 +767,23 @@ class TrainingQueueTask(db.Model):
             'dataset_config': self.dataset_config or {},
             'attempt_count': self.attempt_count,
             'max_attempts': self.max_attempts,
+            'recovery_generation': self.recovery_generation,
+            'resume_count': self.resume_count,
+            'max_resume_count': self.max_resume_count,
+            'checkpoint_interval': self.checkpoint_interval,
+            'latest_checkpoint': (
+                latest_checkpoint.to_dict() if latest_checkpoint else None
+            ),
+            'worker_lost_at': (
+                self.worker_lost_at.isoformat()
+                if self.worker_lost_at
+                else None
+            ),
+            'recovery_deadline_at': (
+                self.recovery_deadline_at.isoformat()
+                if self.recovery_deadline_at
+                else None
+            ),
             'lease_expires_at': (
                 self.lease_expires_at.isoformat()
                 if self.lease_expires_at
@@ -754,7 +831,26 @@ class TrainingJobAttempt(db.Model):
         nullable=True,
         index=True,
     )
+    training_job_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_jobs.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
     attempt_number = db.Column(db.Integer, nullable=False)
+    attempt_kind = db.Column(
+        db.String(20),
+        nullable=False,
+        default='initial',
+        index=True,
+    )
+    generation = db.Column(db.Integer, nullable=False, default=1)
+    resume_checkpoint_id = db.Column(
+        db.Integer,
+        nullable=True,
+        index=True,
+    )
+    resumed_from_epoch = db.Column(db.Integer, nullable=True)
     status = db.Column(db.String(30), nullable=False, default='leased', index=True)
     lease_token = db.Column(db.String(36), nullable=False, unique=True, index=True)
     remote_job_id = db.Column(db.String(36), nullable=True, index=True)
@@ -770,6 +866,11 @@ class TrainingJobAttempt(db.Model):
             name='uq_training_attempt_task_number',
         ),
         db.CheckConstraint('attempt_number >= 1', name='ck_training_attempt_number'),
+        db.CheckConstraint('generation >= 1', name='ck_training_attempt_generation'),
+        db.CheckConstraint(
+            'resumed_from_epoch IS NULL OR resumed_from_epoch >= 0',
+            name='ck_training_attempt_resumed_epoch',
+        ),
     )
 
     def to_dict(self):
@@ -778,7 +879,12 @@ class TrainingJobAttempt(db.Model):
             'attempt_id': self.attempt_id,
             'task_id': self.task_id,
             'worker_id': self.worker_id,
+            'training_job_id': self.training_job_id,
             'attempt_number': self.attempt_number,
+            'attempt_kind': self.attempt_kind,
+            'generation': self.generation,
+            'resume_checkpoint_id': self.resume_checkpoint_id,
+            'resumed_from_epoch': self.resumed_from_epoch,
             'status': self.status,
             'remote_job_id': self.remote_job_id,
             'error': self.error,
@@ -787,6 +893,103 @@ class TrainingJobAttempt(db.Model):
                 self.heartbeat_at.isoformat() if self.heartbeat_at else None
             ),
             'finished_at': self.finished_at.isoformat() if self.finished_at else None,
+        }
+
+
+class TrainingCheckpoint(db.Model):
+    __tablename__ = 'training_checkpoints'
+
+    id = db.Column(db.Integer, primary_key=True)
+    checkpoint_id = db.Column(
+        db.String(36),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    task_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_queue_tasks.id', ondelete='CASCADE'),
+        nullable=False,
+        index=True,
+    )
+    attempt_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_job_attempts.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    worker_id = db.Column(
+        db.Integer,
+        db.ForeignKey('training_workers.id', ondelete='SET NULL'),
+        nullable=True,
+        index=True,
+    )
+    generation = db.Column(db.Integer, nullable=False)
+    epoch = db.Column(db.Integer, nullable=False)
+    total_epochs = db.Column(db.Integer, nullable=False)
+    status = db.Column(
+        db.String(20),
+        nullable=False,
+        default='ready',
+        index=True,
+    )
+    storage_backend = db.Column(db.String(30), nullable=False)
+    object_key = db.Column(db.String(1000), nullable=False)
+    sha256 = db.Column(db.String(64), nullable=False, index=True)
+    size_bytes = db.Column(db.BigInteger, nullable=False)
+    metadata_json = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(
+        db.DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+    verified_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'task_id',
+            'generation',
+            'epoch',
+            name='uq_training_checkpoint_task_generation_epoch',
+        ),
+        db.CheckConstraint(
+            'generation >= 1',
+            name='ck_training_checkpoint_generation',
+        ),
+        db.CheckConstraint('epoch >= 0', name='ck_training_checkpoint_epoch'),
+        db.CheckConstraint(
+            'total_epochs >= epoch',
+            name='ck_training_checkpoint_total_epochs',
+        ),
+        db.CheckConstraint(
+            'size_bytes > 0',
+            name='ck_training_checkpoint_size_bytes',
+        ),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'checkpoint_id': self.checkpoint_id,
+            'task_id': self.task_id,
+            'attempt_id': self.attempt_id,
+            'worker_id': self.worker_id,
+            'generation': self.generation,
+            'epoch': self.epoch,
+            'total_epochs': self.total_epochs,
+            'status': self.status,
+            'storage_backend': self.storage_backend,
+            'object_key': self.object_key,
+            'sha256': self.sha256,
+            'size_bytes': self.size_bytes,
+            'metadata': self.metadata_json or {},
+            'created_at': (
+                self.created_at.isoformat() if self.created_at else None
+            ),
+            'verified_at': (
+                self.verified_at.isoformat() if self.verified_at else None
+            ),
         }
 
 

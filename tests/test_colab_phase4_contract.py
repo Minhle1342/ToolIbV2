@@ -40,7 +40,7 @@ def test_notebook_accepts_authenticated_checksum_bound_dataset_snapshots():
 
     for expected in (
         'python-multipart>=0.0.20,<1',
-        'version="0.6.0"',
+        'version="0.8.0"',
         'from fastapi import (',
         '@app.post("/api/datasets", dependencies=[Depends(require_api_token)])',
         'dataset_id: str = Form(...)',
@@ -89,6 +89,75 @@ def test_notebook_exposes_phase6_parent_cache_finetune_and_artifacts():
         'Parent checkpoint classes do not match dataset classes.',
     ):
         assert expected in source
+
+
+def test_notebook_exposes_phase7_checkpoint_upload_and_resume_contract():
+    source = notebook_source()
+
+    for expected in (
+        'execution_mode: Literal["initial", "resume"] = "initial"',
+        'class CheckpointUploadTarget(BaseModel):',
+        'class ResumeCheckpoint(BaseModel):',
+        '"checkpoint_upload": True',
+        '"checkpoint_resume": True',
+        'model.add_callback("on_model_save", on_model_save)',
+        'requests.put(',
+        'requests.get(',
+        'model.train(resume=True)',
+        '"checkpoint_uploads",',
+        '"resume_checkpoint",',
+    ):
+        assert expected in source
+
+    public_request_start = source.index(
+        'def public_train_request(request_data: TrainRequest) -> dict:'
+    )
+    public_request_end = source.index(
+        '\ndef utc_now() -> str:',
+        public_request_start,
+    )
+    public_request_source = source[
+        public_request_start:public_request_end
+    ]
+    assert '"checkpoint_uploads"' in public_request_source
+    assert '"resume_checkpoint"' in public_request_source
+
+
+def test_notebook_exposes_phase8_direct_object_transport_contract():
+    source = notebook_source()
+
+    for expected in (
+        'class RemoteObjectInput(BaseModel):',
+        'class ParentObjectInput(RemoteObjectInput):',
+        'class ArtifactUploadTarget(BaseModel):',
+        'dataset_object: RemoteObjectInput | None = None',
+        'parent_object: ParentObjectInput | None = None',
+        'artifact_uploads: list[ArtifactUploadTarget]',
+        'def download_verified_object(',
+        'def materialize_dataset_object(',
+        'def materialize_parent_object(',
+        '"/api/model-artifacts/resolve"',
+        '"object_input_download": True',
+        '"artifact_object_upload": True',
+        '"object_transport_protocol_version": 1',
+        'Uploading training artifacts to object storage.',
+        'artifacts["_objects"] = object_artifacts',
+    ):
+        assert expected in source
+
+    public_request_start = source.index(
+        'def public_train_request(request_data: TrainRequest) -> dict:'
+    )
+    public_request_end = source.index(
+        '\ndef utc_now() -> str:',
+        public_request_start,
+    )
+    public_request_source = source[
+        public_request_start:public_request_end
+    ]
+    assert '"dataset_object"' in public_request_source
+    assert '"parent_object"' in public_request_source
+    assert '"artifact_uploads"' in public_request_source
 
 
 def test_notebook_restores_persisted_drive_jobs_after_runtime_restart():
