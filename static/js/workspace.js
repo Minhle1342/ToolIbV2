@@ -3771,8 +3771,26 @@ async function loadImages(fetchFromServer = true) {
             }
         }
 
-        const images = await API.getImages(filters);
-        currentWorkspace.allImages = images;
+        try {
+            const images = await API.getImages(filters);
+            currentWorkspace.allImages = images;
+        } catch (error) {
+            console.error('Failed to load project images:', error);
+            if (container) {
+                container.innerHTML = `
+                    <div class="p-4 text-sm text-red-400 flex flex-col items-center justify-center gap-3">
+                        <span>Không thể tải dữ liệu ảnh. Vui lòng thử lại.</span>
+                        <button type="button"
+                                class="px-3 py-1.5 rounded border border-red-400 hover:bg-red-400/10"
+                                onclick="loadImages(true)">
+                            Thử lại
+                        </button>
+                    </div>
+                `;
+            }
+            updateTotalImageCountFromImageList();
+            return;
+        }
     }
     currentWorkspace.imageById = new Map((currentWorkspace.allImages || []).map(img => [img.id, img]));
 

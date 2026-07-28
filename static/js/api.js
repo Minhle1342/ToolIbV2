@@ -70,6 +70,18 @@ class startAPI {
     async getImages(filters) {
         const params = new URLSearchParams(filters);
         const res = await fetch(`/api/images?${params}`);
+        if (!res.ok) {
+            let message = `Không thể tải dữ liệu ảnh (HTTP ${res.status}).`;
+            try {
+                const payload = await res.json();
+                if (payload && payload.error) {
+                    message = payload.error;
+                }
+            } catch (error) {
+                // Keep the HTTP status message when the server response is not JSON.
+            }
+            throw new Error(message);
+        }
         return await res.json();
     }
 

@@ -4,6 +4,7 @@ import io
 import threading
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -23,11 +24,14 @@ from models import (
 )
 from test_helpers import create_isolated_test_app
 from training_control_plane import (
+    ColabHttpWorkerAdapter,
     WorkerUnavailableError,
     create_finetune_experiment,
     create_training_batch,
     dispatch_once,
     encrypt_worker_token,
+    recover_expired_leases,
+    utcnow,
 )
 
 
@@ -132,10 +136,21 @@ class FakeWorkerAdapter:
             'metrics': metrics,
         }
 
-    def download_artifact(self, remote_job_id, artifact_kind, destination):
+    def download_artifact(
+        self,
+        remote_job_id,
+        artifact_kind,
+        destination,
+        progress_callback=None,
+    ):
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(f'{remote_job_id}:{artifact_kind}'.encode('utf-8'))
+        content = f'{remote_job_id}:{artifact_kind}'.encode('utf-8')
+        if progress_callback is not None:
+            progress_callback(0, len(content))
+        destination.write_bytes(content)
+        if progress_callback is not None:
+            progress_callback(len(content), len(content))
         return destination
 
 
@@ -860,6 +875,136 @@ class TestTrainingControlPlane:
             assert task.status == 'succeeded'
             assert task.imported_model_id is not None
             assert state.submit_count == 1
+
+    def test_artifact_download_heartbeat_prevents_lease_expiry(self):
+        self.add_worker('WorkerSlowArtifact')
+        self.create_batch(project_ids=[self.project_ids[0]])
+        self.app.config['TRAINING_TASK_HEARTBEAT_SECONDS'] = 0.05
+        state = FakeWorkerState()
+        download_started = threading.Event()
+        allow_download = threading.Event()
+
+        class SlowArtifactAdapter(FakeWorkerAdapter):
+            def download_artifact(
+                self,
+                remote_job_id,
+                artifact_kind,
+                destination,
+                progress_callback=None,
+            ):
+                download_started.set()
+                if not allow_download.wait(timeout=3):
+                    raise RuntimeError('test did not release artifact download')
+                return super().download_artifact(
+                    remote_job_id,
+                    artifact_kind,
+                    destination,
+                    progress_callback=progress_callback,
+                )
+
+        result = dispatch_once(
+            self.app,
+            adapter_factory=lambda worker: SlowArtifactAdapter(worker, state),
+            probe=False,
+            asynchronous=True,
+        )
+        assert result['dispatched'] == 1
+        assert download_started.wait(timeout=3)
+
+        try:
+            with self.app.app_context():
+                task = TrainingQueueTask.query.one()
+                task.lease_expires_at = utcnow() + timedelta(
+                    milliseconds=100
+                )
+                db.session.commit()
+
+            time.sleep(0.25)
+            with self.app.app_context():
+                assert recover_expired_leases() == 0
+                task = TrainingQueueTask.query.one()
+                assert task.status == 'downloading_artifacts'
+                assert task.lease_expires_at > utcnow()
+        finally:
+            allow_download.set()
+
+        self.wait_for_terminal_count(1)
+        with self.app.app_context():
+            assert TrainingQueueTask.query.one().status == 'succeeded'
+            assert TrainingJobAttempt.query.one().status == 'succeeded'
+
+    def test_parallel_artifact_downloads_use_isolated_partial_files(self):
+        destination = self.artifact_root / 'parallel' / 'best.onnx'
+        barrier = threading.Barrier(2)
+        payloads = (b'fast-artifact', b'slow-artifact')
+        response_index = 0
+        response_lock = threading.Lock()
+
+        class StreamingResponse:
+            status_code = 200
+            text = ''
+
+            def __init__(self, payload, is_slow):
+                self.payload = payload
+                self.is_slow = is_slow
+                self.headers = {
+                    'Content-Length': str(len(payload)),
+                }
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _exc_type, _exc_value, _traceback):
+                return False
+
+            def iter_content(self, chunk_size):
+                assert chunk_size == 1024 * 1024
+                barrier.wait(timeout=3)
+                if self.is_slow:
+                    time.sleep(0.2)
+                yield self.payload
+
+        class StreamingSession:
+            def get(self, *_args, **_kwargs):
+                nonlocal response_index
+                with response_lock:
+                    index = response_index
+                    response_index += 1
+                return StreamingResponse(
+                    payloads[index],
+                    is_slow=index == 1,
+                )
+
+        adapter = ColabHttpWorkerAdapter(
+            'https://parallel.trycloudflare.com',
+            'test-token',
+            session=StreamingSession(),
+        )
+        errors = []
+
+        def download():
+            try:
+                adapter.download_artifact(
+                    str(uuid.uuid4()),
+                    'onnx',
+                    destination,
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=download),
+            threading.Thread(target=download),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert errors == []
+        assert destination.read_bytes() in payloads
+        assert list(destination.parent.glob('*.part')) == []
 
     def test_remote_acceptance_survives_local_sync_failure_without_resubmit(self):
         self.add_worker('WorkerDurableAcceptance')

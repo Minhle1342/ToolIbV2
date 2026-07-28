@@ -521,10 +521,19 @@ class ColabHttpWorkerAdapter:
             raise WorkerUnavailableError(f'Training status request failed: {exc}') from exc
         return self._require_success(response, 'Training status')
 
-    def download_artifact(self, remote_job_id, artifact_kind, destination):
+    def download_artifact(
+        self,
+        remote_job_id,
+        artifact_kind,
+        destination,
+        progress_callback=None,
+    ):
         destination = Path(destination).resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path = destination.with_suffix(destination.suffix + '.part')
+        temporary_path = destination.with_name(
+            f'.{destination.name}.{os.getpid()}.'
+            f'{threading.get_ident()}.{uuid.uuid4().hex}.part'
+        )
         try:
             with self.session.get(
                 f'{self.api_url}/api/jobs/{remote_job_id}/artifacts/{artifact_kind}',
@@ -535,10 +544,20 @@ class ColabHttpWorkerAdapter:
             ) as response:
                 if not 200 <= response.status_code < 300:
                     self._require_success(response, f'{artifact_kind} artifact download')
+                try:
+                    total_bytes = int(response.headers.get('Content-Length') or 0)
+                except (TypeError, ValueError):
+                    total_bytes = 0
+                downloaded_bytes = 0
+                if progress_callback is not None:
+                    progress_callback(downloaded_bytes, total_bytes)
                 with temporary_path.open('wb') as output:
                     for chunk in response.iter_content(chunk_size=1024 * 1024):
                         if chunk:
                             output.write(chunk)
+                            downloaded_bytes += len(chunk)
+                            if progress_callback is not None:
+                                progress_callback(downloaded_bytes, total_bytes)
             temporary_path.replace(destination)
         except requests.RequestException as exc:
             temporary_path.unlink(missing_ok=True)
@@ -1873,6 +1892,70 @@ def _renew_lease(task, attempt):
     attempt.heartbeat_at = utcnow()
 
 
+class _TaskLeaseHeartbeat:
+    def __init__(self, app, task, attempt):
+        self.app = app
+        self.task_id = task.id
+        self.attempt_id = attempt.id
+        self.lease_token = task.lease_token
+        configured_interval = app.config.get(
+            'TRAINING_TASK_HEARTBEAT_SECONDS'
+        )
+        if configured_interval is None:
+            lease_seconds = max(
+                int(app.config.get('TRAINING_TASK_LEASE_SECONDS', 300)),
+                30,
+            )
+            configured_interval = min(lease_seconds / 3, 30)
+        self.interval_seconds = max(float(configured_interval), 0.05)
+        self.stop_event = threading.Event()
+        self.thread = None
+
+    def __enter__(self):
+        self.thread = threading.Thread(
+            target=self._run,
+            name=f'training-lease-heartbeat-{self.task_id}',
+            daemon=True,
+        )
+        self.thread.start()
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=max(self.interval_seconds * 2, 1))
+
+    def _run(self):
+        while not self.stop_event.wait(self.interval_seconds):
+            with self.app.app_context():
+                try:
+                    task = db.session.get(TrainingQueueTask, self.task_id)
+                    attempt = db.session.get(
+                        TrainingJobAttempt,
+                        self.attempt_id,
+                    )
+                    if (
+                        task is None
+                        or attempt is None
+                        or task.lease_token != self.lease_token
+                        or task.status not in ACTIVE_TASK_STATUSES
+                    ):
+                        return
+                    _renew_lease(task, attempt)
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
+                    current_app.logger.exception(
+                        'Could not renew training artifact download lease',
+                        extra={
+                            'task_id': self.task_id,
+                            'attempt_id': self.attempt_id,
+                        },
+                    )
+                finally:
+                    db.session.remove()
+
+
 def _handle_pipeline_failure(task, attempt, exc):
     error_message = str(exc)[:8000]
     task.error = error_message
@@ -2166,6 +2249,7 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                 'Downloading training artifacts into the central artifact store.',
                 attempt=attempt,
             )
+            _renew_lease(task, attempt)
             db.session.commit()
             remote_artifacts = (
                 job.artifacts if isinstance(job.artifacts, dict) else {}
@@ -2191,11 +2275,55 @@ def _process_task(app, task_id, attempt_id, adapter_factory):
                     task.task_id,
                     artifact_kind,
                 )
-                adapter.download_artifact(
-                    job.remote_job_id,
-                    artifact_kind,
-                    destination,
-                )
+                progress_state = {
+                    'bytes': -1,
+                    'reported_at': 0.0,
+                }
+
+                def report_artifact_progress(
+                    downloaded_bytes,
+                    total_bytes,
+                    *,
+                    current_kind=artifact_kind,
+                ):
+                    now = time.monotonic()
+                    completed = (
+                        total_bytes > 0
+                        and downloaded_bytes >= total_bytes
+                    )
+                    should_report = (
+                        downloaded_bytes == 0
+                        or completed
+                        or downloaded_bytes - progress_state['bytes']
+                        >= 8 * 1024 * 1024
+                        or now - progress_state['reported_at'] >= 5
+                    )
+                    if not should_report:
+                        return
+                    downloaded_mb = downloaded_bytes / (1024 * 1024)
+                    if total_bytes > 0:
+                        total_mb = total_bytes / (1024 * 1024)
+                        progress_text = (
+                            f'{downloaded_mb:.1f}/{total_mb:.1f} MB'
+                        )
+                    else:
+                        progress_text = f'{downloaded_mb:.1f} MB'
+                    task.message = (
+                        f'Downloading {current_kind.upper()} artifact: '
+                        f'{progress_text}.'
+                    )
+                    _renew_lease(task, attempt)
+                    db.session.commit()
+                    progress_state['bytes'] = downloaded_bytes
+                    progress_state['reported_at'] = now
+
+                with _TaskLeaseHeartbeat(app, task, attempt):
+                    adapter.download_artifact(
+                        job.remote_job_id,
+                        artifact_kind,
+                        destination,
+                        progress_callback=report_artifact_progress,
+                    )
                 if not destination.is_file() or destination.stat().st_size <= 0:
                     raise WorkerApiError(
                         f'Downloaded {artifact_kind} artifact is empty.'

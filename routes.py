@@ -709,16 +709,32 @@ def delete_view(view_id):
 # --- Images & Labels ---
 @api_bp.route('/images', methods=['GET'])
 def get_images():
-    project_id = request.args.get('project_id')
-    view_id = request.args.get('view_id')
+    project_id_raw = request.args.get('project_id')
+    view_id_raw = request.args.get('view_id')
+    try:
+        project_id = (
+            int(project_id_raw)
+            if project_id_raw not in (None, '')
+            else None
+        )
+        view_id = (
+            int(view_id_raw)
+            if view_id_raw not in (None, '')
+            else None
+        )
+    except (TypeError, ValueError):
+        return jsonify({
+            'error': 'project_id and view_id must be integers.'
+        }), 400
+
     flag_status = request.args.get('flag_status')
     is_labeled = request.args.get('is_labeled')
     has_any_tag = request.args.get('has_any_tag')
 
     query = Image.query
-    if project_id:
+    if project_id is not None:
         query = query.filter_by(project_id=project_id)
-    if view_id:
+    if view_id is not None:
         query = query.filter_by(view_id=view_id)
     if flag_status:
         normalized_flag_status = flag_status.strip().lower()
