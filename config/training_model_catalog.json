@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "catalog_version": "phase-a-small-v1",
+  "default_checkpoint": "yolo26s.pt",
+  "models": [
+    {
+      "id": "yolo11s",
+      "family": "yolo11",
+      "family_label": "YOLO11",
+      "scale": "s",
+      "scale_label": "Small",
+      "checkpoint": "yolo11s.pt",
+      "task": "detect",
+      "status": "validated",
+      "enabled": true
+    },
+    {
+      "id": "yolo12s",
+      "family": "yolo12",
+      "family_label": "YOLO12",
+      "scale": "s",
+      "scale_label": "Small",
+      "checkpoint": "yolo12s.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo26s",
+      "family": "yolo26",
+      "family_label": "YOLO26",
+      "scale": "s",
+      "scale_label": "Small",
+      "checkpoint": "yolo26s.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    }
+  ]
+}

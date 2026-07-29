@@ -1,0 +1,57 @@
+{
+  "catalog_version": "phase-c2-training-v1",
+  "contract_version": 3,
+  "ultralytics_version": "8.4.110",
+  "groups": [
+    {"id": "core", "label": "Core training", "advanced": false},
+    {"id": "optimizer", "label": "Optimizer and schedule", "advanced": false},
+    {"id": "runtime", "label": "Runtime and memory", "advanced": true},
+    {"id": "loss", "label": "Detection loss", "advanced": true},
+    {"id": "augmentation", "label": "Augmentation", "advanced": true}
+  ],
+  "fields": [
+    {"name": "epochs", "type": "integer", "default": 50, "worker_default": 1, "minimum": 1, "maximum": 300, "forward": "always", "effective": true, "ui": {"label": "Epochs", "group": "core", "step": 1}},
+    {"name": "batch", "type": "integer", "default": 8, "worker_default": 4, "minimum": 1, "maximum": 64, "forward": "always", "effective": true, "ui": {"label": "Batch", "group": "core", "step": 1, "summary": true}},
+    {"name": "imgsz", "type": "enum", "default": 640, "worker_default": 640, "options": [{"value": 320, "label": "320"}, {"value": 416, "label": "416"}, {"value": 512, "label": "512"}, {"value": 640, "label": "640"}, {"value": 768, "label": "768"}], "forward": "always", "effective": true, "ui": {"label": "Image size", "group": "core", "summary": true}},
+    {"name": "patience", "type": "integer", "default": 100, "minimum": 0, "maximum": 300, "forward": "parameter_set", "effective": true, "ui": {"label": "Early-stop patience", "group": "core", "step": 1, "summary": true}},
+    {"name": "fraction", "type": "number", "default": 1.0, "exclusive_minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Dataset fraction", "group": "core", "step": 0.05, "help": "Fraction of the training split used by Ultralytics.", "summary": true}},
+    {"name": "freeze", "type": "integer", "default": 10, "minimum": 0, "maximum": 100, "forward": "parameter_set", "effective": true, "ui": {"label": "Freeze layers", "group": "core", "step": 1}},
+
+    {"name": "optimizer_mode", "type": "enum", "default": "auto", "options": [{"value": "auto", "label": "Auto (Ultralytics resolves)"}, {"value": "explicit", "label": "Explicit"}], "forward": "never", "effective": false, "ui": {"label": "Optimizer mode", "group": "optimizer"}},
+    {"name": "optimizer", "type": "enum", "default": "auto", "options": [{"value": "auto", "label": "Auto"}, {"value": "Adam", "label": "Adam"}, {"value": "Adamax", "label": "Adamax"}, {"value": "AdamW", "label": "AdamW"}, {"value": "NAdam", "label": "NAdam"}, {"value": "RAdam", "label": "RAdam"}, {"value": "RMSprop", "label": "RMSprop"}, {"value": "SGD", "label": "SGD"}, {"value": "MuSGD", "label": "MuSGD"}], "forward": "always", "effective": false, "ui": {"label": "Optimizer", "group": "optimizer", "exclude_values": ["auto"], "visible_when": {"field": "optimizer_mode", "equals": "explicit"}}},
+    {"name": "lr0", "type": "nullable_number", "default": null, "exclusive_minimum": 0.0, "maximum": 0.1, "forward": "explicit_optimizer", "effective": false, "ui": {"label": "Requested learning rate (lr0)", "group": "optimizer", "step": 0.00001, "visible_when": {"field": "optimizer_mode", "equals": "explicit"}}},
+    {"name": "lrf", "type": "number", "default": 0.01, "exclusive_minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Final LR factor (lrf)", "group": "optimizer", "step": 0.001}},
+    {"name": "momentum", "type": "number", "default": 0.937, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Momentum", "group": "optimizer", "step": 0.001}},
+    {"name": "weight_decay", "type": "number", "default": 0.0005, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Weight decay", "group": "optimizer", "step": 0.0001}},
+    {"name": "warmup_epochs", "type": "number", "default": 3.0, "minimum": 0.0, "maximum": 100.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Warmup epochs", "group": "optimizer", "step": 0.1}},
+    {"name": "cos_lr", "type": "boolean", "default": false, "forward": "parameter_set", "effective": true, "ui": {"label": "Cosine LR", "group": "optimizer"}},
+    {"name": "nbs", "type": "integer", "default": 64, "minimum": 1, "maximum": 4096, "forward": "parameter_set", "effective": true, "ui": {"label": "Nominal batch size (nbs)", "group": "optimizer", "step": 1, "help": "Reference batch size used for loss and weight-decay normalization.", "summary": true}},
+
+    {"name": "rect", "type": "boolean", "default": false, "forward": "parameter_set", "effective": true, "ui": {"label": "Rectangular batches", "group": "runtime", "summary": true}},
+    {"name": "cache", "type": "enum", "default": "off", "options": [{"value": "off", "label": "Off"}, {"value": "ram", "label": "RAM"}, {"value": "disk", "label": "Disk"}], "aliases": [{"from": true, "to": "ram"}, {"from": false, "to": "off"}, {"from": null, "to": "off"}], "forward": "parameter_set", "effective": true, "ui": {"label": "Image cache", "group": "runtime", "summary": true}},
+    {"name": "amp", "type": "boolean", "default": true, "forward": "parameter_set", "effective": true, "ui": {"label": "AMP", "group": "runtime", "summary": true}},
+    {"name": "compile", "type": "boolean_or_enum", "default": false, "options": [{"value": "default", "label": "Default compile"}, {"value": "reduce-overhead", "label": "Reduce overhead"}, {"value": "max-autotune-no-cudagraphs", "label": "Max autotune (no CUDA graphs)"}], "forward": "parameter_set", "effective": true, "ui": {"label": "torch.compile mode", "group": "runtime", "help": "Off is safest for smoke tests; compile can add startup cost.", "summary": true}},
+    {"name": "channels_last", "type": "boolean", "default": false, "forward": "parameter_set", "effective": true, "ui": {"label": "Channels-last memory", "group": "runtime", "help": "CUDA-only NHWC memory format.", "summary": true}},
+    {"name": "seed", "type": "integer", "default": 42, "minimum": 0, "maximum": 2147483647, "forward": "always", "effective": true, "ui": {"label": "Seed", "group": "runtime", "step": 1}},
+
+    {"name": "box", "type": "number", "default": 7.5, "minimum": 0.0, "maximum": 100.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Box loss gain", "group": "loss", "step": 0.1, "summary": true}},
+    {"name": "cls", "type": "number", "default": 0.5, "minimum": 0.0, "maximum": 100.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Class loss gain", "group": "loss", "step": 0.1, "summary": true}},
+    {"name": "dfl", "type": "number", "default": 1.5, "minimum": 0.0, "maximum": 100.0, "forward": "parameter_set", "effective": true, "ui": {"label": "DFL loss gain", "group": "loss", "step": 0.1, "summary": true}},
+
+    {"name": "hsv_h", "type": "number", "default": 0.015, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "HSV hue", "group": "augmentation", "step": 0.001}},
+    {"name": "hsv_s", "type": "number", "default": 0.7, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "HSV saturation", "group": "augmentation", "step": 0.01}},
+    {"name": "hsv_v", "type": "number", "default": 0.4, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "HSV brightness", "group": "augmentation", "step": 0.01}},
+    {"name": "mosaic", "type": "number", "default": 0.5, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Mosaic", "group": "augmentation", "step": 0.05}},
+    {"name": "scale", "type": "number", "default": 0.8, "minimum": 0.0, "maximum": 2.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Scale", "group": "augmentation", "step": 0.05}},
+    {"name": "close_mosaic", "type": "integer", "default": 10, "minimum": 0, "maximum": 100, "forward": "parameter_set", "effective": true, "ui": {"label": "Close mosaic", "group": "augmentation", "step": 1}},
+    {"name": "degrees", "type": "number", "default": 15.0, "minimum": 0.0, "maximum": 180.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Degrees", "group": "augmentation", "step": 1}},
+    {"name": "translate", "type": "number", "default": 0.2, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Translate", "group": "augmentation", "step": 0.05}},
+    {"name": "shear", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 180.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Shear", "group": "augmentation", "step": 0.1}},
+    {"name": "perspective", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 0.001, "forward": "parameter_set", "effective": true, "ui": {"label": "Perspective", "group": "augmentation", "step": 0.0001}},
+    {"name": "flipud", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Vertical flip", "group": "augmentation", "step": 0.05}},
+    {"name": "fliplr", "type": "number", "default": 0.5, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Horizontal flip", "group": "augmentation", "step": 0.05}},
+    {"name": "mixup", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Mixup", "group": "augmentation", "step": 0.05}},
+    {"name": "copy_paste", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Copy-paste", "group": "augmentation", "step": 0.05}},
+    {"name": "multi_scale", "type": "number", "default": 0.0, "minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Multi-scale range", "group": "augmentation", "step": 0.05, "help": "Random image-size range as a fraction of imgsz; 0 disables it.", "summary": true}}
+  ]
+}

@@ -79,6 +79,11 @@ RUNTIME_COLUMNS = (
         'metrics JSON',
     ),
     (
+        'training_jobs',
+        'effective_config',
+        'effective_config JSON',
+    ),
+    (
         'training_batches',
         'experiment_type',
         "experiment_type VARCHAR(30) NOT NULL DEFAULT 'fresh'",
@@ -132,6 +137,11 @@ RUNTIME_COLUMNS = (
         'training_queue_tasks',
         'metrics',
         'metrics JSON',
+    ),
+    (
+        'training_queue_tasks',
+        'effective_config',
+        'effective_config JSON',
     ),
     (
         'training_queue_tasks',

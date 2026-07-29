@@ -43,6 +43,22 @@ from training_dataset_service import (
     prepare_training_dataset_snapshot,
     sha256_path,
 )
+from training_model_catalog import (
+    ENABLED_TRAINING_MODEL_CHECKPOINTS,
+    ENABLED_TRAINING_MODEL_CHECKPOINT_SET,
+    TRAINING_MODEL_CATALOG_HASH,
+)
+from training_parameter_catalog import (
+    TRAINING_PARAMETER_CATALOG_HASH,
+    TRAINING_PARAMETER_CATALOG_VERSION,
+    TRAINING_PARAMETER_CONTRACT_VERSION,
+    TRAINING_PARAMETER_DEFAULTS as FINETUNE_PARAMETER_DEFAULTS,
+    TRAINING_PARAMETER_FIELDS as FINETUNE_PARAMETER_FIELDS,
+    TrainingParameterCatalogError,
+    normalize_training_parameters,
+    parameter_option_values,
+    training_parameter_catalog_payload,
+)
 
 
 WORKER_PROVIDERS = {'colab_http'}
@@ -61,9 +77,17 @@ DISPATCHABLE_TASK_STATUSES = {'queued', 'waiting_for_worker', 'retry_wait'}
 DISPATCHABLE_TASK_STATUSES.add('resume_pending')
 TERMINAL_TASK_STATUSES = {'succeeded', 'failed', 'cancelled'}
 REMOTE_TERMINAL_STATUSES = {'succeeded', 'failed'}
-FINETUNE_PRESET_VERSION = 'phase6-database-v1'
+FINETUNE_PRESET_VERSION = TRAINING_PARAMETER_CATALOG_VERSION
 FINETUNE_RANKING_METRIC = 'metrics/mAP50-95(B)'
-FINETUNE_ALLOWED_IMAGE_SIZES = (320, 416, 512, 640, 768)
+FINETUNE_ALLOWED_IMAGE_SIZES = parameter_option_values('imgsz')
+FINETUNE_CACHE_MODES = parameter_option_values('cache')
+FINETUNE_OPTIMIZER_MODES = parameter_option_values('optimizer_mode')
+FINETUNE_EXPLICIT_OPTIMIZERS = tuple(
+    optimizer
+    for optimizer in parameter_option_values('optimizer')
+    if optimizer != 'auto'
+)
+FRESH_TRAINING_MODELS = ENABLED_TRAINING_MODEL_CHECKPOINTS
 OBJECT_ARTIFACT_FILENAMES = {
     'onnx': 'best.onnx',
     'pt': 'best.pt',
@@ -72,30 +96,31 @@ OBJECT_ARTIFACT_FILENAMES = {
     'results': 'results.csv',
     'args': 'args.yaml',
 }
-FINETUNE_PARAMETER_DEFAULTS = {
-    'epochs': 50,
-    'batch': 8,
-    'imgsz': 640,
-    'lr0': 0.0001,
-    'lrf': 0.01,
-    'freeze': 10,
-    'mosaic': 0.5,
-    'scale': 0.8,
-    'close_mosaic': 10,
-    'degrees': 15.0,
-    'translate': 0.2,
-    'mixup': 0.0,
-    'copy_paste': 0.0,
-    'seed': 42,
-}
-FINETUNE_PARAMETER_FIELDS = tuple(FINETUNE_PARAMETER_DEFAULTS)
 DEFAULT_FINETUNE_PARAMETER_SETS = (
     {
+        'system_key': 'fresh-baseline',
+        'name': 'Fresh Baseline',
+        'description': (
+            'Full-network training from an official YOLO checkpoint.'
+        ),
+        'parameters': {
+            **FINETUNE_PARAMETER_DEFAULTS,
+            'optimizer_mode': 'explicit',
+            'optimizer': 'SGD',
+            'lr0': 0.01,
+            'freeze': 0,
+            'mosaic': 1.0,
+        },
+    },
+    {
         'system_key': 'baseline',
-        'name': 'Baseline',
+        'name': 'Fine-tune Baseline',
         'description': 'Balanced starting point for a trusted detection checkpoint.',
         'parameters': {
             **FINETUNE_PARAMETER_DEFAULTS,
+            'optimizer_mode': 'explicit',
+            'optimizer': 'AdamW',
+            'lr0': 0.0001,
         },
     },
     {
@@ -104,6 +129,8 @@ DEFAULT_FINETUNE_PARAMETER_SETS = (
         'description': 'Lower learning rate to preserve more parent-model knowledge.',
         'parameters': {
             **FINETUNE_PARAMETER_DEFAULTS,
+            'optimizer_mode': 'explicit',
+            'optimizer': 'AdamW',
             'lr0': 0.00005,
         },
     },
@@ -113,6 +140,8 @@ DEFAULT_FINETUNE_PARAMETER_SETS = (
         'description': 'Higher learning rate for a dataset that differs from the parent.',
         'parameters': {
             **FINETUNE_PARAMETER_DEFAULTS,
+            'optimizer_mode': 'explicit',
+            'optimizer': 'AdamW',
             'lr0': 0.0002,
         },
     },
@@ -1095,97 +1124,44 @@ def probe_all_workers():
 def _normalize_finetune_parameters(raw_job):
     if not isinstance(raw_job, dict):
         raise ValueError('Fine-tune parameters must be a JSON object.')
-
-    def numeric(name, converter, default):
-        value = raw_job.get(name, default)
-        if isinstance(value, bool):
-            raise ValueError(f'Fine-tune {name} must be numeric.')
-        try:
-            return converter(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'Fine-tune {name} must be numeric.') from exc
-
-    parameters = {
-        'lr0': numeric('lr0', float, 0.0001),
-        'lrf': numeric('lrf', float, 0.01),
-        'freeze': numeric('freeze', int, 10),
-        'mosaic': numeric('mosaic', float, 0.5),
-        'scale': numeric('scale', float, 0.8),
-        'close_mosaic': numeric('close_mosaic', int, 10),
-        'degrees': numeric('degrees', float, 15.0),
-        'translate': numeric('translate', float, 0.2),
-        'mixup': numeric('mixup', float, 0.0),
-        'copy_paste': numeric('copy_paste', float, 0.0),
-        'seed': numeric('seed', int, 42),
+    supplied_parameters = {
+        name: raw_job[name]
+        for name in FINETUNE_PARAMETER_FIELDS
+        if name in raw_job
     }
-    if not 0 < parameters['lr0'] <= 0.1:
-        raise ValueError('Fine-tune lr0 must be greater than 0 and at most 0.1.')
-    if not 0 < parameters['lrf'] <= 1:
-        raise ValueError('Fine-tune lrf must be greater than 0 and at most 1.')
-    if not 0 <= parameters['freeze'] <= 100:
-        raise ValueError('Fine-tune freeze must be between 0 and 100.')
-    for name in ('mosaic', 'mixup', 'copy_paste'):
-        if not 0 <= parameters[name] <= 1:
-            raise ValueError(f'Fine-tune {name} must be between 0 and 1.')
-    if not 0 <= parameters['scale'] <= 2:
-        raise ValueError('Fine-tune scale must be between 0 and 2.')
-    if not 0 <= parameters['translate'] <= 1:
-        raise ValueError('Fine-tune translate must be between 0 and 1.')
-    if not 0 <= parameters['degrees'] <= 180:
-        raise ValueError('Fine-tune degrees must be between 0 and 180.')
-    if not 0 <= parameters['close_mosaic'] <= 100:
-        raise ValueError('Fine-tune close_mosaic must be between 0 and 100.')
-    if not 0 <= parameters['seed'] <= 2**31 - 1:
-        raise ValueError('Fine-tune seed is outside the supported range.')
-    return parameters
+    try:
+        parameters = normalize_training_parameters(supplied_parameters)
+    except TrainingParameterCatalogError as exc:
+        raise ValueError(f'Fine-tune {exc}') from exc
+
+    if parameters['optimizer_mode'] == 'auto':
+        parameters['optimizer'] = 'auto'
+        parameters['lr0'] = None
+    else:
+        if parameters['optimizer'] == 'auto':
+            raise ValueError(
+                'Fine-tune explicit optimizer requires a named optimizer.'
+            )
+        if parameters['lr0'] is None:
+            raise ValueError('Fine-tune explicit optimizer requires lr0.')
+    return {
+        name: parameters[name]
+        for name in FINETUNE_PARAMETER_FIELDS
+        if name not in {'epochs', 'batch', 'imgsz'}
+    }
 
 
 def normalize_finetune_parameter_set_parameters(raw_parameters):
     if not isinstance(raw_parameters, dict):
         raise ValueError('parameters must be a JSON object.')
-    unknown = sorted(
-        set(raw_parameters) - set(FINETUNE_PARAMETER_FIELDS)
-    )
-    if unknown:
-        raise ValueError(
-            'Unsupported fine-tune parameter(s): ' + ', '.join(unknown)
-        )
-
-    merged = {
-        **FINETUNE_PARAMETER_DEFAULTS,
-        **raw_parameters,
-    }
-
-    def integer(name):
-        value = merged[name]
-        if isinstance(value, bool):
-            raise ValueError(f'{name} must be an integer.')
-        try:
-            return int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f'{name} must be an integer.') from exc
-
-    epochs = integer('epochs')
-    batch_size = integer('batch')
-    imgsz = integer('imgsz')
-    if not 1 <= epochs <= 300:
-        raise ValueError('epochs must be between 1 and 300.')
-    if not 1 <= batch_size <= 64:
-        raise ValueError('batch must be between 1 and 64.')
-    if imgsz not in FINETUNE_ALLOWED_IMAGE_SIZES:
-        raise ValueError(
-            f'imgsz must be one of {list(FINETUNE_ALLOWED_IMAGE_SIZES)}.'
-        )
-
-    normalized = {
-        'epochs': epochs,
-        'batch': batch_size,
-        'imgsz': imgsz,
-        **_normalize_finetune_parameters(merged),
-    }
+    try:
+        normalized = normalize_training_parameters(raw_parameters)
+    except TrainingParameterCatalogError as exc:
+        raise ValueError(str(exc)) from exc
+    normalized.update(_normalize_finetune_parameters(normalized))
     normalized['close_mosaic'] = min(
         normalized['close_mosaic'],
-        max(epochs - 1, 0),
+        max(normalized['epochs'] - 1, 0),
     )
     return normalized
 
@@ -1216,9 +1192,13 @@ def finetune_parameter_set_usage_count(parameter_set_id):
 
 
 def serialize_finetune_parameter_set(parameter_set):
-    return parameter_set.to_dict(
+    payload = parameter_set.to_dict(
         usage_count=finetune_parameter_set_usage_count(parameter_set.id)
     )
+    payload['parameters'] = normalize_finetune_parameter_set_parameters(
+        parameter_set.parameters or {}
+    )
+    return payload
 
 
 def ensure_default_finetune_parameter_sets():
@@ -1508,12 +1488,9 @@ def create_training_batch(payload):
             )
 
         parameter_set = None
+        parameter_set_parameters = None
         parameter_set_id = raw_job.get('parameter_set_id')
         if parameter_set_id is not None:
-            if training_mode != 'finetune':
-                raise ValueError(
-                    f'jobs[{index}].parameter_set_id is only valid for fine-tune.'
-                )
             try:
                 parameter_set_id = int(parameter_set_id)
             except (TypeError, ValueError) as exc:
@@ -1528,6 +1505,19 @@ def create_training_batch(payload):
                 raise ValueError(
                     f'jobs[{index}].parameter_set_id does not exist.'
                 )
+            if not parameter_set.is_active:
+                raise ValueError(
+                    f'jobs[{index}].parameter_set_id is archived.'
+                )
+            if parameter_set.model_task != 'detect':
+                raise ValueError(
+                    f'jobs[{index}].parameter_set_id must target detection.'
+                )
+            parameter_set_parameters = (
+                normalize_finetune_parameter_set_parameters(
+                    parameter_set.parameters or {}
+                )
+            )
 
         parent_model_id = raw_job.get(
             'parent_model_id',
@@ -1572,11 +1562,20 @@ def create_training_batch(payload):
 
         model = str(
             raw_job.get('model')
-            or (parent_model.filename if parent_model else 'yolo11n.pt')
+            or (parent_model.filename if parent_model else 'yolo11s.pt')
         ).strip()
-        epochs = int(raw_job.get('epochs') or 1)
-        batch_size = int(raw_job.get('batch') or 16)
-        imgsz = int(raw_job.get('imgsz') or 640)
+        if (
+            training_mode == 'fresh'
+            and model not in ENABLED_TRAINING_MODEL_CHECKPOINT_SET
+        ):
+            raise ValueError(
+                f'jobs[{index}].model must be one of '
+                f'{", ".join(FRESH_TRAINING_MODELS)}.'
+            )
+        effective_parameters = parameter_set_parameters or raw_job
+        epochs = int(effective_parameters.get('epochs') or 1)
+        batch_size = int(effective_parameters.get('batch') or 16)
+        imgsz = int(effective_parameters.get('imgsz') or 640)
         if epochs < 1 or batch_size < 1 or imgsz < 32:
             raise ValueError(
                 f'jobs[{index}] requires epochs>=1, batch>=1 and imgsz>=32.'
@@ -1670,25 +1669,34 @@ def create_training_batch(payload):
             'epochs': epochs,
             'batch': batch_size,
             'imgsz': imgsz,
+            'optimizer_mode': 'auto',
+            'optimizer': 'auto',
+            'lr0': None,
+            'apply_training_parameters': bool(
+                training_mode == 'finetune' or parameter_set is not None
+            ),
         }
         parameter_set_snapshot = None
+        if training_mode == 'finetune' or parameter_set is not None:
+            request_payload.update(_normalize_finetune_parameters(
+                parameter_set_parameters or raw_job
+            ))
         if training_mode == 'finetune':
-            request_payload.update(_normalize_finetune_parameters(raw_job))
             request_payload.update({
                 'parent_artifact_id': parent_artifact.artifact_id,
                 'parent_sha256': parent_artifact.sha256,
             })
-            if parameter_set is not None:
-                parameter_set_snapshot = {
-                    'id': parameter_set.id,
-                    'preset_id': parameter_set.preset_id,
-                    'name': parameter_set.name,
-                    'version': parameter_set.version,
-                    'parameters': {
-                        field: request_payload[field]
-                        for field in FINETUNE_PARAMETER_FIELDS
-                    },
-                }
+        if parameter_set is not None:
+            parameter_set_snapshot = {
+                'id': parameter_set.id,
+                'preset_id': parameter_set.preset_id,
+                'name': parameter_set.name,
+                'version': parameter_set.version,
+                'parameters': {
+                    field: request_payload[field]
+                    for field in FINETUNE_PARAMETER_FIELDS
+                },
+            }
         config_hash = hashlib.sha256(
             json.dumps(
                 request_payload,
@@ -1832,8 +1840,16 @@ def validate_parent_model(model, worker, adapter_factory=adapter_for_worker):
 def finetune_presets_payload(include_archived=False):
     return {
         'version': FINETUNE_PRESET_VERSION,
+        'parameter_catalog': training_parameter_catalog_payload(),
+        'parameter_catalog_hash': TRAINING_PARAMETER_CATALOG_HASH,
+        'training_parameter_contract_version': (
+            TRAINING_PARAMETER_CONTRACT_VERSION
+        ),
         'ranking_metric': FINETUNE_RANKING_METRIC,
         'allowed_image_sizes': list(FINETUNE_ALLOWED_IMAGE_SIZES),
+        'cache_modes': list(FINETUNE_CACHE_MODES),
+        'optimizer_modes': list(FINETUNE_OPTIMIZER_MODES),
+        'explicit_optimizers': list(FINETUNE_EXPLICIT_OPTIMIZERS),
         'parameter_defaults': dict(FINETUNE_PARAMETER_DEFAULTS),
         'parameter_fields': list(FINETUNE_PARAMETER_FIELDS),
         'parameter_sets': list_finetune_parameter_sets(
@@ -2413,6 +2429,7 @@ def _claim_task_for_worker(task, worker):
     task.lease_expires_at = utcnow() + _lease_duration()
     task.next_attempt_at = None
     task.error = None
+    task.effective_config = None
     transition_task(
         task,
         'preparing_dataset',
@@ -2495,6 +2512,10 @@ def _sync_local_training_job(task, worker, remote_payload):
     if isinstance(metrics, dict):
         job.metrics = metrics
         task.metrics = metrics
+    effective_config = remote_payload.get('effective_config')
+    if isinstance(effective_config, dict):
+        job.effective_config = effective_config
+        task.effective_config = effective_config
     job.connection_status = 'synced'
     job.last_sync_error = None
     job.last_synced_at = utcnow()
@@ -3616,8 +3637,10 @@ def _resume_worker_lost_tasks(app, adapter_factory, asynchronous):
 
 
 def _worker_supports_task(worker, task):
+    capabilities = worker.capabilities or {}
+    if capabilities.get('optimizer_contract_version') != 1:
+        return False
     if task.status == 'resume_pending':
-        capabilities = worker.capabilities or {}
         try:
             store_enabled = checkpoint_store().enabled
         except ObjectStoreError:
@@ -3631,9 +3654,45 @@ def _worker_supports_task(worker, task):
     training_mode = str(
         (task.request_payload or {}).get('training_mode') or 'fresh'
     )
+    applies_parameter_set = bool(
+        training_mode == 'finetune'
+        or (task.request_payload or {}).get('apply_training_parameters')
+    )
+    if applies_parameter_set:
+        if not capabilities.get('training_parameter_sets'):
+            return False
+        try:
+            parameter_contract_version = int(
+                capabilities.get('training_parameter_contract_version') or 0
+            )
+        except (TypeError, ValueError):
+            return False
+        if parameter_contract_version < TRAINING_PARAMETER_CONTRACT_VERSION:
+            return False
+        if (
+            str(capabilities.get('training_parameter_catalog_hash') or '')
+            != TRAINING_PARAMETER_CATALOG_HASH
+        ):
+            return False
     if training_mode == 'finetune':
         return worker_supports_finetune(worker)
-    return bool((worker.capabilities or {}).get('training', True))
+    if not capabilities.get('training', True):
+        return False
+
+    worker_catalog_hash = capabilities.get('training_model_catalog_hash')
+    if (
+        worker_catalog_hash is not None
+        and str(worker_catalog_hash) != TRAINING_MODEL_CATALOG_HASH
+    ):
+        return False
+
+    model = str((task.request_payload or {}).get('model') or 'yolo11s.pt')
+    allowed_models = capabilities.get('allowed_models')
+    if allowed_models is None:
+        return model == 'yolo11s.pt'
+    if not isinstance(allowed_models, (list, tuple, set)):
+        return False
+    return model in {str(item) for item in allowed_models}
 
 
 def dispatch_once(

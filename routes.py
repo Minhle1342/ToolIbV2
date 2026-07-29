@@ -72,6 +72,7 @@ from training_control_plane import (
     validate_parent_model,
     worker_supports_finetune,
 )
+from training_model_catalog import public_training_model_catalog
 
 # Initialize Inference Engines
 inference_engine = None
@@ -3340,6 +3341,11 @@ def list_training_batches():
         TrainingBatch.id.desc(),
     ).limit(limit).all()
     return jsonify([batch.to_dict() for batch in batches])
+
+
+@api_bp.route('/training-model-catalog', methods=['GET'])
+def get_training_model_catalog():
+    return jsonify(public_training_model_catalog())
 
 
 @api_bp.route('/finetune/config', methods=['GET'])

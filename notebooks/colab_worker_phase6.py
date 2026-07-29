@@ -33,8 +33,142 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+import ultralytics
 from ultralytics import YOLO
 
+# BEGIN GENERATED TRAINING MODEL CATALOG
+TRAINING_MODEL_CATALOG_VERSION = "phase-a-small-v1"
+TRAINING_MODEL_CATALOG_HASH = "54848e500cb3a1b7f7bad04a2d34672111a6b25114215a9cc3b07f6cb2aac9db"
+ALLOWED_MODELS = {"yolo11s.pt", "yolo12s.pt", "yolo26s.pt"}
+# END GENERATED TRAINING MODEL CATALOG
+# BEGIN GENERATED TRAINING PARAMETER CATALOG
+TRAINING_PARAMETER_CATALOG_VERSION = 'phase-c2-training-v1'
+TRAINING_PARAMETER_CATALOG_HASH = 'b201f355fffc6e3dc17ac540e7d22a1db2da9cd8c202e5cc53d9c61394a9f752'
+TRAINING_PARAMETER_CONTRACT_VERSION = 3
+TRAINING_PARAMETER_ALWAYS_FORWARD_FIELDS = (
+    'epochs',
+    'batch',
+    'imgsz',
+    'optimizer',
+    'seed',
+)
+TRAINING_PARAMETER_SET_FORWARD_FIELDS = (
+    'patience',
+    'fraction',
+    'freeze',
+    'lrf',
+    'momentum',
+    'weight_decay',
+    'warmup_epochs',
+    'cos_lr',
+    'nbs',
+    'rect',
+    'cache',
+    'amp',
+    'compile',
+    'channels_last',
+    'box',
+    'cls',
+    'dfl',
+    'hsv_h',
+    'hsv_s',
+    'hsv_v',
+    'mosaic',
+    'scale',
+    'close_mosaic',
+    'degrees',
+    'translate',
+    'shear',
+    'perspective',
+    'flipud',
+    'fliplr',
+    'mixup',
+    'copy_paste',
+    'multi_scale',
+)
+TRAINING_PARAMETER_EFFECTIVE_FIELDS = (
+    'epochs',
+    'batch',
+    'imgsz',
+    'patience',
+    'fraction',
+    'freeze',
+    'lrf',
+    'momentum',
+    'weight_decay',
+    'warmup_epochs',
+    'cos_lr',
+    'nbs',
+    'rect',
+    'cache',
+    'amp',
+    'compile',
+    'channels_last',
+    'seed',
+    'box',
+    'cls',
+    'dfl',
+    'hsv_h',
+    'hsv_s',
+    'hsv_v',
+    'mosaic',
+    'scale',
+    'close_mosaic',
+    'degrees',
+    'translate',
+    'shear',
+    'perspective',
+    'flipud',
+    'fliplr',
+    'mixup',
+    'copy_paste',
+    'multi_scale',
+)
+
+class TrainingParameterRequest(BaseModel):
+    epochs: int = Field(default=1, ge=1, le=300)
+    batch: int = Field(default=4, ge=1, le=64)
+    imgsz: Literal[320, 416, 512, 640, 768] = 640
+    patience: int = Field(default=100, ge=0, le=300)
+    fraction: float = Field(default=1.0, gt=0.0, le=1.0)
+    freeze: int = Field(default=10, ge=0, le=100)
+    optimizer_mode: Literal['auto', 'explicit'] = 'auto'
+    optimizer: Literal['auto', 'Adam', 'Adamax', 'AdamW', 'NAdam', 'RAdam', 'RMSprop', 'SGD', 'MuSGD'] = 'auto'
+    lr0: float | None = Field(default=None, gt=0.0, le=0.1)
+    lrf: float = Field(default=0.01, gt=0.0, le=1.0)
+    momentum: float = Field(default=0.937, ge=0.0, le=1.0)
+    weight_decay: float = Field(default=0.0005, ge=0.0, le=1.0)
+    warmup_epochs: float = Field(default=3.0, ge=0.0, le=100.0)
+    cos_lr: bool = False
+    nbs: int = Field(default=64, ge=1, le=4096)
+    rect: bool = False
+    cache: Literal['off', 'ram', 'disk'] = 'off'
+    amp: bool = True
+    compile: bool | Literal['default', 'reduce-overhead', 'max-autotune-no-cudagraphs'] = False
+    channels_last: bool = False
+    seed: int = Field(default=42, ge=0, le=2147483647)
+    box: float = Field(default=7.5, ge=0.0, le=100.0)
+    cls: float = Field(default=0.5, ge=0.0, le=100.0)
+    dfl: float = Field(default=1.5, ge=0.0, le=100.0)
+    hsv_h: float = Field(default=0.015, ge=0.0, le=1.0)
+    hsv_s: float = Field(default=0.7, ge=0.0, le=1.0)
+    hsv_v: float = Field(default=0.4, ge=0.0, le=1.0)
+    mosaic: float = Field(default=0.5, ge=0.0, le=1.0)
+    scale: float = Field(default=0.8, ge=0.0, le=2.0)
+    close_mosaic: int = Field(default=10, ge=0, le=100)
+    degrees: float = Field(default=15.0, ge=0.0, le=180.0)
+    translate: float = Field(default=0.2, ge=0.0, le=1.0)
+    shear: float = Field(default=0.0, ge=0.0, le=180.0)
+    perspective: float = Field(default=0.0, ge=0.0, le=0.001)
+    flipud: float = Field(default=0.0, ge=0.0, le=1.0)
+    fliplr: float = Field(default=0.5, ge=0.0, le=1.0)
+    mixup: float = Field(default=0.0, ge=0.0, le=1.0)
+    copy_paste: float = Field(default=0.0, ge=0.0, le=1.0)
+    multi_scale: float = Field(default=0.0, ge=0.0, le=1.0)
+
+# END GENERATED TRAINING PARAMETER CATALOG
+ULTRALYTICS_PIN = "8.4.110"
+ULTRALYTICS_VERSION = getattr(ultralytics, "__version__", "unknown")
 MODEL_CACHE_ROOT = WORK_ROOT / "models"
 MODEL_UPLOAD_ROOT = WORK_ROOT / "model_uploads"
 CHECKPOINT_CACHE_ROOT = WORK_ROOT / "checkpoint_cache"
@@ -227,29 +361,16 @@ class ArtifactUploadTarget(BaseModel):
         return normalized
 
 
-class TrainRequest(BaseModel):
+class TrainRequest(TrainingParameterRequest):
     model_config = ConfigDict(extra="forbid")
 
     execution_mode: Literal["initial", "resume"] = "initial"
     recovery_generation: int = Field(default=1, ge=1, le=100)
     training_mode: Literal["fresh", "finetune"] = "fresh"
-    model: str = "yolo11n.pt"
+    apply_training_parameters: bool = False
+    model: str = "yolo11s.pt"
     parent_artifact_id: str | None = None
     parent_sha256: str | None = None
-    epochs: int = Field(default=1, ge=1, le=300)
-    batch: int = Field(default=4, ge=1, le=64)
-    imgsz: Literal[320, 416, 512, 640, 768] = 640
-    lr0: float = Field(default=0.0001, gt=0, le=0.1)
-    lrf: float = Field(default=0.01, gt=0, le=1)
-    freeze: int = Field(default=10, ge=0, le=100)
-    mosaic: float = Field(default=0.5, ge=0, le=1)
-    scale: float = Field(default=0.8, ge=0, le=2)
-    close_mosaic: int = Field(default=10, ge=0, le=100)
-    degrees: float = Field(default=15.0, ge=0, le=180)
-    translate: float = Field(default=0.2, ge=0, le=1)
-    mixup: float = Field(default=0.0, ge=0, le=1)
-    copy_paste: float = Field(default=0.0, ge=0, le=1)
-    seed: int = Field(default=42, ge=0, le=2**31 - 1)
     dataset_id: str | None = None
     dataset_object: RemoteObjectInput | None = None
     parent_object: ParentObjectInput | None = None
@@ -284,6 +405,18 @@ class TrainRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_training_contract(self):
+        if self.optimizer_mode == "auto":
+            self.optimizer = "auto"
+            self.lr0 = None
+        else:
+            if self.optimizer == "auto":
+                raise ValueError(
+                    "Explicit optimizer mode requires a named optimizer."
+                )
+            if self.lr0 is None:
+                raise ValueError(
+                    "Explicit optimizer mode requires lr0."
+                )
         artifact_kinds = [target.kind for target in self.artifact_uploads]
         if len(artifact_kinds) != len(set(artifact_kinds)):
             raise ValueError("artifact upload kinds must be unique.")
@@ -477,6 +610,7 @@ def restore_persisted_jobs() -> int:
             "error": persisted.get("error"),
             "artifacts": artifacts or None,
             "metrics": persisted.get("metrics") or {},
+            "effective_config": persisted.get("effective_config"),
             "dataset_id": dataset_id,
             "idempotency_key": idempotency_key,
             "request": {
@@ -1229,6 +1363,40 @@ def run_training_job(
         }
         scheduled_checkpoint_epochs = set()
         checkpoint_futures = []
+        effective_config = None
+
+        def on_pretrain_routine_end(trainer) -> None:
+            nonlocal effective_config
+            optimizer = getattr(trainer, "optimizer", None)
+            if optimizer is None:
+                raise RuntimeError(
+                    "Ultralytics did not expose the resolved optimizer."
+                )
+            parameter_groups = []
+            for index, group in enumerate(optimizer.param_groups):
+                initial_lr = float(group.get("initial_lr", group["lr"]))
+                parameter_groups.append({
+                    "index": index,
+                    "name": str(group.get("param_group") or index),
+                    "initial_lr": initial_lr,
+                })
+            trainer_args = getattr(trainer, "args", None)
+            training_arguments = {
+                name: getattr(trainer_args, name, None)
+                for name in TRAINING_PARAMETER_EFFECTIVE_FIELDS
+            }
+            effective_config = {
+                "optimizer_class": type(optimizer).__name__,
+                "initial_lr": min(
+                    group["initial_lr"] for group in parameter_groups
+                ),
+                "parameter_groups": parameter_groups,
+                "training_arguments": training_arguments,
+            }
+            update_job(
+                job_id,
+                effective_config=copy.deepcopy(effective_config),
+            )
 
         def on_train_epoch_end(trainer) -> None:
             current_epoch = int(getattr(trainer, "epoch", 0)) + 1
@@ -1285,34 +1453,36 @@ def run_training_job(
 
         model.add_callback("on_train_epoch_end", on_train_epoch_end)
         model.add_callback("on_model_save", on_model_save)
+        model.add_callback(
+            "on_pretrain_routine_end",
+            on_pretrain_routine_end,
+        )
         train_kwargs = {
             "data": dataset_info["runtime_yaml"],
-            "epochs": request_data.epochs,
-            "batch": request_data.batch,
-            "imgsz": request_data.imgsz,
             "device": 0,
             "workers": 2,
             "project": str(LOCAL_RUN_ROOT),
             "name": job_id,
             "exist_ok": False,
-            "seed": request_data.seed,
         }
-        if request_data.training_mode == "finetune":
-            train_kwargs.update({
-                "lr0": request_data.lr0,
-                "lrf": request_data.lrf,
-                "freeze": request_data.freeze,
-                "mosaic": request_data.mosaic,
-                "scale": request_data.scale,
-                "close_mosaic": min(
-                    request_data.close_mosaic,
-                    max(request_data.epochs - 1, 0),
-                ),
-                "degrees": request_data.degrees,
-                "translate": request_data.translate,
-                "mixup": request_data.mixup,
-                "copy_paste": request_data.copy_paste,
-            })
+        for parameter_name in TRAINING_PARAMETER_ALWAYS_FORWARD_FIELDS:
+            train_kwargs[parameter_name] = getattr(
+                request_data,
+                parameter_name,
+            )
+        if (
+            request_data.training_mode == "finetune"
+            or request_data.apply_training_parameters
+        ):
+            for parameter_name in TRAINING_PARAMETER_SET_FORWARD_FIELDS:
+                value = getattr(request_data, parameter_name)
+                if parameter_name == "cache" and value == "off":
+                    value = False
+                elif parameter_name == "close_mosaic":
+                    value = min(value, max(request_data.epochs - 1, 0))
+                train_kwargs[parameter_name] = value
+            if request_data.optimizer_mode == "explicit":
+                train_kwargs["lr0"] = request_data.lr0
         if request_data.execution_mode == "resume":
             model.train(resume=True)
         else:
@@ -1395,6 +1565,8 @@ def run_training_job(
             "parent_sha256": request_data.parent_sha256,
             "idempotency_key": job_snapshot.get("idempotency_key"),
             "request": job_snapshot.get("request"),
+            "requested_config": job_snapshot.get("request"),
+            "effective_config": effective_config,
             "dataset_yaml": dataset_info["runtime_yaml"],
             "training_save_dir": str(save_dir),
             "metrics": metrics,
@@ -1451,6 +1623,7 @@ def run_training_job(
             message="Training and ONNX export completed.",
             error=None,
             metrics=metrics,
+            effective_config=effective_config,
             artifacts=artifacts,
         )
     except Exception as exc:
@@ -1460,6 +1633,8 @@ def run_training_job(
             "job_id": job_id,
             "status": "failed",
             "request": public_train_request(request_data),
+            "requested_config": public_train_request(request_data),
+            "effective_config": effective_config,
             "error": error_message,
             "finished_at": utc_now(),
         }
@@ -1498,6 +1673,14 @@ def health() -> dict:
         ),
         "active_job_id": active_job_id,
         "idempotent_submit": True,
+        "allowed_models": sorted(ALLOWED_MODELS),
+        "training_model_catalog_version": TRAINING_MODEL_CATALOG_VERSION,
+        "training_model_catalog_hash": TRAINING_MODEL_CATALOG_HASH,
+        "training_parameter_catalog_version": (
+            TRAINING_PARAMETER_CATALOG_VERSION
+        ),
+        "training_parameter_catalog_hash": TRAINING_PARAMETER_CATALOG_HASH,
+        "ultralytics_version": ULTRALYTICS_VERSION,
         "capabilities": {
             "dataset_upload": True,
             "object_input_download": True,
@@ -1506,6 +1689,22 @@ def health() -> dict:
             "object_transport_protocol_version": 1,
             "training": True,
             "training_modes": ["fresh", "finetune"],
+            "training_parameter_sets": True,
+            "training_parameter_contract_version": (
+                TRAINING_PARAMETER_CONTRACT_VERSION
+            ),
+            "training_parameter_catalog_version": (
+                TRAINING_PARAMETER_CATALOG_VERSION
+            ),
+            "training_parameter_catalog_hash": (
+                TRAINING_PARAMETER_CATALOG_HASH
+            ),
+            "optimizer_contract_version": 1,
+            "allowed_models": sorted(ALLOWED_MODELS),
+            "training_model_catalog_version": TRAINING_MODEL_CATALOG_VERSION,
+            "training_model_catalog_hash": TRAINING_MODEL_CATALOG_HASH,
+            "ultralytics_version": ULTRALYTICS_VERSION,
+            "ultralytics_pin": ULTRALYTICS_PIN,
             "checkpoint_upload": True,
             "checkpoint_resume": True,
             "checkpoint_protocol_version": 1,
@@ -1613,6 +1812,7 @@ def start_train(request_data: TrainRequest, request: Request):
             "error": None,
             "artifacts": None,
             "metrics": {},
+            "effective_config": None,
             "latest_checkpoint": (
                 request_data.resume_checkpoint.model_dump(
                     exclude={"download_url"}

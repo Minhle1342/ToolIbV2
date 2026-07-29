@@ -32,7 +32,7 @@ lập. Khi test UI Phase 4, không cần tự tạo hoặc copy
    val đều phải lớn hơn 0.
 8. Bấm `Chuẩn bị & tải dataset lên Colab`. Chờ trạng thái `uploaded` và ghi lại
    8 ký tự đầu của `dataset_id`.
-9. Chọn `yolo11n.pt`, task `detect`, epochs, batch và imgsz rồi bấm
+9. Chọn `yolo11s.pt`, `yolo12s.pt` hoặc `yolo26s.pt`, task `detect`, epochs, batch và imgsz rồi bấm
    `Start Train`. Nút này bị khóa nếu chưa có snapshot `uploaded`.
 10. Trong Training history, xác nhận job hiển thị cùng `dataset_id`.
 11. Khi job `succeeded`, xác nhận Drive có:
@@ -98,7 +98,7 @@ Training request Phase 4:
 
 ```json
 {
-  "model": "yolo11n.pt",
+  "model": "yolo11s.pt",
   "epochs": 2,
   "batch": 4,
   "imgsz": 640,
@@ -136,7 +136,7 @@ Notebook sử dụng:
 PoC hiện hỗ trợ:
 
 - Ultralytics YOLO detection.
-- `yolo11n.pt` và `yolo11s.pt`.
+- `yolo11s.pt`, `yolo12s.pt` và `yolo26s.pt` cho fresh training.
 - Một training job tại một thời điểm.
 - Dataset YOLO được tạo bởi ToolIbV2.
 - Bearer token.
@@ -241,7 +241,8 @@ Nếu đã upload notebook trước Phase 2, phải upload lại file hiện t�
 GET /health
 ```
 
-Không cần token. Response chỉ chứa trạng thái API, GPU và active job ID.
+Không cần token. Response có trạng thái API, GPU, active job ID, `allowed_models`,
+phiên bản Ultralytics và capability của worker.
 
 ### Submit training
 
@@ -255,7 +256,7 @@ Body:
 
 ```json
 {
-  "model": "yolo11n.pt",
+  "model": "yolo11s.pt",
   "epochs": 1,
   "batch": 4,
   "imgsz": 640
@@ -330,7 +331,7 @@ Submit một job một epoch:
 
 ```powershell
 $body = @{
-    model  = 'yolo11n.pt'
+    model  = 'yolo11s.pt'
     epochs = 1
     batch  = 4
     imgsz  = 640
@@ -364,15 +365,20 @@ do {
 } while ($true)
 ```
 
-## 7. Test từ UI ToolIbV2
+## 7. Test direct API từ UI ToolIbV2 (legacy smoke)
+
+Đây là đường kiểm tra trực tiếp một worker, không phải flow training chính.
+Trong giao diện mới, mở details `Legacy direct Colab smoke test` để thấy các
+control bên dưới. Flow chính dùng `Worker registry`, shared parameter presets và
+`Queue training jobs` ở Phase 5/6.
 
 1. Giữ cell server/tunnel trên Colab đang chạy.
 2. Khởi động ToolIbV2 tại `localhost:5000`.
 3. Mở `/colab-manager`.
-4. Chọn family `YOLO11`.
-5. Chọn `yolo11n.pt` hoặc `yolo11s.pt`.
+4. Chọn family `YOLO11`, `YOLO12` hoặc `YOLO26`.
+5. Chọn checkpoint Small tương ứng: `yolo11s.pt`, `yolo12s.pt` hoặc `yolo26s.pt`.
 6. Chọn task `detect`, epochs, batch và image size hợp lệ.
-7. Trong panel `Remote Colab API (PoC)`, paste Quick Tunnel URL.
+7. Trong `Legacy direct Colab smoke test`, paste Quick Tunnel URL.
 8. Paste cùng giá trị của Colab Secret `TOOLIB_COLAB_API_TOKEN`.
 9. Bấm `Kiểm tra`; trạng thái phải là `Online · GPU`.
 10. Bấm `Start Train`; UI phải hiện job ID và tự poll khoảng bốn giây một lần.
@@ -393,7 +399,7 @@ Quy tắc lưu trên browser:
 
 Nếu Colab trả `409`, UI sẽ lấy `active_job_id` và chuyển sang theo dõi job đang chạy.
 
-Model ngoài `yolo11n.pt` và `yolo11s.pt` vẫn dùng được với phần Code Generator, nhưng nút Remote `Start Train` sẽ bị khóa.
+Model ngoài `yolo11s.pt`, `yolo12s.pt` và `yolo26s.pt` vẫn dùng được với phần Code Generator, nhưng nút Remote `Start Train` sẽ bị khóa.
 
 Nếu tab đã đóng hoặc token không còn trong `sessionStorage`:
 
@@ -419,7 +425,7 @@ Submit request thứ hai khi job đầu đang chạy phải trả `409`.
 
 Các giá trị sau phải bị từ chối với `422`:
 
-- Model ngoài `yolo11n.pt`, `yolo11s.pt`.
+- Model ngoài `yolo11s.pt`, `yolo12s.pt`, `yolo26s.pt`.
 - `epochs` nhỏ hơn 1 hoặc lớn hơn 100.
 - `batch` nhỏ hơn 1 hoặc lớn hơn 32.
 - `imgsz` ngoài `320, 416, 512, 640, 768`.
@@ -561,7 +567,7 @@ Thử:
 
 - `batch: 2` hoặc `batch: 1`.
 - `imgsz: 320`.
-- `yolo11n.pt`.
+- `yolo11s.pt` với `batch: 1` hoặc `batch: 2`.
 
 Job phải chuyển sang `failed`; API không được chết.
 
@@ -665,7 +671,7 @@ Với mỗi Google account:
 2. Chọn GPU runtime, tạo một bearer token riêng và lưu vào
    `TOOLIB_COLAB_API_TOKEN`.
 3. Chạy notebook đến khi có `Temporary public API`.
-4. Tại `/colab-manager`, paste URL và token vào phần Colab API hiện tại.
+4. Tại `/colab-manager`, paste URL và token trong `Worker registry`.
 5. Nhập tên phân biệt, ví dụ `colab-account-1-t4`.
 6. Bấm `Đăng ký API hiện tại`.
 7. Lặp lại bằng account/runtime khác.
@@ -673,14 +679,30 @@ Với mỗi Google account:
 Mỗi worker online có capacity mặc định bằng 1. Hai worker có thể nhận hai task
 song song; task thứ ba giữ trạng thái `queued` cho đến khi có capacity.
 
-### 14.3 Queue batch
+### 14.3 Queue Fresh hoặc Fine-tune bằng shared parameter presets
 
-1. Chọn model, epochs, batch size, imgsz và split dataset.
-2. Trong `Production training control plane`, chọn một hoặc nhiều ToolIb
-   project.
-3. Chọn priority và max attempts.
-4. Bấm `Queue selected projects`.
-5. Theo dõi worker, batch, task, attempt và event ngay trên cùng màn hình.
+1. Chọn `yolo11s.pt`, `yolo12s.pt` hoặc `yolo26s.pt` ở đầu trang.
+2. Trong `1. Dataset và queue`, chọn một hoặc nhiều ToolIb project, split,
+   priority và max attempts.
+3. Trong `2. Training recipe`, chọn `Fresh` hoặc `Fine-tune`.
+4. Chọn một hoặc nhiều bộ tham số trong `Training parameter library`.
+5. Với Fine-tune, chỉ chọn đúng một project và chọn parent `.pt` đã `Ready`.
+6. Bấm `Queue fresh training jobs` hoặc `Queue fine-tune jobs`.
+7. Theo dõi worker, batch, task, attempt và event trong `Scheduler & batches`.
+
+Fresh và Fine-tune dùng cùng bảng parameter set trong database. Mỗi task lưu
+immutable parameter snapshot để việc sửa preset sau đó không làm đổi job đã
+queue.
+
+Số job Fresh được tạo theo công thức:
+
+```text
+số project × số parameter set được chọn
+```
+
+Hai worker capacity 1 có thể nhận hai task song song. Worker phải quảng cáo
+`training_parameter_sets=true`; UI hiển thị `Presets ready`. Worker cũ hiển thị
+`upgrade worker` và không nhận task Fresh dùng preset.
 
 Model ONNX hoàn tất được import với `is_active=false` và
 `activation_ready=false`. Người dùng phải kiểm tra chất lượng trước khi kích

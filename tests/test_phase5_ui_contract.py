@@ -11,12 +11,15 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
 
     required_contract = (
         'trainingWorkerRegisterBtn',
+        'colabRemoteEndpoint',
+        'colabRemoteToken',
         'trainingBatchProjects',
         'trainingBatchCreateBtn',
         'trainingBatchList',
         'registerCurrentColabWorker()',
         'async function reconnectTrainingWorker(',
         'async function createAutomatedTrainingBatch()',
+        'async function createUnifiedTrainingExperiment()',
         'async function dispatchTrainingControlPlane(',
         '/api/training-control-plane/status',
         'Await reconnect',
@@ -25,11 +28,17 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'finetunePhase6Panel',
         'finetuneParentFile',
         'finetuneParentModel',
-        'finetuneProject',
+        'trainingExperimentMode',
+        'finetuneOnlyFields',
         'finetuneParameterSetList',
         'finetuneParameterSetSelectionSummary',
         'finetuneParameterSetModal',
         'openFinetuneParameterSetEditor(',
+        'finetuneParameterPrimaryGroups',
+        'updateFinetuneParameterDependencies',
+        'auto optimizer · lr0 resolved at runtime',
+        'task.requested_config || task.request || {}',
+        'task.effective_config.optimizer_class',
         'saveFinetuneParameterSet()',
         'cloneFinetuneParameterSet(',
         'archiveFinetuneParameterSet(',
@@ -43,6 +52,9 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'parameter_set_ids: parameterSetIds',
         'shared dataset #',
         'Phase 6 ${supportsFinetune ? "ready" : "not supported"}',
+        'legacyRemoteColabPanel',
+        'legacyCodeGeneratorPanel',
+        'toggleLegacyCodeGenerator()',
     )
     for marker in required_contract:
         assert marker in template
@@ -56,6 +68,27 @@ def test_colab_manager_uses_database_parameter_sets_not_candidate_counts():
     assert 'finetuneSelectedParameterSetIds' in template
     assert 'finetuneCandidateCount' not in template
     assert 'candidate_count:' not in template
+    assert 'parameter_set_id: parameterSetId' in template
+    assert 'training_mode: "fresh"' in template
+
+
+def test_colab_manager_primary_training_ui_only_lists_supported_detection_models():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    assert 'id="trainingModelCatalogSummary"' in template
+    assert 'localTrainingApiFetch("/api/training-model-catalog")' in template
+    assert 'function applyTrainingModelCatalog(catalog)' in template
+    assert 'function populateTrainingModelFamilies(' in template
+    assert 'model => model.family === family' in template
+    assert 'trainingModelAllowedCheckpoints.has(state.model_version)' in template
+    assert 'YOLO_CHECKPOINTS_MAP' not in template
+    assert 'COLAB_REMOTE_ALLOWED_MODELS' not in template
+    assert '<option value="segment">' not in template
+    assert '<option value="classify">' not in template
+    assert '<option value="pose">' not in template
+    assert 'id="task_type" type="hidden" value="detect"' in template
 
 
 def test_finetune_submit_has_immediate_feedback_and_idempotency_guard():
@@ -98,3 +131,39 @@ def test_run_script_starts_and_stops_dedicated_scheduler_process():
     assert 'try {' in run_script
     assert '} finally {' in run_script
     assert 'Stop-Process -Id $schedulerProcess.Id' in run_script
+
+
+def test_colab_manager_exposes_phase_c_parameter_editor_without_legacy_drift():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    for marker in (
+        'id="finetuneParameterPrimaryGroups"',
+        'id="finetuneParameterAdvancedGroups"',
+        'finetuneConfig?.parameter_catalog',
+        'function renderFinetuneParameterEditor()',
+        'function createFinetuneParameterControl(field)',
+        '["boolean", "enum", "boolean_or_enum"]',
+        'field.options || []',
+        'field.ui?.visible_when',
+        'field.ui?.exclude_values',
+        'renderFinetuneParameterEditor();',
+        'Legacy code generator - does not control scheduler training',
+    ):
+        assert marker in template
+
+
+def test_colab_manager_displays_requested_and_effective_phase_c_arguments():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    for marker in (
+        'function summarizeTrainingParameters(values)',
+        'field.ui?.summary',
+        'requestedParameters = summarizeTrainingParameters(',
+        'task.effective_config.training_arguments',
+        'Runtime ${summarizeTrainingParameters(',
+    ):
+        assert marker in template

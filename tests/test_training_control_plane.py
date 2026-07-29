@@ -6,6 +6,7 @@ import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from cryptography.fernet import Fernet
@@ -29,7 +30,10 @@ from models import (
 from test_helpers import create_isolated_test_app
 from training_control_plane import (
     _attempt_is_current,
+    _worker_supports_task,
     ColabHttpWorkerAdapter,
+    FRESH_TRAINING_MODELS,
+    TRAINING_PARAMETER_CONTRACT_VERSION,
     WorkerUnavailableError,
     create_finetune_experiment,
     create_training_batch,
@@ -37,6 +41,15 @@ from training_control_plane import (
     encrypt_worker_token,
     recover_expired_leases,
     utcnow,
+)
+from training_model_catalog import (
+    TRAINING_MODEL_CATALOG_HASH,
+    public_training_model_catalog,
+)
+from training_parameter_catalog import (
+    TRAINING_PARAMETER_CATALOG_HASH,
+    TRAINING_PARAMETER_CATALOG_VERSION,
+    TRAINING_PARAMETER_EFFECTIVE_FIELDS,
 )
 
 
@@ -139,6 +152,31 @@ class FakeWorkerAdapter:
             'message': 'Training and ONNX export completed.',
             'artifacts': artifacts,
             'metrics': metrics,
+            'effective_config': {
+                'optimizer_class': (
+                    request_payload.get('optimizer')
+                    if request_payload.get('optimizer_mode') == 'explicit'
+                    else 'AdamW'
+                ),
+                'initial_lr': (
+                    request_payload.get('lr0')
+                    if request_payload.get('optimizer_mode') == 'explicit'
+                    else 0.001
+                ),
+                'parameter_groups': [{
+                    'index': 0,
+                    'name': 'weight',
+                    'initial_lr': (
+                        request_payload.get('lr0')
+                        if request_payload.get('optimizer_mode') == 'explicit'
+                        else 0.001
+                    ),
+                }],
+                'training_arguments': {
+                    name: request_payload.get(name)
+                    for name in TRAINING_PARAMETER_EFFECTIVE_FIELDS
+                },
+            },
         }
 
     def download_artifact(
@@ -381,7 +419,17 @@ class TestTrainingControlPlane:
                 gpu_name='Fake GPU',
                 capabilities={
                     'training': True,
+                    'optimizer_contract_version': 1,
                     'training_modes': ['fresh', 'finetune'],
+                    'training_parameter_sets': True,
+                    'training_parameter_contract_version': (
+                        TRAINING_PARAMETER_CONTRACT_VERSION
+                    ),
+                    'training_parameter_catalog_hash': (
+                        TRAINING_PARAMETER_CATALOG_HASH
+                    ),
+                    'allowed_models': list(FRESH_TRAINING_MODELS),
+                    'training_model_catalog_hash': TRAINING_MODEL_CATALOG_HASH,
                     'dataset_upload': True,
                     'model_artifact_upload': True,
                     'artifact_download': [
@@ -407,7 +455,7 @@ class TestTrainingControlPlane:
                 'jobs': [
                     {
                         'project_id': project_id,
-                        'model': 'yolo11n.pt',
+                        'model': 'yolo11s.pt',
                         'epochs': 1,
                         'batch': 4,
                         'imgsz': 640,
@@ -447,6 +495,431 @@ class TestTrainingControlPlane:
             db.session.add(artifact)
             db.session.commit()
             return model.id
+
+    def test_fresh_training_catalog_accepts_exact_small_checkpoints(self):
+        with self.app.app_context():
+            for model_name in FRESH_TRAINING_MODELS:
+                _batch, tasks = create_training_batch({
+                    'jobs': [{
+                        'project_id': self.project_ids[0],
+                        'model': model_name,
+                        'epochs': 1,
+                        'batch': 4,
+                        'imgsz': 640,
+                    }],
+                })
+                assert tasks[0].request_payload['model'] == model_name
+
+            try:
+                create_training_batch({
+                    'jobs': [{
+                        'project_id': self.project_ids[0],
+                        'model': 'yolo11n.pt',
+                        'epochs': 1,
+                        'batch': 4,
+                        'imgsz': 640,
+                    }],
+                })
+            except ValueError as exc:
+                assert 'model must be one of' in str(exc)
+            else:
+                raise AssertionError('Unsupported fresh model was accepted.')
+            finally:
+                db.session.rollback()
+
+    def test_worker_capability_filters_fresh_models(self):
+        worker = SimpleNamespace(capabilities={
+            'training': True,
+            'optimizer_contract_version': 1,
+            'allowed_models': ['yolo12s.pt'],
+            'training_model_catalog_hash': TRAINING_MODEL_CATALOG_HASH,
+        })
+        yolo12_task = SimpleNamespace(
+            status='queued',
+            request_payload={'training_mode': 'fresh', 'model': 'yolo12s.pt'},
+        )
+        yolo26_task = SimpleNamespace(
+            status='queued',
+            request_payload={'training_mode': 'fresh', 'model': 'yolo26s.pt'},
+        )
+        assert _worker_supports_task(worker, yolo12_task)
+        assert not _worker_supports_task(worker, yolo26_task)
+
+        drifted_worker = SimpleNamespace(capabilities={
+            **worker.capabilities,
+            'training_model_catalog_hash': 'stale-catalog-hash',
+        })
+        assert not _worker_supports_task(drifted_worker, yolo12_task)
+
+        legacy_worker = SimpleNamespace(capabilities={'training': True})
+        yolo11_task = SimpleNamespace(
+            status='queued',
+            request_payload={'training_mode': 'fresh', 'model': 'yolo11s.pt'},
+        )
+        assert not _worker_supports_task(legacy_worker, yolo11_task)
+        assert not _worker_supports_task(legacy_worker, yolo12_task)
+
+    def test_training_model_catalog_api_matches_validated_source(self):
+        response = self.client.get('/api/training-model-catalog')
+        assert response.status_code == 200
+        assert response.get_json() == public_training_model_catalog()
+        assert tuple(
+            model['checkpoint']
+            for model in response.get_json()['models']
+            if model['enabled']
+        ) == FRESH_TRAINING_MODELS
+
+    def test_fresh_training_uses_database_parameter_set_snapshot(self):
+        config = self.client.get('/api/finetune/config').get_json()
+        fresh_baseline = next(
+            parameter_set
+            for parameter_set in config['parameter_sets']
+            if parameter_set['system_key'] == 'fresh-baseline'
+        )
+
+        with self.app.app_context():
+            _batch, tasks = create_training_batch({
+                'jobs': [{
+                    'project_id': self.project_ids[0],
+                    'training_mode': 'fresh',
+                    'model': 'yolo12s.pt',
+                    'parameter_set_id': fresh_baseline['id'],
+                }],
+            })
+            task = tasks[0]
+            assert task.request_payload['training_mode'] == 'fresh'
+            assert task.request_payload['model'] == 'yolo12s.pt'
+            assert task.request_payload['apply_training_parameters'] is True
+            assert task.request_payload['freeze'] == 0
+            assert task.request_payload['lr0'] == 0.01
+            assert task.request_payload['epochs'] == (
+                fresh_baseline['parameters']['epochs']
+            )
+            assert task.parameter_set_id == fresh_baseline['id']
+            assert task.parameter_set_snapshot['name'] == 'Fresh Baseline'
+
+    def test_fresh_training_without_parameter_set_preserves_worker_defaults(self):
+        with self.app.app_context():
+            _batch, tasks = create_training_batch({
+                'jobs': [{
+                    'project_id': self.project_ids[0],
+                    'training_mode': 'fresh',
+                    'model': 'yolo26s.pt',
+                    'epochs': 1,
+                    'batch': 2,
+                    'imgsz': 320,
+                }],
+            })
+            request_payload = tasks[0].request_payload
+            assert request_payload['apply_training_parameters'] is False
+            assert 'freeze' not in request_payload
+            assert tasks[0].parameter_set_snapshot is None
+
+    def test_fresh_parameter_sets_require_new_worker_capability(self):
+        task = SimpleNamespace(
+            status='queued',
+            request_payload={
+                'training_mode': 'fresh',
+                'model': 'yolo12s.pt',
+                'apply_training_parameters': True,
+            },
+        )
+        old_worker = SimpleNamespace(capabilities={
+            'training': True,
+            'optimizer_contract_version': 1,
+            'allowed_models': ['yolo12s.pt'],
+        })
+        new_worker = SimpleNamespace(capabilities={
+            **old_worker.capabilities,
+            'training_parameter_sets': True,
+            'training_parameter_contract_version': (
+                TRAINING_PARAMETER_CONTRACT_VERSION
+            ),
+            'training_parameter_catalog_hash': (
+                TRAINING_PARAMETER_CATALOG_HASH
+            ),
+        })
+        assert not _worker_supports_task(old_worker, task)
+        assert _worker_supports_task(new_worker, task)
+
+    def test_legacy_parameter_set_without_optimizer_mode_normalizes_to_auto(self):
+        with self.app.app_context():
+            legacy = FineTuneParameterSet(
+                preset_id=str(uuid.uuid4()),
+                name='Legacy lr preset',
+                model_task='detect',
+                parameters={
+                    'epochs': 3,
+                    'batch': 4,
+                    'imgsz': 640,
+                    'lr0': 0.0002,
+                },
+                version=1,
+                is_active=True,
+            )
+            db.session.add(legacy)
+            db.session.commit()
+            legacy_id = legacy.id
+
+        config = self.client.get('/api/finetune/config').get_json()
+        normalized = next(
+            item for item in config['parameter_sets']
+            if item['id'] == legacy_id
+        )
+        assert normalized['parameters']['optimizer_mode'] == 'auto'
+        assert normalized['parameters']['optimizer'] == 'auto'
+        assert normalized['parameters']['lr0'] is None
+
+    def test_phase_c_legacy_parameter_set_receives_safe_defaults(self):
+        with self.app.app_context():
+            legacy = FineTuneParameterSet(
+                preset_id=str(uuid.uuid4()),
+                name='Legacy Phase B preset',
+                model_task='detect',
+                parameters={
+                    'epochs': 3,
+                    'batch': 4,
+                    'imgsz': 640,
+                },
+                version=1,
+                is_active=True,
+            )
+            db.session.add(legacy)
+            db.session.commit()
+            legacy_id = legacy.id
+
+        config = self.client.get('/api/finetune/config').get_json()
+        assert config['version'] == TRAINING_PARAMETER_CATALOG_VERSION
+        assert config['training_parameter_contract_version'] == 3
+        assert config['parameter_catalog_hash'] == TRAINING_PARAMETER_CATALOG_HASH
+        assert len(config['parameter_catalog']['fields']) == 39
+        assert config['cache_modes'] == ['off', 'ram', 'disk']
+        normalized = next(
+            item for item in config['parameter_sets']
+            if item['id'] == legacy_id
+        )['parameters']
+        assert normalized['patience'] == 100
+        assert normalized['rect'] is False
+        assert normalized['cache'] == 'off'
+        assert normalized['amp'] is True
+        assert normalized['cos_lr'] is False
+        assert normalized['momentum'] == 0.937
+        assert normalized['weight_decay'] == 0.0005
+        assert normalized['warmup_epochs'] == 3.0
+        assert normalized['hsv_h'] == 0.015
+        assert normalized['hsv_s'] == 0.7
+        assert normalized['hsv_v'] == 0.4
+        assert normalized['shear'] == 0.0
+        assert normalized['perspective'] == 0.0
+        assert normalized['flipud'] == 0.0
+        assert normalized['fliplr'] == 0.5
+        assert normalized['multi_scale'] == 0.0
+        assert normalized['fraction'] == 1.0
+        assert normalized['box'] == 7.5
+        assert normalized['cls'] == 0.5
+        assert normalized['dfl'] == 1.5
+        assert normalized['nbs'] == 64
+        assert normalized['compile'] is False
+        assert normalized['channels_last'] is False
+
+    def test_phase_c_parameters_are_snapshotted_for_fresh_training(self):
+        created = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Phase C contract',
+                'parameters': {
+                    'epochs': 2,
+                    'batch': 4,
+                    'imgsz': 512,
+                    'patience': 12,
+                    'rect': True,
+                    'cache': 'disk',
+                    'amp': False,
+                    'cos_lr': True,
+                    'momentum': 0.9,
+                    'weight_decay': 0.001,
+                    'warmup_epochs': 1.5,
+                    'hsv_h': 0.02,
+                    'hsv_s': 0.6,
+                    'hsv_v': 0.3,
+                    'shear': 2.0,
+                    'perspective': 0.0005,
+                    'flipud': 0.1,
+                    'fliplr': 0.4,
+                    'multi_scale': 0.5,
+                    'fraction': 0.75,
+                    'box': 8.0,
+                    'cls': 0.6,
+                    'dfl': 1.7,
+                    'nbs': 32,
+                    'compile': 'reduce-overhead',
+                    'channels_last': True,
+                },
+            },
+        )
+        assert created.status_code == 201
+        parameter_set = created.get_json()
+
+        with self.app.app_context():
+            _batch, tasks = create_training_batch({
+                'jobs': [{
+                    'project_id': self.project_ids[0],
+                    'training_mode': 'fresh',
+                    'model': 'yolo12s.pt',
+                    'parameter_set_id': parameter_set['id'],
+                }],
+            })
+            request_payload = tasks[0].request_payload
+            snapshot = tasks[0].parameter_set_snapshot['parameters']
+            for name in (
+                'patience', 'rect', 'cache', 'amp', 'cos_lr', 'momentum',
+                'weight_decay', 'warmup_epochs', 'hsv_h', 'hsv_s', 'hsv_v',
+                'shear', 'perspective', 'flipud', 'fliplr',
+                'multi_scale', 'fraction', 'box', 'cls', 'dfl', 'nbs',
+                'compile', 'channels_last',
+            ):
+                assert snapshot[name] == request_payload[name]
+            assert request_payload['cache'] == 'disk'
+            assert request_payload['rect'] is True
+            assert request_payload['cos_lr'] is True
+
+    def test_phase_c_validation_rejects_invalid_values(self):
+        invalid_cache = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={'name': 'Bad cache', 'parameters': {'cache': 'gpu'}},
+        )
+        assert invalid_cache.status_code == 400
+        assert 'cache must be one of' in invalid_cache.get_json()['error']
+
+        invalid_perspective = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Bad perspective',
+                'parameters': {'perspective': 0.01},
+            },
+        )
+        assert invalid_perspective.status_code == 400
+        assert 'perspective must be at most' in (
+            invalid_perspective.get_json()['error']
+        )
+
+        invalid_boolean = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={'name': 'Bad AMP', 'parameters': {'amp': 1}},
+        )
+        assert invalid_boolean.status_code == 400
+        assert 'amp must be a boolean' in invalid_boolean.get_json()['error']
+
+    def test_phase_c_parameterized_task_requires_contract_v2_worker(self):
+        task = SimpleNamespace(
+            status='queued',
+            request_payload={
+                'training_mode': 'fresh',
+                'model': 'yolo12s.pt',
+                'apply_training_parameters': True,
+            },
+        )
+        phase_b_worker = SimpleNamespace(capabilities={
+            'training': True,
+            'optimizer_contract_version': 1,
+            'training_parameter_sets': True,
+            'training_parameter_contract_version': 1,
+            'allowed_models': ['yolo12s.pt'],
+        })
+        phase_c_worker = SimpleNamespace(capabilities={
+            **phase_b_worker.capabilities,
+            'training_parameter_contract_version': 2,
+        })
+        phase_c2_worker = SimpleNamespace(capabilities={
+            **phase_c_worker.capabilities,
+            'training_parameter_contract_version': 3,
+            'training_parameter_catalog_hash': TRAINING_PARAMETER_CATALOG_HASH,
+        })
+        assert not _worker_supports_task(phase_b_worker, task)
+        assert not _worker_supports_task(phase_c_worker, task)
+        assert _worker_supports_task(phase_c2_worker, task)
+
+    def test_explicit_optimizer_requires_name_and_lr0(self):
+        missing_optimizer = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Missing optimizer',
+                'parameters': {
+                    'optimizer_mode': 'explicit',
+                    'lr0': 0.001,
+                },
+            },
+        )
+        assert missing_optimizer.status_code == 400
+        assert 'explicit optimizer requires a named optimizer' in (
+            missing_optimizer.get_json()['error']
+        )
+
+        missing_lr0 = self.client.post(
+            '/api/finetune-parameter-sets',
+            json={
+                'name': 'Missing lr0',
+                'parameters': {
+                    'optimizer_mode': 'explicit',
+                    'optimizer': 'AdamW',
+                },
+            },
+        )
+        assert missing_lr0.status_code == 400
+        assert 'requires lr0' in missing_lr0.get_json()['error']
+
+    def test_task_api_separates_requested_and_effective_optimizer_config(self):
+        config = self.client.get('/api/finetune/config').get_json()
+        fresh_baseline = next(
+            item for item in config['parameter_sets']
+            if item['system_key'] == 'fresh-baseline'
+        )
+        self.add_worker('OptimizerWorker')
+        with self.app.app_context():
+            _batch, tasks = create_training_batch({
+                'jobs': [{
+                    'project_id': self.project_ids[0],
+                    'training_mode': 'fresh',
+                    'model': 'yolo12s.pt',
+                    'parameter_set_id': fresh_baseline['id'],
+                }],
+            })
+            task_id = tasks[0].id
+            original_request = dict(tasks[0].request_payload)
+            original_snapshot = dict(tasks[0].parameter_set_snapshot)
+
+        state = FakeWorkerState()
+        result = dispatch_once(
+            self.app,
+            adapter_factory=lambda worker: FakeWorkerAdapter(worker, state),
+            probe=False,
+            asynchronous=False,
+        )
+        assert result['dispatched'] == 1
+
+        with self.app.app_context():
+            task = db.session.get(TrainingQueueTask, task_id)
+            payload = task.to_dict()
+            assert payload['requested_config'] == original_request
+            assert payload['request'] == original_request
+            assert task.parameter_set_snapshot == original_snapshot
+            assert payload['effective_config'] == {
+                'optimizer_class': 'SGD',
+                'initial_lr': 0.01,
+                'parameter_groups': [{
+                    'index': 0,
+                    'name': 'weight',
+                    'initial_lr': 0.01,
+                }],
+                'training_arguments': {
+                    name: original_request[name]
+                    for name in TRAINING_PARAMETER_EFFECTIVE_FIELDS
+                },
+            }
+            training_job = db.session.get(TrainingJob, task.training_job_id)
+            assert training_job.to_dict()['effective_config'] == payload[
+                'effective_config'
+            ]
 
     def active_parameter_set_ids(self, count=None):
         response = self.client.get('/api/finetune/config')
@@ -506,7 +979,14 @@ class TestTrainingControlPlane:
         config = self.client.get('/api/finetune/config')
         assert config.status_code == 200
         seeded = config.get_json()['parameter_sets']
-        assert len(seeded) == 5
+        assert {parameter_set['system_key'] for parameter_set in seeded} == {
+            'fresh-baseline',
+            'baseline',
+            'conservative-lr',
+            'adaptive-lr',
+            'shallow-unfreeze',
+            'resolution-variant',
+        }
         assert all(parameter_set['is_system'] for parameter_set in seeded)
 
         created_response = self.client.post(
@@ -518,6 +998,8 @@ class TestTrainingControlPlane:
                     'epochs': 2,
                     'batch': 4,
                     'imgsz': 640,
+                    'optimizer_mode': 'explicit',
+                    'optimizer': 'AdamW',
                     'lr0': 0.00008,
                     'freeze': 8,
                 },
@@ -587,6 +1069,8 @@ class TestTrainingControlPlane:
                     'epochs': 2,
                     'batch': 4,
                     'imgsz': 640,
+                    'optimizer_mode': 'explicit',
+                    'optimizer': 'AdamW',
                     'lr0': 0.00007,
                 },
             },
@@ -1512,6 +1996,14 @@ class TestTrainingControlPlane:
     def test_checkpoint_failover_resumes_on_another_worker_generation(self):
         worker_a_id = self.add_worker('ResumeWorkerA')
         worker_b_id = self.add_worker('ResumeWorkerB')
+        parameter_sets = self.client.get('/api/finetune/config').get_json()[
+            'parameter_sets'
+        ]
+        parameter_set_id = next(
+            item['id']
+            for item in parameter_sets
+            if item['system_key'] == 'shallow-unfreeze'
+        )
         with self.app.app_context():
             for worker_id in (worker_a_id, worker_b_id):
                 worker = db.session.get(TrainingWorker, worker_id)
@@ -1527,14 +2019,16 @@ class TestTrainingControlPlane:
                 'max_resume_count': 3,
                 'jobs': [{
                     'project_id': self.project_ids[0],
-                    'model': 'yolo11n.pt',
+                    'model': 'yolo11s.pt',
                     'epochs': 10,
                     'batch': 4,
                     'imgsz': 640,
+                    'parameter_set_id': parameter_set_id,
                 }],
             })
             task_id = tasks[0].id
             batch_id = batch.id
+            original_request = dict(tasks[0].request_payload)
             db.session.commit()
 
         class FakeStoredObject:
@@ -1646,6 +2140,14 @@ class TestTrainingControlPlane:
             assert task.status == 'succeeded'
             assert task.resume_count == 1
             assert task.recovery_generation == 2
+            assert task.request_payload == original_request
+            assert task.effective_config['optimizer_class'] == 'AdamW'
+            expected_initial_lr = (
+                original_request['lr0']
+                if original_request['optimizer_mode'] == 'explicit'
+                else 0.001
+            )
+            assert task.effective_config['initial_lr'] == expected_initial_lr
             attempts = TrainingJobAttempt.query.filter_by(
                 task_id=task.id,
             ).order_by(TrainingJobAttempt.attempt_number.asc()).all()
@@ -1673,6 +2175,22 @@ class TestTrainingControlPlane:
             assert resume_request['resume_checkpoint']['epoch'] == 5
             assert resume_request['resume_checkpoint']['sha256'] == 'a' * 64
             assert resume_request['checkpoint_uploads'][0]['epoch'] == 10
+            assert resume_request['optimizer_mode'] == 'auto'
+            assert resume_request['optimizer'] == 'auto'
+            assert resume_request['lr0'] is None
+            for parameter_name in (
+                'multi_scale',
+                'fraction',
+                'box',
+                'cls',
+                'dfl',
+                'nbs',
+                'compile',
+                'channels_last',
+            ):
+                assert resume_request[parameter_name] == original_request[
+                    parameter_name
+                ]
             assert len(TrainingCheckpoint.query.all()) == 2
             persisted_payload = str(task.to_dict(
                 include_attempts=True,

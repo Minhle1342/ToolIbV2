@@ -10,15 +10,19 @@
             </div>
             <div>
                 <h1 class="font-bold text-base text-content flex items-center gap-2">
-                    Google Colab Code Generator & Manager
-                    <span class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">17 YOLO Versions (Theme Ready v6.0)</span>
+                    YOLO Training Control Plane
+                    <span id="trainingModelCatalogSummary" class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">Đang tải catalog...</span>
                 </h1>
-                <p class="text-xs text-content-muted">Chọn 17 Phiên Bản YOLO - Tinh chỉnh Preprocessing & Augmentation - Mã Colab chứa ghi chú tác dụng từng thông số</p>
+                <p class="text-xs text-content-muted">Fresh training, fine-tune, parameter presets và multi-worker Colab</p>
             </div>
         </div>
 
         <!-- Template Selector & Action Controls -->
         <div class="flex items-center gap-3">
+            <button id="legacyGeneratorToggleBtn" type="button" onclick="toggleLegacyCodeGenerator()" class="bg-surface hover:bg-panel text-content-muted border border-border text-xs px-3 py-2 rounded-lg font-medium transition">
+                <i class="fa-solid fa-flask mr-1"></i> Legacy generator
+            </button>
+            <div id="legacyTemplateControls" class="hidden items-center gap-3">
             <div class="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-1.5">
                 <i class="fa-solid fa-bookmark text-content-muted text-sm"></i>
                 <label for="templateSelect" class="text-xs text-content">Template:</label>
@@ -39,6 +43,7 @@
             <button onclick="resetToDefaults()" class="bg-surface hover:bg-panel text-content-muted text-xs px-3 py-2 rounded-lg border border-border transition" title="Reset thông số mặc định">
                 <i class="fa-solid fa-rotate-left"></i>
             </button>
+            </div>
         </div>
     </header>
 
@@ -46,7 +51,7 @@
     <div class="flex-1 flex min-h-0 h-full overflow-hidden">
         
         <!-- LEFT COLUMN: PARAMETER CONTROLS (50% Width) -->
-        <div class="w-1/2 border-r border-border bg-surface/50 flex flex-col h-full min-h-0">
+        <div id="trainingControlsColumn" class="w-full bg-surface/50 flex flex-col h-full min-h-0">
             <div class="p-3 bg-panel border-b border-border flex items-center justify-between shrink-0">
                 <span class="text-xs font-semibold text-content uppercase tracking-wider flex items-center gap-2">
                     <i class="fa-solid fa-sliders text-amber-400"></i> Bảng Tinh Chỉnh Thông Số
@@ -59,19 +64,19 @@
             <!-- Scrollable Control Form -->
             <div class="flex-1 overflow-y-auto p-4 space-y-6">
                 
-                <!-- SECTION 1: SELECTION OF ALL 17 YOLO VERSIONS & CHECKPOINTS -->
+                <!-- SECTION 1: SUPPORTED REMOTE TRAINING MODELS -->
                 <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-amber-400 flex items-center justify-between border-b border-border pb-2">
-                        <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> 1. Chọn Phiên Bản YOLO (17 Versions)</span>
-                        <span class="text-xs font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/60" id="yolo_badge">Ultralytics Ecosystem</span>
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> Model detection được hỗ trợ</span>
+                        <span class="text-xs font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/60" id="yolo_badge">Ultralytics 8.4.110</span>
                     </h3>
                     
                     <div class="grid grid-cols-2 gap-4">
                         <!-- Dropdown 1: Họ Phiên Bản YOLO (17 Versions) -->
-                        <div class="col-span-2">
+                        <div>
                             <label class="text-xs text-content font-semibold mb-1.5 flex items-center justify-between">
                                 <span class="flex items-center gap-1.5">
-                                    <span>Họ Phiên Bản YOLO (YOLO Version Family)</span>
+                                    <span>Họ model</span>
                                     <span class="group relative inline-flex items-center cursor-help text-amber-400 hover:text-amber-300 transition-colors" title="Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
                                         <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
@@ -79,39 +84,17 @@
                                         </span>
                                     </span>
                                 </span>
-                                <span class="text-[10px] text-content-muted font-normal">Tất cả 17 phiên bản lịch sử</span>
+                                <span class="text-[10px] text-content-muted font-normal">Catalog worker hiện tại</span>
                             </label>
                             <select id="yolo_family" onchange="onYoloFamilyChange()" class="w-full bg-surface border border-amber-500/40 text-sm rounded-lg p-2.5 text-amber-400 font-medium focus:border-amber-400 focus:outline-none">
-                                <optgroup label="⚡ Thế hệ mới nhất (2024 - 2026)">
-                                    <option value="yolo26" selected>YOLO26 (Ultralytics End-to-End NMS-Free - 2026)</option>
-                                    <option value="yolo12">YOLO12 (Attention-Centric Architecture - 2025)</option>
-                                    <option value="yolo11">YOLO11 (Ultralytics Recommended Production Baseline - 2024)</option>
-                                    <option value="yolov10">YOLOv10 (Tsinghua University Dual NMS-Free - 2024)</option>
-                                    <option value="yolov9">YOLOv9 (Programmable Gradient Info PGI - 2024)</option>
-                                    <option value="yolo_world">YOLO-World (Real-time Open-Vocabulary / Zero-Shot - 2024)</option>
-                                </optgroup>
-                                <optgroup label="🔥 Độc quyền & Phổ biến (2021 - 2023)">
-                                    <option value="yolov8">YOLOv8 (Ultralytics Multi-Task Detection/Seg/Pose - 2023)</option>
-                                    <option value="yolo_nas">YOLO-NAS (Deci AI Neural Architecture Search - 2023)</option>
-                                    <option value="yolov7">YOLOv7 (WongKinYiu Trainable Bag-of-Freebies - 2022)</option>
-                                    <option value="yolov6">YOLOv6 (Meituan RepVGG Industrial - 2022)</option>
-                                    <option value="yolox">YOLOX (Megvii Anchor-Free Decoupled Head - 2021)</option>
-                                    <option value="pp_yoloe">PP-YOLOE (Baidu PaddleDetection - 2022)</option>
-                                </optgroup>
-                                <optgroup label="🏛️ Lịch sử & Cổ điển (2015 - 2020)">
-                                    <option value="yolov5">YOLOv5 (Ultralytics PyTorch Benchmark Classic - 2020)</option>
-                                    <option value="yolov4">YOLOv4 (AlexeyAB CSPDarknet53 - 2020)</option>
-                                    <option value="yolov3">YOLOv3 (Joseph Redmon Darknet-53 Original - 2018)</option>
-                                    <option value="yolov2">YOLOv2 / YOLO9000 (Joseph Redmon Anchor Boxes - 2016)</option>
-                                    <option value="yolov1">YOLOv1 (Joseph Redmon First Single-Stage Detector - 2015)</option>
-                                </optgroup>
+                                <option value="">Đang tải catalog...</option>
                             </select>
                         </div>
 
-                        <!-- Dropdown 2: Dynamic Checkpoint Weights -->
+                        <!-- Dropdown 2: Scale from the backend catalog -->
                         <div>
                             <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
-                                <span>Mô Hình Trọng Số (Checkpoint)</span>
+                                <span>Scale</span>
                                 <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
                                     <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
@@ -120,7 +103,7 @@
                                 </span>
                             </label>
                             <select id="model_version" onchange="renderCode('model_version')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
-                                <!-- Dynamically populated by JS based on yolo_family -->
+                                <option value="">Đang tải catalog...</option>
                             </select>
                         </div>
 
@@ -135,12 +118,10 @@
                                     </span>
                                 </span>
                             </label>
-                            <select id="task_type" onchange="renderCode('task_type')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
-                                <option value="detect" selected>Object Detection (Nhận diện vật thể)</option>
-                                <option value="segment">Instance Segmentation (Phân vùng)</option>
-                                <option value="classify">Image Classification (Phân loại ảnh)</option>
-                                <option value="pose">Pose Estimation (Ước lượng tư thế)</option>
-                            </select>
+                            <input id="task_type" type="hidden" value="detect">
+                            <div class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content">
+                                Object Detection
+                            </div>
                         </div>
 
                         <!-- Epochs & Batch -->
@@ -172,45 +153,23 @@
                 </div>
 
                 <!-- PHASE 2: TEMPORARY REMOTE COLAB API -->
-                <div class="bg-panel border border-sky-500/40 rounded-xl p-4 space-y-4 shadow-sm">
-                    <h3 class="text-sm font-semibold text-sky-400 flex items-center justify-between border-b border-border pb-2">
+                <details id="legacyRemoteColabPanel" class="bg-panel border border-sky-500/40 rounded-xl p-4 shadow-sm">
+                    <summary class="text-sm font-semibold text-sky-400 flex items-center justify-between cursor-pointer">
                         <span class="flex items-center gap-2">
                             <i class="fa-solid fa-satellite-dish"></i>
-                            Remote Colab API (PoC)
+                            Legacy direct Colab smoke test
                         </span>
                         <span id="colabRemoteConnectionBadge" class="text-[10px] font-mono text-content-muted bg-surface px-2 py-0.5 rounded border border-border">
                             Chưa kiểm tra
                         </span>
-                    </h3>
+                    </summary>
+
+                    <div class="mt-4 space-y-4">
 
                     <p class="text-[11px] text-content-muted leading-relaxed">
                         Gọi trực tiếp FastAPI tạm thời trên Colab. URL Quick Tunnel được lưu trên trình duyệt;
                         bearer token chỉ được giữ trong tab hiện tại và không được lưu cùng template.
                     </p>
-
-                    <div>
-                        <label for="colabRemoteEndpoint" class="text-xs text-content font-medium mb-1 block">Temporary public API URL</label>
-                        <input
-                            type="url"
-                            id="colabRemoteEndpoint"
-                            placeholder="https://example.trycloudflare.com"
-                            autocomplete="url"
-                            spellcheck="false"
-                            class="w-full bg-surface border border-border text-sm rounded-lg p-2.5 text-content font-mono focus:border-sky-500 focus:outline-none"
-                        >
-                    </div>
-
-                    <div>
-                        <label for="colabRemoteToken" class="text-xs text-content font-medium mb-1 block">Bearer token</label>
-                        <input
-                            type="password"
-                            id="colabRemoteToken"
-                            placeholder="TOOLIB_COLAB_API_TOKEN"
-                            autocomplete="off"
-                            spellcheck="false"
-                            class="w-full bg-surface border border-border text-sm rounded-lg p-2.5 text-content font-mono focus:border-sky-500 focus:outline-none"
-                        >
-                    </div>
 
                     <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
@@ -228,32 +187,6 @@
                             <select id="colabDatasetProject" class="w-full bg-panel border border-border text-xs rounded-lg p-2 text-content focus:border-violet-500 focus:outline-none">
                                 <option value="">Đang tải projects...</option>
                             </select>
-                        </div>
-
-                        <div class="grid grid-cols-3 gap-2">
-                            <label class="text-[10px] text-content-muted">
-                                Train %
-                                <input id="colabDatasetTrainSplit" type="number" value="80" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
-                            </label>
-                            <label class="text-[10px] text-content-muted">
-                                Val %
-                                <input id="colabDatasetValSplit" type="number" value="20" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
-                            </label>
-                            <label class="text-[10px] text-content-muted">
-                                Test %
-                                <input id="colabDatasetTestSplit" type="number" value="0" min="0" max="98" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
-                            </label>
-                        </div>
-
-                        <div class="flex flex-wrap gap-3 text-[10px] text-content-muted">
-                            <label class="flex items-center gap-1.5">
-                                <input id="colabDatasetExcludeFlagged" type="checkbox" checked>
-                                Loại ảnh flagged
-                            </label>
-                            <label class="flex items-center gap-1.5">
-                                <input id="colabDatasetIncludeUnlabeled" type="checkbox">
-                                Gồm ảnh background chưa label
-                            </label>
                         </div>
 
                         <button id="colabDatasetPrepareBtn" type="button" onclick="prepareAndUploadColabDataset()" class="w-full bg-violet-700 hover:bg-violet-600 disabled:bg-panel disabled:text-content-muted disabled:cursor-not-allowed text-white text-xs px-3 py-2 rounded-lg font-medium transition">
@@ -329,7 +262,8 @@
                         </div>
                         <div id="colabTrainingHistoryList" class="space-y-2"></div>
                     </div>
-                </div>
+                    </div>
+                </details>
 
                 <!-- PHASE 5: PRODUCTION TRAINING CONTROL PLANE -->
                 <div class="bg-panel border border-emerald-500/40 rounded-xl p-4 space-y-4 shadow-sm">
@@ -356,6 +290,30 @@
                             </h4>
                             <span id="trainingWorkerSummary" class="text-[10px] text-content-muted">0 worker</span>
                         </div>
+                        <div class="grid grid-cols-1 gap-2">
+                            <label class="text-[10px] text-content-muted">
+                                Quick Tunnel API URL
+                                <input
+                                    type="url"
+                                    id="colabRemoteEndpoint"
+                                    placeholder="https://example.trycloudflare.com"
+                                    autocomplete="url"
+                                    spellcheck="false"
+                                    class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
+                                >
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Worker bearer token
+                                <input
+                                    type="password"
+                                    id="colabRemoteToken"
+                                    placeholder="TOOLIB_COLAB_API_TOKEN"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                    class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
+                                >
+                            </label>
+                        </div>
                         <div class="grid grid-cols-[1fr_auto] gap-2">
                             <input id="trainingWorkerName" type="text" placeholder="Ví dụ: Colab T4 account A" class="bg-panel border border-border rounded p-2 text-xs text-content focus:border-emerald-500 focus:outline-none">
                             <button id="trainingWorkerRegisterBtn" type="button" onclick="registerCurrentColabWorker()" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
@@ -363,7 +321,7 @@
                             </button>
                         </div>
                         <div class="text-[10px] text-content-muted">
-                            Nút này dùng URL và bearer token ở khối “Remote Colab API” phía trên. Lặp lại với từng Colab runtime.
+                            Nhập URL/token của từng Colab runtime, đăng ký rồi Probe worker.
                         </div>
                         <div id="trainingWorkerEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
                             Chưa có worker.
@@ -375,7 +333,7 @@
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-content">
                                 <i class="fa-solid fa-layer-group text-violet-400 mr-1"></i>
-                                Create automated batch
+                                1. Dataset và queue
                             </h4>
                             <span class="text-[10px] text-content-muted">Ctrl/Shift để chọn nhiều project</span>
                         </div>
@@ -383,6 +341,30 @@
                         <select id="trainingBatchProjects" multiple size="5" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-violet-500 focus:outline-none">
                             <option disabled>Đang tải projects...</option>
                         </select>
+                        <div class="grid grid-cols-3 gap-2">
+                            <label class="text-[10px] text-content-muted">
+                                Train %
+                                <input id="colabDatasetTrainSplit" type="number" value="80" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Val %
+                                <input id="colabDatasetValSplit" type="number" value="20" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                            <label class="text-[10px] text-content-muted">
+                                Test %
+                                <input id="colabDatasetTestSplit" type="number" value="0" min="0" max="98" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
+                            </label>
+                        </div>
+                        <div class="flex flex-wrap gap-3 text-[10px] text-content-muted">
+                            <label class="flex items-center gap-1.5">
+                                <input id="colabDatasetExcludeFlagged" type="checkbox" checked>
+                                Loại ảnh flagged
+                            </label>
+                            <label class="flex items-center gap-1.5">
+                                <input id="colabDatasetIncludeUnlabeled" type="checkbox">
+                                Gồm ảnh background chưa label
+                            </label>
+                        </div>
                         <div class="grid grid-cols-2 gap-2">
                             <label class="text-[10px] text-content-muted">
                                 Max attempts
@@ -393,25 +375,32 @@
                                 <input id="trainingBatchPriority" type="number" value="0" min="-100" max="100" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
                         </div>
-                        <button id="trainingBatchCreateBtn" type="button" onclick="createAutomatedTrainingBatch()" class="w-full bg-violet-700 hover:bg-violet-600 text-white rounded px-3 py-2 text-xs font-medium">
-                            <i class="fa-solid fa-list-check mr-1"></i>
-                            Queue selected projects
-                        </button>
                     </div>
 
                     <div id="finetunePhase6Panel" class="bg-surface border border-cyan-500/40 rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-cyan-300">
                                 <i class="fa-solid fa-code-branch mr-1"></i>
-                                Phase 6 · Fine-tune từ parent .pt
+                                2. Training recipe
                             </h4>
                             <span id="finetuneFeatureStatus" class="text-[10px] text-amber-300">Đang tải...</span>
                         </div>
                         <p class="text-[10px] text-content-muted leading-relaxed">
-                            Upload một checkpoint YOLO detect đáng tin cậy, xác thực bằng Colab worker,
-                            rồi chọn tùy ý các bộ tham số trong database để chạy trên cùng một dataset snapshot.
+                            Cùng một thư viện bộ tham số dùng cho fresh training và fine-tune.
                         </p>
 
+                        <label class="block text-[10px] text-content-muted">
+                            Training mode
+                            <select id="trainingExperimentMode" onchange="updateUnifiedTrainingMode()" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                                <option value="fresh" selected>Fresh - bắt đầu từ official pretrained checkpoint</option>
+                                <option value="finetune">Fine-tune - tiếp tục từ parent .pt</option>
+                            </select>
+                        </label>
+                        <div id="trainingFreshModelSummary" class="text-[10px] text-amber-200 border border-amber-900/70 rounded p-2">
+                            Fresh model lấy từ Family và Scale trong catalog backend ở đầu trang.
+                        </div>
+
+                        <div id="finetuneOnlyFields" class="hidden space-y-2">
                         <div class="border border-border rounded p-2 space-y-2">
                             <strong class="text-[10px] text-content">1. Import parent checkpoint</strong>
                             <input id="finetuneParentName" type="text" placeholder="Ví dụ: V14.7 external" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
@@ -424,8 +413,7 @@
                         </div>
 
                         <div class="border border-border rounded p-2 space-y-2">
-                            <strong class="text-[10px] text-content">2. Tạo fine-tune experiment</strong>
-                            <input id="finetuneExperimentName" type="text" placeholder="Tên experiment (không bắt buộc)" class="w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                            <strong class="text-[10px] text-content">Parent model</strong>
                             <label class="block text-[10px] text-content-muted">
                                 Parent model
                                 <select id="finetuneParentModel" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
@@ -435,16 +423,14 @@
                             <button id="finetuneParentValidateBtn" type="button" onclick="validateSelectedFinetuneParent()" class="w-full text-cyan-300 border border-cyan-800 rounded px-3 py-1.5 text-[10px] hover:bg-cyan-950/40">
                                 Xác thực lại parent đang chọn
                             </button>
-                            <label class="block text-[10px] text-content-muted">
-                                Project dataset
-                                <select id="finetuneProject" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
-                                    <option value="">Đang tải project...</option>
-                                </select>
-                            </label>
+                        </div>
+                        </div>
+
+                        <div class="border border-border rounded p-2 space-y-2">
                             <div class="border border-cyan-900/70 rounded p-2 space-y-2">
                                 <div class="flex items-center justify-between gap-2">
                                     <div>
-                                        <strong class="text-[10px] text-content">Thư viện bộ tham số</strong>
+                                        <strong class="text-[10px] text-content">Training parameter library</strong>
                                         <div id="finetuneParameterSetSelectionSummary" class="text-[10px] text-cyan-300">
                                             Đang tải...
                                         </div>
@@ -461,9 +447,9 @@
                                     <div id="finetuneArchivedParameterSetList" class="space-y-2 mt-2"></div>
                                 </details>
                             </div>
-                            <button id="finetuneExperimentCreateBtn" type="button" onclick="createFinetuneExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-wait text-white rounded px-3 py-2 text-xs font-medium">
+                            <button id="trainingBatchCreateBtn" type="button" onclick="createUnifiedTrainingExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-wait text-white rounded px-3 py-2 text-xs font-medium">
                                 <i class="fa-solid fa-play mr-1"></i>
-                                Tạo snapshot và queue các bộ đã chọn
+                                Queue training jobs
                             </button>
                             <div id="finetuneExperimentSubmitStatus" class="hidden rounded border border-sky-800 bg-sky-950/30 px-3 py-2 text-[10px] text-sky-200" role="status" aria-live="polite"></div>
                         </div>
@@ -487,26 +473,10 @@
                                     Mô tả
                                     <textarea id="finetuneParameterSetDescription" maxlength="500" rows="2" class="mt-1 w-full bg-surface border border-border rounded p-2 text-xs text-content"></textarea>
                                 </label>
-                                <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                    <label class="text-[10px] text-content-muted">Epochs<input id="finetuneParamEpochs" type="number" min="1" max="300" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                    <label class="text-[10px] text-content-muted">Batch<input id="finetuneParamBatch" type="number" min="1" max="64" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                    <label class="text-[10px] text-content-muted">Image size<select id="finetuneParamImgsz" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"><option>320</option><option>416</option><option>512</option><option>640</option><option>768</option></select></label>
-                                    <label class="text-[10px] text-content-muted">Learning rate (lr0)<input id="finetuneParamLr0" type="number" min="0.0000001" max="0.1" step="0.00001" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                    <label class="text-[10px] text-content-muted">Final LR factor (lrf)<input id="finetuneParamLrf" type="number" min="0.000001" max="1" step="0.001" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                    <label class="text-[10px] text-content-muted">Freeze layers<input id="finetuneParamFreeze" type="number" min="0" max="100" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                </div>
+                                <div id="finetuneParameterPrimaryGroups" class="space-y-3"></div>
                                 <details class="border border-border rounded p-2">
                                     <summary class="text-[10px] text-content cursor-pointer">Thông số nâng cao</summary>
-                                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
-                                        <label class="text-[10px] text-content-muted">Mosaic<input id="finetuneParamMosaic" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Scale<input id="finetuneParamScale" type="number" min="0" max="2" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Close mosaic<input id="finetuneParamCloseMosaic" type="number" min="0" max="100" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Degrees<input id="finetuneParamDegrees" type="number" min="0" max="180" step="1" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Translate<input id="finetuneParamTranslate" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Mixup<input id="finetuneParamMixup" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Copy-paste<input id="finetuneParamCopyPaste" type="number" min="0" max="1" step="0.05" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                        <label class="text-[10px] text-content-muted">Seed<input id="finetuneParamSeed" type="number" min="0" max="2147483647" class="mt-1 w-full bg-surface border border-border rounded p-1.5 text-content"></label>
-                                    </div>
+                                    <div id="finetuneParameterAdvancedGroups" class="space-y-3 mt-2"></div>
                                 </details>
                                 <div class="flex justify-end gap-2">
                                     <button type="button" onclick="closeFinetuneParameterSetEditor()" class="text-xs text-content-muted border border-border rounded px-3 py-2">Hủy</button>
@@ -538,6 +508,16 @@
                         <div id="trainingBatchList" class="space-y-2"></div>
                     </div>
                 </div>
+
+                <details id="legacyNotebookGeneratorSettings" class="bg-panel border border-amber-700/60 rounded-xl p-4 shadow-sm">
+                    <summary class="text-sm font-semibold text-content-muted cursor-pointer flex items-center gap-2">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
+                        Legacy code generator - does not control scheduler training
+                    </summary>
+                    <div class="mt-3 rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
+                        Letterbox, HSV, flip and Albumentations controls below only generate manual sample code. Fresh and Fine-tune jobs use the Parameter Sets above.
+                    </div>
+                    <div class="mt-4 space-y-6">
 
                 <!-- SECTION: EXPORT & STORAGE -->
                 <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
@@ -939,11 +919,14 @@
                     </div>
                 </div>
 
+                    </div>
+                </details>
+
             </div>
         </div>
 
         <!-- RIGHT COLUMN: FULL-HEIGHT REAL-TIME COLAB CODE DISPLAY (50% Width) -->
-        <div class="w-1/2 bg-surface flex flex-col flex-1 h-full min-h-0 min-w-0">
+        <div id="legacyCodeGeneratorPanel" class="hidden w-1/2 bg-surface flex-col flex-1 h-full min-h-0 min-w-0 border-l border-border">
             <!-- Header Bar with Copy, Font Size & Export Buttons -->
             <div class="p-3 bg-panel border-b border-border flex items-center justify-between shrink-0">
                 <span class="text-xs font-semibold text-amber-400 uppercase tracking-wider flex items-center gap-2">
@@ -997,111 +980,21 @@
             document.getElementById('colabCodeBlock').style.fontSize = `${currentFontSize}px`;
         }
 
-        const YOLO_CHECKPOINTS_MAP = {
-            "yolo26": [
-                { name: "YOLO26 Nano (yolo26n.pt)", val: "yolo26n.pt" },
-                { name: "YOLO26 Small (yolo26s.pt)", val: "yolo26s.pt" },
-                { name: "YOLO26 Medium (yolo26m.pt)", val: "yolo26m.pt" },
-                { name: "YOLO26 Large (yolo26l.pt)", val: "yolo26l.pt" },
-                { name: "YOLO26 Extra Large (yolo26x.pt)", val: "yolo26x.pt" }
-            ],
-            "yolo12": [
-                { name: "YOLO12 Nano (yolov12n.pt)", val: "yolov12n.pt" },
-                { name: "YOLO12 Small (yolov12s.pt)", val: "yolov12s.pt" },
-                { name: "YOLO12 Medium (yolov12m.pt)", val: "yolov12m.pt" },
-                { name: "YOLO12 Large (yolov12l.pt)", val: "yolov12l.pt" },
-                { name: "YOLO12 Extra Large (yolov12x.pt)", val: "yolov12x.pt" }
-            ],
-            "yolo11": [
-                { name: "YOLO11 Nano (yolo11n.pt)", val: "yolo11n.pt" },
-                { name: "YOLO11 Small (yolo11s.pt)", val: "yolo11s.pt" },
-                { name: "YOLO11 Medium (yolo11m.pt)", val: "yolo11m.pt" },
-                { name: "YOLO11 Large (yolo11l.pt)", val: "yolo11l.pt" },
-                { name: "YOLO11 Extra Large (yolo11x.pt)", val: "yolo11x.pt" }
-            ],
-            "yolov10": [
-                { name: "YOLOv10 Nano (yolov10n.pt)", val: "yolov10n.pt" },
-                { name: "YOLOv10 Small (yolov10s.pt)", val: "yolov10s.pt" },
-                { name: "YOLOv10 Medium (yolov10m.pt)", val: "yolov10m.pt" },
-                { name: "YOLOv10 Balanced (yolov10b.pt)", val: "yolov10b.pt" },
-                { name: "YOLOv10 Large (yolov10l.pt)", val: "yolov10l.pt" },
-                { name: "YOLOv10 Extra Large (yolov10x.pt)", val: "yolov10x.pt" }
-            ],
-            "yolov9": [
-                { name: "YOLOv9 Tiny (yolov9t.pt)", val: "yolov9t.pt" },
-                { name: "YOLOv9 Small (yolov9s.pt)", val: "yolov9s.pt" },
-                { name: "YOLOv9 Medium (yolov9m.pt)", val: "yolov9m.pt" },
-                { name: "YOLOv9 Compact (yolov9c.pt)", val: "yolov9c.pt" },
-                { name: "YOLOv9 Extended (yolov9e.pt)", val: "yolov9e.pt" }
-            ],
-            "yolo_world": [
-                { name: "YOLO-World Small (yolov8s-world.pt)", val: "yolov8s-world.pt" },
-                { name: "YOLO-World Medium (yolov8m-world.pt)", val: "yolov8m-world.pt" },
-                { name: "YOLO-World Large (yolov8l-world.pt)", val: "yolov8l-world.pt" },
-                { name: "YOLO-World Extra Large (yolov8x-world.pt)", val: "yolov8x-world.pt" }
-            ],
-            "yolov8": [
-                { name: "YOLOv8 Nano (yolov8n.pt)", val: "yolov8n.pt" },
-                { name: "YOLOv8 Small (yolov8s.pt)", val: "yolov8s.pt" },
-                { name: "YOLOv8 Medium (yolov8m.pt)", val: "yolov8m.pt" },
-                { name: "YOLOv8 Large (yolov8l.pt)", val: "yolov8l.pt" },
-                { name: "YOLOv8 Extra Large (yolov8x.pt)", val: "yolov8x.pt" }
-            ],
-            "yolo_nas": [
-                { name: "YOLO-NAS Small (yolo_nas_s)", val: "yolo_nas_s" },
-                { name: "YOLO-NAS Medium (yolo_nas_m)", val: "yolo_nas_m" },
-                { name: "YOLO-NAS Large (yolo_nas_l)", val: "yolo_nas_l" }
-            ],
-            "yolov7": [
-                { name: "YOLOv7 Tiny (yolov7-tiny.pt)", val: "yolov7-tiny.pt" },
-                { name: "YOLOv7 Standard (yolov7.pt)", val: "yolov7.pt" },
-                { name: "YOLOv7 Extra (yolov7x.pt)", val: "yolov7x.pt" },
-                { name: "YOLOv7 W6 (yolov7-w6.pt)", val: "yolov7-w6.pt" },
-                { name: "YOLOv7 E6 (yolov7-e6.pt)", val: "yolov7-e6.pt" }
-            ],
-            "yolov6": [
-                { name: "YOLOv6 Nano (yolov6n.pt)", val: "yolov6n.pt" },
-                { name: "YOLOv6 Small (yolov6s.pt)", val: "yolov6s.pt" },
-                { name: "YOLOv6 Medium (yolov6m.pt)", val: "yolov6m.pt" },
-                { name: "YOLOv6 Large (yolov6l.pt)", val: "yolov6l.pt" }
-            ],
-            "yolox": [
-                { name: "YOLOX Nano (yolox-nano)", val: "yolox-nano" },
-                { name: "YOLOX Tiny (yolox-tiny)", val: "yolox-tiny" },
-                { name: "YOLOX Small (yolox-s)", val: "yolox-s" },
-                { name: "YOLOX Medium (yolox-m)", val: "yolox-m" },
-                { name: "YOLOX Large (yolox-l)", val: "yolox-l" },
-                { name: "YOLOX X-Large (yolox-x)", val: "yolox-x" }
-            ],
-            "pp_yoloe": [
-                { name: "PP-YOLOE Small (ppyoloe_crn_s_80e)", val: "ppyoloe_crn_s_80e" },
-                { name: "PP-YOLOE Medium (ppyoloe_crn_m_80e)", val: "ppyoloe_crn_m_80e" },
-                { name: "PP-YOLOE Large (ppyoloe_crn_l_80e)", val: "ppyoloe_crn_l_80e" }
-            ],
-            "yolov5": [
-                { name: "YOLOv5 Nano (yolov5n.pt)", val: "yolov5n.pt" },
-                { name: "YOLOv5 Small (yolov5s.pt)", val: "yolov5s.pt" },
-                { name: "YOLOv5 Medium (yolov5m.pt)", val: "yolov5m.pt" },
-                { name: "YOLOv5 Large (yolov5l.pt)", val: "yolov5l.pt" },
-                { name: "YOLOv5 Extra Large (yolov5x.pt)", val: "yolov5x.pt" }
-            ],
-            "yolov4": [
-                { name: "YOLOv4 Tiny (yolov4-tiny.weights)", val: "yolov4-tiny" },
-                { name: "YOLOv4 Standard (yolov4.weights)", val: "yolov4" }
-            ],
-            "yolov3": [
-                { name: "YOLOv3 Tiny (yolov3-tiny.pt)", val: "yolov3-tiny.pt" },
-                { name: "YOLOv3 Standard (yolov3.pt)", val: "yolov3.pt" },
-                { name: "YOLOv3 SPP (yolov3-spp.pt)", val: "yolov3-spp.pt" }
-            ],
-            "yolov2": [
-                { name: "YOLOv2 Tiny (yolov2-tiny.cfg)", val: "yolov2-tiny" },
-                { name: "YOLOv2 9000 (yolo9000.cfg)", val: "yolo9000" }
-            ],
-            "yolov1": [
-                { name: "YOLOv1 Original (yolov1.cfg)", val: "yolov1" }
-            ]
-        };
+        function toggleLegacyCodeGenerator() {
+            const panel = document.getElementById("legacyCodeGeneratorPanel");
+            const controls = document.getElementById("legacyTemplateControls");
+            const trainingColumn = document.getElementById("trainingControlsColumn");
+            const button = document.getElementById("legacyGeneratorToggleBtn");
+            const opening = panel.classList.contains("hidden");
+            panel.classList.toggle("hidden", !opening);
+            panel.classList.toggle("flex", opening);
+            controls.classList.toggle("hidden", !opening);
+            controls.classList.toggle("flex", opening);
+            trainingColumn.classList.toggle("w-full", !opening);
+            trainingColumn.classList.toggle("w-1/2", opening);
+            trainingColumn.classList.toggle("border-r", opening);
+            button.classList.toggle("text-amber-300", opening);
+        }
 
         const DEFAULT_PRESETS = {
             "preset_yolo26_nextgen": {
@@ -1165,9 +1058,9 @@
                 clahe_limit: 0.0
             },
             "preset_high_aug": {
-                name: "High Augmentation (Anti-Overfit)",
-                yolo_family: "yolov8",
-                model_version: "yolov8m.pt",
+                name: "YOLO12 High Augmentation (Legacy Generator)",
+                yolo_family: "yolo12",
+                model_version: "yolo12s.pt",
                 task_type: "detect",
                 epochs: 200,
                 batch_size: 16,
@@ -1201,7 +1094,6 @@
         const COLAB_REMOTE_ENDPOINT_KEY = "toolib_colab_remote_endpoint_v1";
         const COLAB_REMOTE_TOKEN_KEY = "toolib_colab_remote_token_v1";
         const COLAB_DATASET_PROJECT_KEY = "toolib_colab_dataset_project_v1";
-        const COLAB_REMOTE_ALLOWED_MODELS = new Set(["yolo11n.pt", "yolo11s.pt"]);
         const COLAB_REMOTE_ALLOWED_IMAGE_SIZES = new Set([320, 416, 512, 640, 768]);
         const COLAB_REMOTE_POLL_INTERVAL_MS = 4000;
         let colabRemotePollTimer = null;
@@ -1212,6 +1104,9 @@
         let colabPreparedDataset = null;
         let trainingControlPlaneWorkers = [];
         let trainingControlPlaneBatches = [];
+        let trainingModelCatalog = null;
+        let trainingModelCatalogEntries = [];
+        let trainingModelAllowedCheckpoints = new Set();
         let finetuneModels = [];
         let finetuneConfig = null;
         let finetuneParameterSets = [];
@@ -1219,13 +1114,13 @@
         let finetuneParameterSetSelectionInitialized = false;
         let finetuneExperimentSubmitting = false;
         let finetunePendingSubmission = null;
+        let lastUnifiedTrainingMode = null;
         let trainingControlPlaneRefreshTimer = null;
         let trainingControlPlaneLoading = false;
 
         window.addEventListener('DOMContentLoaded', () => {
             loadTemplatesFromStorage();
             populateTemplateDropdown();
-            loadTemplateToUI(activeTemplateId);
             loadColabRemoteSettings();
             loadColabTrainingHistory();
             initializeColabTrainingDatasets();
@@ -1264,31 +1159,79 @@
             renderCode('yolo_family');
         }
 
+        function applyTrainingModelCatalog(catalog) {
+            if (
+                !catalog
+                || !Array.isArray(catalog.models)
+                || !catalog.models.length
+                || typeof catalog.hash !== "string"
+                || typeof catalog.version !== "string"
+            ) {
+                throw new Error("Training model catalog response is invalid.");
+            }
+            trainingModelCatalog = catalog;
+            trainingModelCatalogEntries = catalog.models.filter(
+                model => model.enabled && model.task === "detect"
+            );
+            trainingModelAllowedCheckpoints = new Set(
+                trainingModelCatalogEntries.map(model => model.checkpoint)
+            );
+            if (!trainingModelAllowedCheckpoints.size) {
+                throw new Error("Training model catalog has no enabled detection model.");
+            }
+
+            const summary = document.getElementById("trainingModelCatalogSummary");
+            summary.textContent = trainingModelCatalogEntries
+                .map(model => model.checkpoint)
+                .join(" · ");
+            document.getElementById("yolo_badge").textContent = (
+                `Catalog ${catalog.version} · ${catalog.hash.slice(0, 8)}`
+            );
+        }
+
+        function populateTrainingModelFamilies(selectedFamily = null) {
+            const select = document.getElementById("yolo_family");
+            const families = [];
+            for (const model of trainingModelCatalogEntries) {
+                if (!families.some(item => item.family === model.family)) {
+                    families.push({
+                        family: model.family,
+                        label: model.family_label
+                    });
+                }
+            }
+            select.replaceChildren();
+            for (const family of families) {
+                const option = document.createElement("option");
+                option.value = family.family;
+                option.textContent = family.label;
+                option.selected = family.family === selectedFamily;
+                select.appendChild(option);
+            }
+        }
+
         function populateCheckpointsDropdown(family, selectVal = null) {
             const select = document.getElementById('model_version');
             select.innerHTML = '';
-            const list = YOLO_CHECKPOINTS_MAP[family] || YOLO_CHECKPOINTS_MAP["yolo26"];
-            list.forEach(item => {
+            const list = trainingModelCatalogEntries.filter(
+                model => model.family === family
+            );
+            list.forEach(model => {
                 const opt = document.createElement('option');
-                opt.value = item.val;
-                opt.textContent = item.name;
-                if (selectVal && item.val === selectVal) opt.selected = true;
+                opt.value = model.checkpoint;
+                opt.textContent = `${model.scale_label} (${model.scale})`;
+                opt.dataset.status = model.status;
+                if (selectVal && model.checkpoint === selectVal) opt.selected = true;
                 select.appendChild(opt);
             });
             const badge = document.getElementById('yolo_badge');
-            if (["yolo26", "yolo12", "yolo11", "yolov10", "yolov9", "yolo_world", "yolov8", "yolov5", "yolov3"].includes(family)) {
-                badge.textContent = "Ultralytics Ecosystem";
-            } else if (family === "yolo_nas") {
-                badge.textContent = "SuperGradients Framework";
-            } else if (family === "yolov7") {
-                badge.textContent = "WongKinYiu Repository";
-            } else if (family === "yolox") {
-                badge.textContent = "Megvii Anchor-Free";
-            } else if (family === "pp_yoloe") {
-                badge.textContent = "Baidu PaddleDetection";
-            } else {
-                badge.textContent = "Darknet C-Framework";
+            if (trainingModelCatalog) {
+                badge.textContent = (
+                    `Catalog ${trainingModelCatalog.version} · `
+                    + trainingModelCatalog.hash.slice(0, 8)
+                );
             }
+            updateUnifiedTrainingMode();
         }
 
         function loadSelectedTemplate() {
@@ -1300,9 +1243,19 @@
             const tpl = currentTemplates[templateId];
             if (!tpl) return;
 
-            const family = tpl.yolo_family || 'yolo26';
-            document.getElementById('yolo_family').value = family;
-            populateCheckpointsDropdown(family, tpl.model_version);
+            if (!trainingModelCatalog) return;
+            const requestedModel = trainingModelCatalogEntries.find(
+                model => model.checkpoint === tpl.model_version
+            );
+            const defaultModel = trainingModelCatalogEntries.find(
+                model => model.checkpoint === trainingModelCatalog.default_checkpoint
+            ) || trainingModelCatalogEntries[0];
+            const selectedModel = requestedModel || defaultModel;
+            populateTrainingModelFamilies(selectedModel.family);
+            populateCheckpointsDropdown(
+                selectedModel.family,
+                selectedModel.checkpoint
+            );
 
             document.getElementById('task_type').value = tpl.task_type || 'detect';
             document.getElementById('epochs').value = tpl.epochs || 100;
@@ -1466,7 +1419,7 @@
 
 # 1. SETUP ENVIRONMENT & DEPENDENCIES
 !nvidia-smi
-!pip install -q ultralytics albumentations opencv-python roboflow
+!pip install -q ultralytics==8.4.110 albumentations opencv-python roboflow
 
 import torch
 from ultralytics import YOLO
@@ -1783,7 +1736,12 @@ print("Initialized YOLO-NAS Training Configuration")
 
         async function initializeTrainingControlPlane() {
             try {
-                const projects = await localTrainingApiFetch("/api/projects");
+                const [catalog, projects] = await Promise.all([
+                    localTrainingApiFetch("/api/training-model-catalog"),
+                    localTrainingApiFetch("/api/projects")
+                ]);
+                applyTrainingModelCatalog(catalog);
+                loadTemplateToUI(activeTemplateId);
                 const selector = document.getElementById("trainingBatchProjects");
                 selector.innerHTML = "";
                 for (const project of projects) {
@@ -1813,21 +1771,129 @@ print("Initialized YOLO-NAS Training Configuration")
             );
         }
 
+        function finetuneParameterControlId(parameterName) {
+            return `finetuneParameter_${parameterName}`;
+        }
+
+        function finetuneParameterCatalog() {
+            const catalog = finetuneConfig?.parameter_catalog;
+            if (!catalog || !Array.isArray(catalog.fields)) {
+                throw new Error("Training parameter catalog is unavailable.");
+            }
+            return catalog;
+        }
+
+        function appendFinetuneParameterOption(select, value, label) {
+            const option = document.createElement("option");
+            option.value = JSON.stringify(value);
+            option.textContent = label;
+            select.appendChild(option);
+        }
+
+        function createFinetuneParameterControl(field) {
+            const wrapper = document.createElement("label");
+            wrapper.className = "text-[10px] text-content-muted";
+            wrapper.dataset.parameterWrapper = field.name;
+            wrapper.textContent = field.ui?.label || field.name;
+            const controlClass = "mt-1 w-full bg-surface border border-border rounded p-1.5 text-content";
+            let control;
+            if (["boolean", "enum", "boolean_or_enum"].includes(field.type)) {
+                control = document.createElement("select");
+                if (field.type === "boolean" || field.type === "boolean_or_enum") {
+                    appendFinetuneParameterOption(control, false, "Off");
+                }
+                if (field.type === "boolean") {
+                    appendFinetuneParameterOption(control, true, "On");
+                } else {
+                    const excluded = new Set(field.ui?.exclude_values || []);
+                    for (const option of field.options || []) {
+                        if (!excluded.has(option.value)) {
+                            appendFinetuneParameterOption(
+                                control,
+                                option.value,
+                                option.label ?? String(option.value)
+                            );
+                        }
+                    }
+                }
+            } else {
+                control = document.createElement("input");
+                control.type = "number";
+                if (field.minimum !== undefined) {
+                    control.min = String(field.minimum);
+                }
+                if (field.exclusive_minimum !== undefined) {
+                    control.min = String(field.exclusive_minimum);
+                }
+                if (field.maximum !== undefined) {
+                    control.max = String(field.maximum);
+                }
+                control.step = String(field.ui?.step || (
+                    field.type === "integer" ? 1 : "any"
+                ));
+            }
+            control.id = finetuneParameterControlId(field.name);
+            control.dataset.parameterName = field.name;
+            control.dataset.parameterType = field.type;
+            control.className = controlClass;
+            control.addEventListener("change", updateFinetuneParameterDependencies);
+            wrapper.appendChild(control);
+            if (field.ui?.help) {
+                const help = document.createElement("span");
+                help.className = "block mt-1 text-[9px] text-content-muted/80";
+                help.textContent = field.ui.help;
+                wrapper.appendChild(help);
+            }
+            return wrapper;
+        }
+
+        function renderFinetuneParameterEditor() {
+            const catalog = finetuneParameterCatalog();
+            const destinations = {
+                false: document.getElementById("finetuneParameterPrimaryGroups"),
+                true: document.getElementById("finetuneParameterAdvancedGroups")
+            };
+            destinations.false.replaceChildren();
+            destinations.true.replaceChildren();
+            for (const group of catalog.groups || []) {
+                const fields = catalog.fields.filter(
+                    field => field.ui?.group === group.id
+                );
+                if (!fields.length) {
+                    continue;
+                }
+                const section = document.createElement("section");
+                const title = document.createElement("div");
+                title.className = "text-[10px] font-semibold text-cyan-300 mb-1";
+                title.textContent = group.label;
+                const grid = document.createElement("div");
+                grid.className = "grid grid-cols-2 md:grid-cols-3 gap-2";
+                for (const field of fields) {
+                    grid.appendChild(createFinetuneParameterControl(field));
+                }
+                section.append(title, grid);
+                destinations[String(Boolean(group.advanced))].appendChild(section);
+            }
+        }
+
         async function loadFinetuneOptions(projects = null) {
-            const [config, models, availableProjects] = await Promise.all([
+            const [config, models] = await Promise.all([
                 localTrainingApiFetch("/api/finetune/config"),
-                localTrainingApiFetch("/api/models"),
-                projects ? Promise.resolve(projects) : localTrainingApiFetch("/api/projects")
+                localTrainingApiFetch("/api/models")
             ]);
             finetuneConfig = config;
+            renderFinetuneParameterEditor();
             finetuneModels = models;
             finetuneParameterSets = config.parameter_sets || [];
             const activeParameterSets = finetuneParameterSets.filter(
                 parameterSet => parameterSet.is_active
             );
             if (!finetuneParameterSetSelectionInitialized) {
+                const recommended = activeParameterSets.find(
+                    parameterSet => parameterSet.system_key === "fresh-baseline"
+                ) || activeParameterSets[0];
                 finetuneSelectedParameterSetIds = new Set(
-                    activeParameterSets.slice(0, 2).map(parameterSet => parameterSet.id)
+                    recommended ? [recommended.id] : []
                 );
                 finetuneParameterSetSelectionInitialized = true;
             } else {
@@ -1839,16 +1905,16 @@ print("Initialized YOLO-NAS Training Configuration")
                 );
             }
             const featureStatus = document.getElementById("finetuneFeatureStatus");
-            const panel = document.getElementById("finetunePhase6Panel");
             featureStatus.textContent = config.enabled
-                ? `${config.version} · enabled`
-                : "disabled";
+                ? `${config.version} · fresh + fine-tune`
+                : `${config.version} · fresh only`;
             featureStatus.className = config.enabled
                 ? "text-[10px] text-emerald-300"
-                : "text-[10px] text-rose-300";
-            panel.querySelectorAll("input, select, button").forEach(control => {
-                control.disabled = !config.enabled;
-            });
+                : "text-[10px] text-amber-300";
+            const finetuneOption = document.querySelector(
+                '#trainingExperimentMode option[value="finetune"]'
+            );
+            if (finetuneOption) finetuneOption.disabled = !config.enabled;
 
             const parentSelector = document.getElementById("finetuneParentModel");
             const previousParent = parentSelector.value;
@@ -1879,31 +1945,18 @@ print("Initialized YOLO-NAS Training Configuration")
                 }
             }
 
-            const projectSelector = document.getElementById("finetuneProject");
-            const previousProject = projectSelector.value;
-            projectSelector.innerHTML = "";
-            for (const project of availableProjects) {
-                const option = document.createElement("option");
-                option.value = project.id;
-                option.textContent = `${project.name} (#${project.id})`;
-                projectSelector.appendChild(option);
-            }
-            if (!availableProjects.length) {
-                const option = document.createElement("option");
-                option.value = "";
-                option.textContent = "Chưa có ToolIb project";
-                projectSelector.appendChild(option);
-            } else if (availableProjects.some(project => String(project.id) === previousProject)) {
-                projectSelector.value = previousProject;
-            }
             renderFinetuneParameterSets();
+            updateUnifiedTrainingMode();
         }
 
         function finetuneParameterSummary(parameterSet) {
             const parameters = parameterSet.parameters || {};
+            const optimizerSummary = parameters.optimizer_mode === "explicit"
+                ? `${parameters.optimizer} · requested lr0 ${parameters.lr0}`
+                : "auto optimizer · lr0 resolved at runtime";
             return (
                 `epochs ${parameters.epochs} · batch ${parameters.batch} · `
-                + `imgsz ${parameters.imgsz} · lr0 ${parameters.lr0} · `
+                + `imgsz ${parameters.imgsz} · ${optimizerSummary} · `
                 + `freeze ${parameters.freeze}`
             );
         }
@@ -1922,7 +1975,7 @@ print("Initialized YOLO-NAS Training Configuration")
             const archivedList = document.getElementById("finetuneArchivedParameterSetList");
             const archivedSection = document.getElementById("finetuneArchivedParameterSetSection");
             const summary = document.getElementById("finetuneParameterSetSelectionSummary");
-            const createButton = document.getElementById("finetuneExperimentCreateBtn");
+            const createButton = document.getElementById("trainingBatchCreateBtn");
             activeList.innerHTML = "";
             archivedList.innerHTML = "";
 
@@ -2034,31 +2087,71 @@ print("Initialized YOLO-NAS Training Configuration")
 
             const selectedCount = finetuneSelectedParameterSetIds.size;
             summary.textContent = selectedCount
-                ? `Đã chọn ${selectedCount} bộ · sẽ tạo ${selectedCount} training jobs`
+                ? `Đã chọn ${selectedCount} bộ tham số cho training jobs`
                 : "Chưa chọn bộ tham số nào";
             summary.className = selectedCount
                 ? "text-[10px] text-emerald-300"
                 : "text-[10px] text-amber-300";
-            createButton.disabled = !finetuneConfig?.enabled || selectedCount === 0;
+            createButton.disabled = selectedCount === 0;
         }
 
         function finetuneEditorFieldMap() {
-            return {
-                epochs: "finetuneParamEpochs",
-                batch: "finetuneParamBatch",
-                imgsz: "finetuneParamImgsz",
-                lr0: "finetuneParamLr0",
-                lrf: "finetuneParamLrf",
-                freeze: "finetuneParamFreeze",
-                mosaic: "finetuneParamMosaic",
-                scale: "finetuneParamScale",
-                close_mosaic: "finetuneParamCloseMosaic",
-                degrees: "finetuneParamDegrees",
-                translate: "finetuneParamTranslate",
-                mixup: "finetuneParamMixup",
-                copy_paste: "finetuneParamCopyPaste",
-                seed: "finetuneParamSeed"
-            };
+            return Object.fromEntries(
+                finetuneParameterCatalog().fields.map(field => [
+                    field.name,
+                    {
+                        id: finetuneParameterControlId(field.name),
+                        type: field.type,
+                        field
+                    }
+                ])
+            );
+        }
+
+        function readFinetuneParameterControl(field, control) {
+            if (["boolean", "enum", "boolean_or_enum"].includes(field.type)) {
+                return JSON.parse(control.value);
+            }
+            if (field.type === "nullable_number" && control.value === "") {
+                return null;
+            }
+            const value = Number(control.value);
+            if (!Number.isFinite(value)) {
+                throw new Error(`${field.name} phải là số hợp lệ.`);
+            }
+            return value;
+        }
+
+        function writeFinetuneParameterControl(field, control, value) {
+            if (["boolean", "enum", "boolean_or_enum"].includes(field.type)) {
+                control.value = JSON.stringify(value);
+            } else {
+                control.value = value === null || value === undefined
+                    ? ""
+                    : String(value);
+            }
+        }
+
+        function updateFinetuneParameterDependencies() {
+            const fieldMap = finetuneEditorFieldMap();
+            for (const { field, id } of Object.values(fieldMap)) {
+                const condition = field.ui?.visible_when;
+                if (!condition) {
+                    continue;
+                }
+                const dependency = fieldMap[condition.field];
+                const dependencyValue = readFinetuneParameterControl(
+                    dependency.field,
+                    document.getElementById(dependency.id)
+                );
+                const visible = dependencyValue === condition.equals;
+                const control = document.getElementById(id);
+                control.disabled = !visible;
+                control.closest("[data-parameter-wrapper]").classList.toggle(
+                    "hidden",
+                    !visible
+                );
+            }
         }
 
         function openFinetuneParameterSetEditor(parameterSetId = null) {
@@ -2073,9 +2166,23 @@ print("Initialized YOLO-NAS Training Configuration")
                 : "Thêm bộ tham số";
             document.getElementById("finetuneParameterSetName").value = parameterSet?.name || "";
             document.getElementById("finetuneParameterSetDescription").value = parameterSet?.description || "";
-            for (const [parameterName, fieldId] of Object.entries(finetuneEditorFieldMap())) {
-                document.getElementById(fieldId).value = parameters[parameterName];
+            for (const [parameterName, field] of Object.entries(finetuneEditorFieldMap())) {
+                writeFinetuneParameterControl(
+                    field.field,
+                    document.getElementById(field.id),
+                    parameters[parameterName]
+                );
             }
+            if ((parameters.optimizer_mode || "auto") === "auto") {
+                const fieldMap = finetuneEditorFieldMap();
+                writeFinetuneParameterControl(
+                    fieldMap.optimizer.field,
+                    document.getElementById(fieldMap.optimizer.id),
+                    "AdamW"
+                );
+                document.getElementById(fieldMap.lr0.id).value = "0.001";
+            }
+            updateFinetuneParameterDependencies();
             document.getElementById("finetuneParameterSetModal").classList.remove("hidden");
         }
 
@@ -2085,12 +2192,22 @@ print("Initialized YOLO-NAS Training Configuration")
 
         function readFinetuneParameterSetEditor() {
             const parameters = {};
-            for (const [parameterName, fieldId] of Object.entries(finetuneEditorFieldMap())) {
-                const value = Number(document.getElementById(fieldId).value);
-                if (!Number.isFinite(value)) {
-                    throw new Error(`${parameterName} phải là số hợp lệ.`);
+            for (const [parameterName, field] of Object.entries(finetuneEditorFieldMap())) {
+                parameters[parameterName] = readFinetuneParameterControl(
+                    field.field,
+                    document.getElementById(field.id)
+                );
+            }
+            if (parameters.optimizer_mode === "explicit") {
+                if (!parameters.optimizer || parameters.optimizer === "auto") {
+                    throw new Error("Explicit mode requires a named optimizer.");
                 }
-                parameters[parameterName] = value;
+                if (!Number.isFinite(parameters.lr0) || parameters.lr0 <= 0) {
+                    throw new Error("lr0 must be a positive number in explicit mode.");
+                }
+            } else {
+                parameters.optimizer = "auto";
+                parameters.lr0 = null;
             }
             const name = document.getElementById("finetuneParameterSetName").value.trim();
             if (!name) {
@@ -2279,6 +2396,62 @@ print("Initialized YOLO-NAS Training Configuration")
             }
         }
 
+        function updateUnifiedTrainingMode() {
+            const selector = document.getElementById("trainingExperimentMode");
+            if (!selector) return;
+            if (selector.value === "finetune" && !finetuneConfig?.enabled) {
+                selector.value = "fresh";
+            }
+            const isFinetune = selector.value === "finetune";
+            if (
+                selector.value !== lastUnifiedTrainingMode
+                && finetuneParameterSets.length
+            ) {
+                const recommendedKey = isFinetune
+                    ? "baseline"
+                    : "fresh-baseline";
+                const recommended = finetuneParameterSets.find(
+                    parameterSet => (
+                        parameterSet.is_active
+                        && parameterSet.system_key === recommendedKey
+                    )
+                );
+                if (recommended) {
+                    finetuneSelectedParameterSetIds = new Set([recommended.id]);
+                    renderFinetuneParameterSets();
+                }
+            }
+            lastUnifiedTrainingMode = selector.value;
+            document.getElementById("finetuneOnlyFields").classList.toggle(
+                "hidden",
+                !isFinetune
+            );
+            const freshSummary = document.getElementById("trainingFreshModelSummary");
+            freshSummary.classList.toggle("hidden", isFinetune);
+            if (!isFinetune) {
+                const state = getUIFormState("temp");
+                freshSummary.textContent = (
+                    `Fresh training từ ${state.model_version}. `
+                    + "Mỗi project × bộ tham số sẽ tạo một job riêng."
+                );
+            }
+            const button = document.getElementById("trainingBatchCreateBtn");
+            if (button && !finetuneExperimentSubmitting) {
+                button.innerHTML = isFinetune
+                    ? '<i class="fa-solid fa-play mr-1"></i>Queue fine-tune jobs'
+                    : '<i class="fa-solid fa-play mr-1"></i>Queue fresh training jobs';
+            }
+        }
+
+        async function createUnifiedTrainingExperiment() {
+            const mode = document.getElementById("trainingExperimentMode").value;
+            if (mode === "finetune") {
+                await createFinetuneExperiment();
+                return;
+            }
+            await createAutomatedTrainingBatch();
+        }
+
         async function createFinetuneExperiment() {
             if (finetuneExperimentSubmitting) {
                 return;
@@ -2286,13 +2459,16 @@ print("Initialized YOLO-NAS Training Configuration")
             const parentModelId = Number(
                 document.getElementById("finetuneParentModel").value
             );
-            const projectId = Number(
-                document.getElementById("finetuneProject").value
-            );
-            if (!parentModelId || !projectId) {
-                showColabRemoteError("Chọn parent model đã xác thực và Project dataset.");
+            const selectedProjectIds = Array.from(
+                document.getElementById("trainingBatchProjects").selectedOptions
+            ).map(option => Number(option.value)).filter(Boolean);
+            if (!parentModelId || selectedProjectIds.length !== 1) {
+                showColabRemoteError(
+                    "Fine-tune cần một parent đã xác thực và đúng một project."
+                );
                 return;
             }
+            const projectId = selectedProjectIds[0];
             const selectedParent = finetuneModels.find(
                 model => model.id === parentModelId
             );
@@ -2305,6 +2481,10 @@ print("Initialized YOLO-NAS Training Configuration")
             const parameterSetIds = [...finetuneSelectedParameterSetIds];
             if (!parameterSetIds.length) {
                 showColabRemoteError("Chọn ít nhất một bộ tham số trong thư viện.");
+                return;
+            }
+            if (selectedProjectIds.length * parameterSetIds.length > 100) {
+                showColabRemoteError("Một batch tối đa 100 jobs. Giảm số project hoặc bộ tham số.");
                 return;
             }
 
@@ -2326,7 +2506,7 @@ print("Initialized YOLO-NAS Training Configuration")
             }
 
             const requestBody = {
-                name: document.getElementById("finetuneExperimentName").value.trim(),
+                name: document.getElementById("trainingBatchName").value.trim(),
                 parent_model_id: parentModelId,
                 project_id: projectId,
                 parameter_set_ids: parameterSetIds,
@@ -2353,7 +2533,7 @@ print("Initialized YOLO-NAS Training Configuration")
             requestBody.idempotency_key =
                 finetunePendingSubmission.idempotencyKey;
 
-            const button = document.getElementById("finetuneExperimentCreateBtn");
+            const button = document.getElementById("trainingBatchCreateBtn");
             const submitStatus = document.getElementById(
                 "finetuneExperimentSubmitStatus"
             );
@@ -2507,9 +2687,13 @@ print("Initialized YOLO-NAS Training Configuration")
                     worker.capabilities?.model_artifact_upload
                     && (worker.capabilities?.training_modes || []).includes("finetune")
                 );
+                const supportsTrainingPresets = Boolean(
+                    worker.capabilities?.training_parameter_sets
+                );
                 detail.textContent = (
                     `${worker.provider} · GPU ${worker.gpu_name || (worker.gpu_available ? "available" : "unavailable")} · `
                     + `capacity ${worker.active_leases}/${worker.capacity} · `
+                    + `Presets ${supportsTrainingPresets ? "ready" : "upgrade worker"} · `
                     + `Phase 6 ${supportsFinetune ? "ready" : "not supported"} · ${worker.api_url}`
                 );
 
@@ -2648,14 +2832,14 @@ print("Initialized YOLO-NAS Training Configuration")
             const state = getUIFormState("temp");
             if (
                 state.task_type !== "detect"
-                || !COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version)
-                || state.epochs < 1
-                || state.epochs > 100
-                || state.batch_size < 1
-                || state.batch_size > 32
-                || !COLAB_REMOTE_ALLOWED_IMAGE_SIZES.has(Number(state.imgsz))
+                || !trainingModelAllowedCheckpoints.has(state.model_version)
             ) {
-                showColabRemoteError("Batch automation hiện hỗ trợ contract YOLO detect của Colab worker.");
+                showColabRemoteError("Fresh training chỉ chấp nhận model detection đang enabled trong catalog backend.");
+                return;
+            }
+            const parameterSetIds = [...finetuneSelectedParameterSetIds];
+            if (!parameterSetIds.length) {
+                showColabRemoteError("Chọn ít nhất một bộ tham số trong thư viện.");
                 return;
             }
 
@@ -2681,22 +2865,33 @@ print("Initialized YOLO-NAS Training Configuration")
             try {
                 const priority = Number(document.getElementById("trainingBatchPriority").value || 0);
                 const maxAttempts = Number(document.getElementById("trainingBatchMaxAttempts").value || 3);
+                const jobs = selectedProjectIds.flatMap(projectId => (
+                    parameterSetIds.map((parameterSetId, index) => ({
+                        project_id: projectId,
+                        training_mode: "fresh",
+                        model: state.model_version,
+                        parameter_set_id: parameterSetId,
+                        candidate_name: `${index + 1}. ${(
+                            finetuneParameterSets.find(
+                                parameterSet => parameterSet.id === parameterSetId
+                            )?.name || `preset ${parameterSetId}`
+                        )}`,
+                        priority,
+                        splits,
+                        exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                        include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
+                    }))
+                ));
                 const batch = await localTrainingApiFetch("/api/training-batches", {
                     method: "POST",
                     body: {
-                        name: document.getElementById("trainingBatchName").value.trim(),
+                        name: (
+                            document.getElementById("trainingBatchName").value.trim()
+                            || `Fresh ${state.model_version}`
+                        ),
+                        experiment_type: "fresh",
                         max_attempts: maxAttempts,
-                        jobs: selectedProjectIds.map(projectId => ({
-                            project_id: projectId,
-                            model: state.model_version,
-                            epochs: Number(state.epochs),
-                            batch: Number(state.batch_size),
-                            imgsz: Number(state.imgsz),
-                            priority,
-                            splits,
-                            exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
-                            include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
-                        }))
+                        jobs
                     }
                 });
                 showToast(`Đã queue ${batch.total_jobs} job trong batch ${batch.batch_id.slice(0, 8)}.`);
@@ -2704,7 +2899,7 @@ print("Initialized YOLO-NAS Training Configuration")
             } catch (error) {
                 showColabRemoteError(`Tạo batch lỗi: ${error.message}`);
             } finally {
-                createButton.disabled = false;
+                createButton.disabled = finetuneSelectedParameterSetIds.size === 0;
                 await loadTrainingControlPlane(true);
             }
         }
@@ -2721,6 +2916,16 @@ print("Initialized YOLO-NAS Training Configuration")
                     200
                 );
             }
+        }
+
+        function summarizeTrainingParameters(values) {
+            if (!values) {
+                return "";
+            }
+            return finetuneParameterCatalog().fields
+                .filter(field => field.ui?.summary && values[field.name] !== undefined)
+                .map(field => `${field.name}=${values[field.name]}`)
+                .join(" · ");
         }
 
         function renderTrainingBatches() {
@@ -2792,13 +2997,37 @@ print("Initialized YOLO-NAS Training Configuration")
                     if (task.config_hash) {
                         const configDetail = document.createElement("div");
                         configDetail.className = "text-content-muted break-words";
-                        const requestConfig = task.request || {};
+                        const requestConfig = task.requested_config || task.request || {};
+                        const requestedOptimizer = requestConfig.optimizer_mode === "explicit"
+                            ? `${requestConfig.optimizer} · lr0=${requestConfig.lr0}`
+                            : "auto optimizer · lr0 delegated";
+                        const requestedParameters = summarizeTrainingParameters(
+                            requestConfig
+                        );
                         configDetail.textContent = (
-                            `Config ${task.config_hash.slice(0, 10)} · `
-                            + `lr0=${requestConfig.lr0 ?? "-"} · freeze=${requestConfig.freeze ?? "-"} · `
-                            + `imgsz=${requestConfig.imgsz}`
+                            `Requested ${task.config_hash.slice(0, 10)} · ${requestedOptimizer}`
+                            + (requestedParameters ? ` · ${requestedParameters}` : "")
                         );
                         info.appendChild(configDetail);
+                    }
+
+                    if (task.effective_config) {
+                        const effectiveDetail = document.createElement("div");
+                        effectiveDetail.className = "text-sky-300 font-mono break-words";
+                        effectiveDetail.textContent = (
+                            `Effective ${task.effective_config.optimizer_class} · `
+                            + `initial lr=${task.effective_config.initial_lr}`
+                        );
+                        info.appendChild(effectiveDetail);
+                        const effectiveArgs = task.effective_config.training_arguments;
+                        if (effectiveArgs) {
+                            const argumentsDetail = document.createElement("div");
+                            argumentsDetail.className = "text-sky-300 font-mono break-words";
+                            argumentsDetail.textContent = `Runtime ${summarizeTrainingParameters(
+                                effectiveArgs
+                            )}`;
+                            info.appendChild(argumentsDetail);
+                        }
                     }
 
                     if (task.metrics && task.metrics[rankingMetric] !== undefined) {
@@ -3439,8 +3668,7 @@ print("Initialized YOLO-NAS Training Configuration")
             if (!startButton || !eligibility) return;
 
             const modelEligible = state.task_type === "detect"
-                && state.yolo_family === "yolo11"
-                && COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version);
+                && trainingModelAllowedCheckpoints.has(state.model_version);
             const parametersEligible = state.epochs >= 1
                 && state.epochs <= 100
                 && state.batch_size >= 1
@@ -3451,7 +3679,7 @@ print("Initialized YOLO-NAS Training Configuration")
             startButton.disabled = !eligible || colabRemoteActiveJobId !== null;
 
             if (!modelEligible) {
-                eligibility.textContent = "Remote API PoC chỉ hỗ trợ detect với yolo11n.pt hoặc yolo11s.pt. Các model khác vẫn dùng Code Generator.";
+                eligibility.textContent = "Remote API chỉ nhận model detection đang enabled trong catalog backend.";
             } else if (!parametersEligible) {
                 eligibility.textContent = "Remote API yêu cầu epochs 1-100, batch 1-32 và imgsz thuộc 320, 416, 512, 640, 768.";
             } else if (!datasetEligible) {
@@ -3470,8 +3698,7 @@ print("Initialized YOLO-NAS Training Configuration")
             const state = getUIFormState("temp");
             if (
                 state.task_type !== "detect"
-                || state.yolo_family !== "yolo11"
-                || !COLAB_REMOTE_ALLOWED_MODELS.has(state.model_version)
+                || !trainingModelAllowedCheckpoints.has(state.model_version)
                 || state.epochs < 1
                 || state.epochs > 100
                 || state.batch_size < 1

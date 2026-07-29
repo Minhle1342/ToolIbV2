@@ -1,10 +1,22 @@
 import json
 from pathlib import Path
 
+from training_model_catalog import (
+    ENABLED_TRAINING_MODEL_CHECKPOINTS,
+    TRAINING_MODEL_CATALOG_HASH,
+    TRAINING_MODEL_CATALOG_VERSION,
+)
+from training_parameter_catalog import (
+    TRAINING_PARAMETER_CATALOG_HASH,
+    TRAINING_PARAMETER_CATALOG_VERSION,
+    TRAINING_PARAMETER_CONTRACT_VERSION,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_PATH = REPO_ROOT / 'templates' / 'colab_manager.html'
 NOTEBOOK_PATH = REPO_ROOT / 'notebooks' / 'Colab_FastAPI_PoC.ipynb'
+WORKER_PATH = REPO_ROOT / 'notebooks' / 'colab_worker_phase6.py'
 
 
 def notebook_source():
@@ -33,6 +45,41 @@ def test_colab_manager_requires_uploaded_project_snapshot_before_training():
     assert html.count('id="colabDatasetProject"') == 1
     assert 'api_token: credentials.token' in html
     assert 'localStorage.setItem(COLAB_REMOTE_TOKEN_KEY' not in html
+
+
+def test_colab_remote_catalog_supports_exact_small_detection_models():
+    html = TEMPLATE_PATH.read_text(encoding='utf-8')
+    source = notebook_source()
+    worker = WORKER_PATH.read_text(encoding='utf-8')
+    exact_catalog = '{"yolo11s.pt", "yolo12s.pt", "yolo26s.pt"}'
+
+    assert '/api/training-model-catalog' in html
+    assert 'YOLO_CHECKPOINTS_MAP' not in html
+    assert 'COLAB_REMOTE_ALLOWED_MODELS' not in html
+    assert 'trainingModelAllowedCheckpoints' in html
+    assert exact_catalog in source
+    assert exact_catalog in worker
+    assert tuple(ENABLED_TRAINING_MODEL_CHECKPOINTS) == (
+        'yolo11s.pt',
+        'yolo12s.pt',
+        'yolo26s.pt',
+    )
+    for generated in (
+        f'TRAINING_MODEL_CATALOG_VERSION = "{TRAINING_MODEL_CATALOG_VERSION}"',
+        f'TRAINING_MODEL_CATALOG_HASH = "{TRAINING_MODEL_CATALOG_HASH}"',
+    ):
+        assert generated in worker
+        assert generated in source
+    assert 'yolov12' not in html
+    assert 'ultralytics==8.4.110' in html
+    assert '"ultralytics==8.4.110"' in source
+    assert 'model: str = "yolo11s.pt"' in source
+    assert 'SMOKE_MODEL = "yolo11s.pt"' in source
+    assert '"allowed_models": sorted(ALLOWED_MODELS)' in source
+    assert '"ultralytics_version": ULTRALYTICS_VERSION' in source
+    assert 'ULTRALYTICS_PIN = "8.4.110"' in worker
+    assert 'yolo11n.pt' not in source
+    assert worker in source
 
 
 def test_notebook_accepts_authenticated_checksum_bound_dataset_snapshots():
@@ -76,6 +123,9 @@ def test_notebook_exposes_phase6_parent_cache_finetune_and_artifacts():
 
     for expected in (
         'training_mode: Literal["fresh", "finetune"] = "fresh"',
+        'apply_training_parameters: bool = False',
+        "optimizer_mode: Literal['auto', 'explicit'] = 'auto'",
+        '"optimizer_contract_version": 1',
         'parent_artifact_id: str | None = None',
         'parent_sha256: str | None = None',
         '@app.get(\n    "/api/model-artifacts/{artifact_id}"',
@@ -83,9 +133,18 @@ def test_notebook_exposes_phase6_parent_cache_finetune_and_artifacts():
         'validate_yolo_checkpoint(local_path)',
         '"model_artifact_upload": True',
         '"training_modes": ["fresh", "finetune"]',
+        '"training_parameter_sets": True',
+        '"training_model_catalog_version": TRAINING_MODEL_CATALOG_VERSION',
+        '"training_model_catalog_hash": TRAINING_MODEL_CATALOG_HASH',
+        '"training_parameter_catalog_hash": (',
         '"last_pt": (".pt", "last.pt")',
         'model = YOLO(model_source)',
-        '"lr0": request_data.lr0',
+        'or request_data.apply_training_parameters',
+        'train_kwargs["lr0"] = request_data.lr0',
+        'model.add_callback(\n            "on_pretrain_routine_end",',
+        '"optimizer_class": type(optimizer).__name__',
+        '"requested_config": job_snapshot.get("request")',
+        '"effective_config": effective_config',
         'Parent checkpoint classes do not match dataset classes.',
     ):
         assert expected in source
@@ -190,3 +249,63 @@ def test_notebook_remains_valid_json():
 
     assert notebook['nbformat'] == 4
     assert notebook['metadata']['accelerator'] == 'GPU'
+
+
+def test_notebook_exposes_phase_c_training_parameter_contract():
+    source = notebook_source()
+
+    for expected in (
+        'class TrainingParameterRequest(BaseModel):',
+        'patience: int = Field(default=100, ge=0, le=300)',
+        'rect: bool = False',
+        "cache: Literal['off', 'ram', 'disk'] = 'off'",
+        'amp: bool = True',
+        'cos_lr: bool = False',
+        'momentum: float = Field(default=0.937, ge=0.0, le=1.0)',
+        'weight_decay: float = Field(default=0.0005, ge=0.0, le=1.0)',
+        'warmup_epochs: float = Field(default=3.0, ge=0.0, le=100.0)',
+        'fraction: float = Field(default=1.0, gt=0.0, le=1.0)',
+        'multi_scale: float = Field(default=0.0, ge=0.0, le=1.0)',
+        'box: float = Field(default=7.5, ge=0.0, le=100.0)',
+        'cls: float = Field(default=0.5, ge=0.0, le=100.0)',
+        'dfl: float = Field(default=1.5, ge=0.0, le=100.0)',
+        'nbs: int = Field(default=64, ge=1, le=4096)',
+        "compile: bool | Literal['default', 'reduce-overhead', 'max-autotune-no-cudagraphs'] = False",
+        'channels_last: bool = False',
+        (
+            'TRAINING_PARAMETER_CONTRACT_VERSION = '
+            f'{TRAINING_PARAMETER_CONTRACT_VERSION}'
+        ),
+        f"TRAINING_PARAMETER_CATALOG_VERSION = '{TRAINING_PARAMETER_CATALOG_VERSION}'",
+        f"TRAINING_PARAMETER_CATALOG_HASH = '{TRAINING_PARAMETER_CATALOG_HASH}'",
+        'for parameter_name in TRAINING_PARAMETER_SET_FORWARD_FIELDS:',
+    ):
+        assert expected in source
+
+
+def test_notebook_reports_effective_phase_c_runtime_arguments():
+    source = notebook_source()
+
+    assert '"training_arguments": training_arguments' in source
+    assert 'trainer_args = getattr(trainer, "args", None)' in source
+    for argument in (
+        "'patience'",
+        "'rect'",
+        "'cache'",
+        "'amp'",
+        "'cos_lr'",
+        "'weight_decay'",
+        "'warmup_epochs'",
+        "'hsv_h'",
+        "'perspective'",
+        "'fliplr'",
+        "'fraction'",
+        "'multi_scale'",
+        "'box'",
+        "'cls'",
+        "'dfl'",
+        "'nbs'",
+        "'compile'",
+        "'channels_last'",
+    ):
+        assert argument in source

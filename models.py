@@ -453,6 +453,7 @@ class TrainingJob(db.Model):
     error = db.Column(db.Text, nullable=True)
     last_sync_error = db.Column(db.Text, nullable=True)
     request_payload = db.Column(db.JSON, nullable=True)
+    effective_config = db.Column(db.JSON, nullable=True)
     artifacts = db.Column(db.JSON, nullable=True)
     metrics = db.Column(db.JSON, nullable=True)
     remote_created_at = db.Column(db.DateTime, nullable=True)
@@ -484,6 +485,8 @@ class TrainingJob(db.Model):
             'error': self.error,
             'last_sync_error': self.last_sync_error,
             'request': self.request_payload,
+            'requested_config': self.request_payload or {},
+            'effective_config': self.effective_config or None,
             'artifacts': self.artifacts,
             'metrics': self.metrics or {},
             'remote_created_at': self.remote_created_at.isoformat() if self.remote_created_at else None,
@@ -689,6 +692,7 @@ class TrainingQueueTask(db.Model):
     candidate_name = db.Column(db.String(100), nullable=True)
     config_hash = db.Column(db.String(64), nullable=True, index=True)
     metrics = db.Column(db.JSON, nullable=True)
+    effective_config = db.Column(db.JSON, nullable=True)
     status = db.Column(db.String(40), nullable=False, default='queued', index=True)
     stage = db.Column(db.String(50), nullable=False, default='queued')
     priority = db.Column(db.Integer, nullable=False, default=0, index=True)
@@ -760,10 +764,12 @@ class TrainingQueueTask(db.Model):
             'candidate_name': self.candidate_name,
             'config_hash': self.config_hash,
             'metrics': self.metrics or {},
+            'effective_config': self.effective_config or None,
             'status': self.status,
             'stage': self.stage,
             'priority': self.priority,
             'request': self.request_payload or {},
+            'requested_config': self.request_payload or {},
             'dataset_config': self.dataset_config or {},
             'attempt_count': self.attempt_count,
             'max_attempts': self.max_attempts,
