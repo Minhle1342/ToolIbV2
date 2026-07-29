@@ -79,6 +79,49 @@ inference_engine = None
 classifier_engine = None
 auto_label_thread_local = threading.local()
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+
+def require_json_int(value, field_name):
+    if isinstance(value, bool):
+        raise ValueError(f'{field_name} must be an integer.')
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f'{field_name} must be an integer.') from exc
+
+
+def require_json_int_list(value, field_name):
+    if not isinstance(value, list):
+        raise ValueError(f'{field_name} must be a list of integers.')
+    return [require_json_int(item, field_name) for item in value]
+
+
+def require_json_bool(value, field_name):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'true', '1', 'yes', 'on'}:
+            return True
+        if normalized in {'false', '0', 'no', 'off'}:
+            return False
+    raise ValueError(f'{field_name} must be a boolean.')
+
+
+def optional_bounded_string(data, field_name, max_length):
+    if field_name not in data:
+        return None
+    value = data[field_name]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError(f'{field_name} must be a string.')
+    value = value.strip()
+    if not value or len(value) > max_length:
+        raise ValueError(
+            f'{field_name} must contain 1-{max_length} characters.'
+        )
+    return value
 GUIDE_STORAGE_DIR = os.path.join(BASE_DIR, 'project_guides')
 TRAINING_DATASET_ROOT = os.path.join(BASE_DIR, 'training_datasets')
 
@@ -562,8 +605,11 @@ def delete_image(image_id):
 
 @api_bp.route('/images/batch-delete', methods=['POST'])
 def batch_delete_images():
-    data = request.json
-    image_ids = data.get('image_ids', [])
+    data = request.get_json(silent=True) or {}
+    try:
+        image_ids = require_json_int_list(data.get('image_ids', []), 'image_ids')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
     if not image_ids:
         return jsonify({'message': 'No images specified'}), 200
 
@@ -663,9 +709,16 @@ def upload_project_images(project_id):
 # --- Views ---
 @api_bp.route('/views', methods=['POST'])
 def create_view():
-    data = request.json
-    view_name = data['name']
-    project_id = data['project_id']
+    data = request.get_json(silent=True) or {}
+    try:
+        view_name = optional_bounded_string(data, 'name', 100)
+        if view_name is None:
+            raise ValueError('name is required.')
+        project_id = require_json_int(data.get('project_id'), 'project_id')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    Project.query.get_or_404(project_id)
 
     existing_view = View.query.filter_by(name=view_name, project_id=project_id).first()
     if existing_view:
@@ -680,12 +733,29 @@ def create_view():
 def assign_view():
     # Logic to assign images to a view
     # data: { view_id, count, strategy='random'|'sequential', assign_mode='both'|'labeled'|'unlabeled' ... }
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    try:
+        view_id = require_json_int(data.get('view_id'), 'view_id')
+        project_id = require_json_int(data.get('project_id'), 'project_id')
+        count_requested = require_json_int(data.get('count', 0), 'count')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    assign_mode = data.get('assign_mode', 'both')
+    if assign_mode not in {'both', 'labeled', 'unlabeled'}:
+        return jsonify({'error': 'assign_mode is invalid.'}), 400
+    if count_requested <= 0:
+        return jsonify({'error': 'count must be greater than 0.'}), 400
+
+    view = View.query.get_or_404(view_id)
+    if view.project_id != project_id:
+        return jsonify({'error': 'View does not belong to the project.'}), 400
+
     count = utils.assign_images_to_view(
-        data['view_id'],
-        data.get('count', 0),
-        data.get('project_id'),
-        data.get('assign_mode', 'both')
+        view_id,
+        count_requested,
+        project_id,
+        assign_mode
     )
     if count == 0:
         return jsonify({'error': 'Lỗi: Tổng ảnh chưa phân công hiện tại là 0 hoặc không có ảnh nào phù hợp để phân công.'}), 400
@@ -819,14 +889,22 @@ def get_images():
 @api_bp.route('/labels/<int:image_id>', methods=['GET'])
 def get_label(image_id):
     image = Image.query.get_or_404(image_id)
-    labels = utils.read_yolo_label(image)
-    return jsonify(labels)
+    if request.args.get('include_revision', '').lower() in {'1', 'true', 'yes'}:
+        labels, revision = utils.read_yolo_label_state(image)
+        return jsonify({
+            'labels': labels,
+            'revision': revision,
+        })
+    return jsonify(utils.read_yolo_label(image))
 
 @api_bp.route('/images/batch-review', methods=['POST'])
 def batch_review():
-    data = request.json
-    image_ids = data.get('image_ids', [])
-    is_reviewed = data.get('is_reviewed', True)
+    data = request.get_json(silent=True) or {}
+    try:
+        image_ids = require_json_int_list(data.get('image_ids', []), 'image_ids')
+        is_reviewed = require_json_bool(data.get('is_reviewed', True), 'is_reviewed')
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
 
     if not image_ids:
         return jsonify({'message': 'No images to update'}), 200
@@ -841,42 +919,99 @@ def batch_review():
 
 @api_bp.route('/save', methods=['POST'])
 def save_label():
-    data = request.json
-    # data: { image_id, labels: [...], flag_status, save_time }
-    image = Image.query.get_or_404(data['image_id'])
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'JSON body is required.'}), 400
 
-    save_time = data.get('save_time', 0)
-    project = Project.query.get(image.project_id)
+    try:
+        image_id = require_json_int(data.get('image_id'), 'image_id')
+        normalized_labels = utils.normalize_yolo_labels(data.get('labels'))
+        flag_status = optional_bounded_string(data, 'flag_status', 20)
+        split_type = optional_bounded_string(data, 'split_type', 20)
+        is_reviewed = (
+            require_json_bool(data['is_reviewed'], 'is_reviewed')
+            if 'is_reviewed' in data
+            else None
+        )
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+
+    if split_type is not None and split_type not in {'train', 'val', 'test'}:
+        return jsonify({'error': 'split_type must be train, val, or test.'}), 400
+
+    image = Image.query.filter_by(id=image_id).with_for_update().first_or_404()
+    project = Project.query.get_or_404(image.project_id)
     label_file = utils.resolve_label_path(project.root_path, image.filename)
-    import os
-    os.makedirs(os.path.dirname(label_file), exist_ok=True)
+    old_existed = os.path.exists(label_file)
+    old_content = b''
+    if old_existed:
+        try:
+            with open(label_file, 'rb') as f:
+                old_content = f.read()
+        except OSError as exc:
+            db.session.rollback()
+            return jsonify({'error': f'Could not read current label file: {exc}'}), 500
 
-    # Kiểm tra thời gian save mới nhất (check newest save time)
-    if os.path.exists(label_file) and save_time > 0:
-        file_mtime = os.path.getmtime(label_file) * 1000 # convert to ms
-        if save_time < file_mtime:
-            return jsonify({'message': 'Ignored older save. Another user saved newer data.', 'ignored': True}), 200
+    current_revision = (
+        utils.label_content_revision(old_content)
+        if old_existed
+        else utils.LABEL_MISSING_REVISION
+    )
+    if 'expected_revision' not in data:
+        if old_content:
+            db.session.rollback()
+            return jsonify({
+                'error': 'expected_revision is required for an existing label.',
+                'revision': current_revision,
+            }), 428
+    else:
+        expected_revision = data['expected_revision']
+        if not isinstance(expected_revision, str):
+            db.session.rollback()
+            return jsonify({'error': 'expected_revision must be a string.'}), 400
+        if expected_revision != current_revision:
+            db.session.rollback()
+            return jsonify({
+                'error': 'Annotations changed on the server. Reload before saving.',
+                'conflict': True,
+                'revision': current_revision,
+            }), 409
 
-    # Clear tọa độ của bounding box trước đó (clear previous bounding box coordinates)
-    if os.path.exists(label_file):
-        open(label_file, 'w').close()
+    file_replaced = False
+    try:
+        saved_count = utils.save_yolo_label(image, normalized_labels)
+        file_replaced = True
 
-    # Gọi đến hàm save() để lưu tọa độ của bounding box mới nhất
-    saved_count = utils.save_yolo_label(image, data['labels'])
+        image.is_labeled = saved_count > 0
+        if flag_status is not None:
+            image.flag_status = flag_status
+        if split_type is not None:
+            image.split_type = split_type
+        if is_reviewed is not None:
+            image.is_reviewed = is_reviewed
 
-    image.is_labeled = saved_count > 0
-    if 'flag_status' in data:
-        image.flag_status = data['flag_status']
-    if 'split_type' in data:
-        image.split_type = data['split_type']
-    if 'is_reviewed' in data:
-        image.is_reviewed = data['is_reviewed']
+        db.session.commit()
+    except Exception as exc:
+        if file_replaced:
+            try:
+                utils.restore_file_bytes(label_file, old_existed, old_content)
+            except Exception:
+                current_app.logger.exception(
+                    'Failed to restore label file after database save failure',
+                    extra={'image_id': image_id, 'label_file': label_file},
+                )
+        db.session.rollback()
+        current_app.logger.exception(
+            'Could not save annotations',
+            extra={'image_id': image_id},
+        )
+        return jsonify({'error': f'Could not save annotations: {exc}'}), 500
 
-    db.session.commit()
     return jsonify({
         'message': 'Saved successfully',
         'saved_count': saved_count,
-        'is_labeled': image.is_labeled
+        'is_labeled': image.is_labeled,
+        'revision': utils.label_file_revision(label_file),
     })
 
 @api_bp.route('/image_data/<int:image_id>')
@@ -1369,30 +1504,57 @@ def run_auto_label_bulk_job(app, job_id, project_id, settings, model_path, model
                     try:
                         prediction = future.result()
                         result = prediction.get('result') or {}
-                        image = Image.query.get(target['image_id'])
+                        image = (
+                            Image.query.filter_by(id=target['image_id'])
+                            .with_for_update()
+                            .first()
+                        )
                         if not image:
                             skipped_count += 1
+                            db.session.rollback()
                         elif len(utils.read_yolo_label(image)) > 0:
                             image.is_labeled = True
                             skipped_count += 1
                             db.session.commit()
                         elif 'error' in result:
                             fail_count += 1
+                            db.session.rollback()
                         elif result.get('success') or 'boxes' in result:
                             result = apply_auto_label_classifier(project, target['image_path'], result)
                             boxes = valid_auto_label_boxes(result.get('boxes', []))
                             if boxes:
-                                saved = utils.save_yolo_label(image, boxes)
-                                image.is_labeled = saved > 0
+                                label_file = utils.resolve_label_path(
+                                    project.root_path,
+                                    image.filename,
+                                )
+                                old_existed = os.path.exists(label_file)
+                                old_content = b''
+                                if old_existed:
+                                    with open(label_file, 'rb') as f:
+                                        old_content = f.read()
+                                try:
+                                    saved = utils.save_yolo_label(image, boxes)
+                                    image.is_labeled = saved > 0
+                                    db.session.commit()
+                                except Exception:
+                                    utils.restore_file_bytes(
+                                        label_file,
+                                        old_existed,
+                                        old_content,
+                                    )
+                                    db.session.rollback()
+                                    raise
                                 saved_count += 1 if saved > 0 else 0
                             else:
                                 image.is_labeled = False
                                 empty_count += 1
+                                db.session.commit()
                             success_count += 1
-                            db.session.commit()
                         else:
                             fail_count += 1
+                            db.session.rollback()
                     except Exception as exc:
+                        db.session.rollback()
                         fail_count += 1
                         current_app.logger.exception('Bulk auto-label failed for image %s: %s', target.get('image_id'), exc)
                     finally:

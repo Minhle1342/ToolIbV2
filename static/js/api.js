@@ -91,12 +91,33 @@ class startAPI {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
         });
-        return res.json();
+        let payload;
+        try {
+            payload = await res.json();
+        } catch (error) {
+            payload = { error: `Save failed with HTTP ${res.status}.` };
+        }
+        if (!res.ok) {
+            const error = new Error(payload.error || `Save failed with HTTP ${res.status}.`);
+            error.status = res.status;
+            error.payload = payload;
+            throw error;
+        }
+        return payload;
     }
 
     async getLabel(imageId) {
         const res = await fetch(`/api/labels/${imageId}`);
         return await res.json();
+    }
+
+    async getLabelState(imageId) {
+        const res = await fetch(`/api/labels/${imageId}?include_revision=true`);
+        const payload = await res.json();
+        if (!res.ok) {
+            throw new Error(payload.error || 'Failed to load annotations.');
+        }
+        return payload;
     }
 
     async autoLabel(imageId, region = null, options = {}) {

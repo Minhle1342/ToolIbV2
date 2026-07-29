@@ -530,7 +530,9 @@ class Workspace {
         const loadSeq = ++editor._loadSequence;
 
         // 1. Get Labels first?
-        const labels = await API.getLabel(image.id);
+        const labelState = await API.getLabelState(image.id);
+        image.label_revision = labelState.revision;
+        const labels = labelState.labels;
 
         // Check if user already switched to another image
         if (loadSeq !== editor._loadSequence) return;
@@ -1390,10 +1392,12 @@ class Workspace {
                 flag_status: currentImage.flag_status,
                 split_type: currentImage.split_type,
                 is_reviewed: currentImage.is_reviewed || false,
-                save_time: Date.now()
+                expected_revision: currentImage.label_revision
             };
 
             const result = await API.saveLabel(data);
+
+            currentImage.label_revision = result.revision;
 
             if (result.ignored) {
                 if (!silent) {
@@ -1424,6 +1428,7 @@ class Workspace {
                     localImg.classes = uniqueClasses;
                     localImg.is_labeled = boxes.length > 0;
                     localImg.boxes = boxes.map(box => this.toImageListBox(box));
+                    localImg.label_revision = result.revision;
 
                     // Update check icon in DOM without reloading the whole list
                     const el = document.getElementById(`img-${currentImage.id}`);
@@ -1474,6 +1479,24 @@ class Workspace {
                 }
             }
         } catch (error) {
+            if (error.status === 409 && error.payload && error.payload.conflict) {
+                try {
+                    const latestState = await API.getLabelState(currentImage.id);
+                    currentImage.label_revision = latestState.revision;
+                    editor.loadBoxes(latestState.labels);
+                    editor.isDirty = false;
+                    const localImg = this.allImages?.find(img => img.id === currentImage.id);
+                    if (localImg) {
+                        localImg.label_revision = latestState.revision;
+                        localImg.boxes = latestState.labels.map(box => this.toImageListBox(box));
+                        localImg.is_labeled = latestState.labels.length > 0;
+                    }
+                } catch (reloadError) {
+                    console.error('Could not reload annotations after conflict:', reloadError);
+                }
+                alert('This image was changed by another user. The latest server version has been reloaded; please review your changes before saving again.');
+                return;
+            }
             console.error('Save error:', error);
             if (btnSpan && btn) {
                 btnSpan.textContent = 'Failed!';

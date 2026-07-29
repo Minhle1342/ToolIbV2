@@ -2,7 +2,9 @@ import os
 import glob
 import shutil
 import json
+import hashlib
 import math
+import tempfile
 import yaml
 import random
 from sqlalchemy import or_
@@ -500,8 +502,13 @@ def assign_images_to_view(view_id, count, project_id, assign_mode='both'):
     Returns number of assigned images.
     """
     try:
+        view_id = int(view_id)
         count = int(count)
-    except ValueError:
+        project_id = int(project_id)
+    except (TypeError, ValueError):
+        return 0
+
+    if count <= 0:
         return 0
 
     query = Image.query.filter_by(project_id=project_id, view_id=None)
@@ -552,6 +559,133 @@ def read_yolo_label(image):
                         pass
     return labels
 
+
+LABEL_MISSING_REVISION = 'missing'
+
+
+def label_content_revision(content):
+    return hashlib.sha256(content).hexdigest()
+
+
+def label_file_revision(label_file):
+    """Return a stable server-side revision for optimistic concurrency."""
+    if not os.path.exists(label_file):
+        return LABEL_MISSING_REVISION
+
+    digest = hashlib.sha256()
+    with open(label_file, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_yolo_label_state(image):
+    """Read labels and their revision from one immutable byte snapshot."""
+    project = Project.query.get(image.project_id)
+    label_file = resolve_label_path(project.root_path, image.filename)
+    if not os.path.exists(label_file):
+        return [], LABEL_MISSING_REVISION
+
+    with open(label_file, 'rb') as f:
+        content = f.read()
+
+    labels = []
+    try:
+        text = content.decode('utf-8')
+    except UnicodeDecodeError:
+        text = ''
+    for line in text.splitlines():
+        parts = line.strip().split()
+        if len(parts) != 5:
+            continue
+        try:
+            class_id = int(parts[0])
+            x = float(parts[1])
+            y = float(parts[2])
+            w = float(parts[3])
+            h = float(parts[4])
+        except ValueError:
+            continue
+        if w <= 0 or h <= 0:
+            continue
+        labels.append({
+            'class_id': class_id,
+            'x': x,
+            'y': y,
+            'w': w,
+            'h': h,
+        })
+    return labels, label_content_revision(content)
+
+
+def normalize_yolo_labels(labels):
+    """Validate an entire YOLO payload before any existing file is replaced."""
+    if not isinstance(labels, list):
+        raise ValueError('labels must be a list.')
+
+    normalized = []
+    for index, label in enumerate(labels):
+        if not isinstance(label, dict):
+            raise ValueError(f'labels[{index}] must be an object.')
+        try:
+            class_id = int(label['class_id'])
+            x = float(label['x'])
+            y = float(label['y'])
+            w = float(label['w'])
+            h = float(label['h'])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f'labels[{index}] contains invalid values.') from exc
+
+        if class_id < 0:
+            raise ValueError(f'labels[{index}].class_id must be non-negative.')
+        if not all(math.isfinite(value) for value in (x, y, w, h)):
+            raise ValueError(f'labels[{index}] coordinates must be finite.')
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            raise ValueError(f'labels[{index}] center must be between 0 and 1.')
+        if not (0 < w <= 1 and 0 < h <= 1):
+            raise ValueError(f'labels[{index}] size must be greater than 0 and at most 1.')
+
+        normalized.append({
+            'class_id': class_id,
+            'x': x,
+            'y': y,
+            'w': w,
+            'h': h,
+        })
+    return normalized
+
+
+def atomic_write_bytes(path, content):
+    """Replace a file atomically after fully flushing a sibling temp file."""
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f'.{os.path.basename(path)}.',
+        suffix='.tmp',
+        dir=directory,
+    )
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def restore_file_bytes(path, existed, content):
+    """Restore the previous file state after a later database failure."""
+    if existed:
+        atomic_write_bytes(path, content)
+    elif os.path.exists(path):
+        os.remove(path)
+
+
 def save_yolo_label(image, labels):
     """
     Writes labels to .txt file.
@@ -561,23 +695,14 @@ def save_yolo_label(image, labels):
     label_file = resolve_label_path(project.root_path, image.filename)
     os.makedirs(os.path.dirname(label_file), exist_ok=True)
 
-    saved_count = 0
-    with open(label_file, 'w') as f:
-        for label in labels:
-            try:
-                class_id = int(label['class_id'])
-                x = float(label['x'])
-                y = float(label['y'])
-                w = float(label['w'])
-                h = float(label['h'])
-                if w <= 0 or h <= 0:
-                    continue
-                line = f"{class_id} {x} {y} {w} {h}\n"
-                f.write(line)
-                saved_count += 1
-            except (KeyError, TypeError, ValueError):
-                pass
-    return saved_count
+    normalized = normalize_yolo_labels(labels)
+    content = ''.join(
+        f"{label['class_id']} {label['x']} {label['y']} "
+        f"{label['w']} {label['h']}\n"
+        for label in normalized
+    ).encode('utf-8')
+    atomic_write_bytes(label_file, content)
+    return len(normalized)
 
 def export_dataset(criteria, splits=None, format='yolo', output_dir=None):
     """

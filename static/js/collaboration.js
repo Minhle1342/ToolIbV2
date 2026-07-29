@@ -1376,12 +1376,13 @@
                         if (!editor.isDirty) {
                             (async () => {
                                 try {
-                                    const labels = await API.getLabel(data.image_id);
+                                    const labelState = await API.getLabelState(data.image_id);
                                     // Guard: make sure user is still on the same image
                                     const stillSameImage = (typeof currentImage !== 'undefined' && currentImage && currentImage.id === data.image_id);
-                                    if (stillSameImage && labels) {
-                                        editor.loadBoxes(labels);
-                                        console.log(`[Collab] Auto-reloaded ${labels.length} boxes for image ${data.image_id} after remote save.`);
+                                    if (stillSameImage && labelState) {
+                                        currentImage.label_revision = labelState.revision;
+                                        editor.loadBoxes(labelState.labels);
+                                        console.log(`[Collab] Auto-reloaded ${labelState.labels.length} boxes for image ${data.image_id} after remote save.`);
                                     }
                                 } catch (err) {
                                     console.error('[Collab] Error auto-reloading boxes after annotations_changed:', err);
