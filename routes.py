@@ -4270,11 +4270,41 @@ def test_models():
     model_ids = request.form.get('model_ids') # comma separated
     conf_threshold = request.form.get('conf_threshold', default=0.25, type=float)
     iou_threshold = request.form.get('iou_threshold', default=0.45, type=float)
+    ioh_threshold = request.form.get('ioh_threshold', default=0.50, type=float)
+    resize_mode = (request.form.get('resize_mode') or 'letterbox').strip().lower()
     if not model_ids:
         return jsonify({'error': 'No models selected'}), 400
 
+    try:
+        selected_model_ids = list(dict.fromkeys(
+            int(raw_id.strip())
+            for raw_id in model_ids.split(',')
+            if raw_id.strip()
+        ))
+    except ValueError:
+        return jsonify({'error': 'model_ids must contain integers'}), 400
+
+    if not selected_model_ids:
+        return jsonify({'error': 'No models selected'}), 400
+    if len(selected_model_ids) > 3:
+        return jsonify({'error': 'Select at most 3 models for one comparison'}), 400
+
+    try:
+        image_size = int(request.form.get('image_size', 640))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'image_size must be an integer'}), 400
+    if image_size < 160 or image_size > 2048 or image_size % 32 != 0:
+        return jsonify({
+            'error': 'image_size must be 160-2048 and divisible by 32'
+        }), 400
+    if resize_mode not in {'letterbox', 'stretch'}:
+        return jsonify({
+            'error': "resize_mode must be 'letterbox' or 'stretch'"
+        }), 400
+
     conf_threshold = min(max(conf_threshold, 0.0), 1.0)
     iou_threshold = min(max(iou_threshold, 0.0), 1.0)
+    ioh_threshold = min(max(ioh_threshold, 0.0), 1.0)
 
     import tempfile
     import uuid
@@ -4284,9 +4314,8 @@ def test_models():
 
     results = {}
     try:
-        for mid in model_ids.split(','):
-            if not mid.strip(): continue
-            m = AIModel.query.get(int(mid.strip()))
+        for model_id in selected_model_ids:
+            m = AIModel.query.get(model_id)
             if m:
                 m_path = os.path.join(os.getcwd(), 'models', m.filename)
                 if os.path.exists(m_path):
@@ -4297,7 +4326,10 @@ def test_models():
                         pred = engine.predict(
                             temp_path,
                             conf_threshold=conf_threshold,
-                            iou_threshold=iou_threshold
+                            iou_threshold=iou_threshold,
+                            ioh_threshold=ioh_threshold,
+                            image_size=image_size,
+                            resize_mode=resize_mode
                         )
                         duration_ms = (time.time() - start_time) * 1000
 
@@ -4326,15 +4358,25 @@ def test_models():
                                     'class_name': class_name,
                                     'confidence': box['conf']
                                 })
-                            results[m.id] = {'success': True, 'predictions': predictions, 'time_ms': round(duration_ms, 2)}
+                            results[m.id] = {
+                                'success': True,
+                                'predictions': predictions,
+                                'time_ms': round(duration_ms, 2),
+                                'image_size': image_size,
+                                'resize_mode': resize_mode,
+                            }
                         else:
                             res_dict = dict(pred)
                             res_dict['time_ms'] = round(duration_ms, 2)
+                            res_dict['image_size'] = image_size
+                            res_dict['resize_mode'] = resize_mode
                             results[m.id] = res_dict
                     except Exception as e:
                         results[m.id] = {'error': str(e)}
                 else:
                     results[m.id] = {'error': 'Model file not found'}
+            else:
+                results[model_id] = {'error': 'Model not found'}
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)

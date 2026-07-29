@@ -52,9 +52,18 @@ class YOLOInference:
             except Exception as e:
                 print(f"Error loading ONNX session: {e}")
 
-    def preprocess(self, image_path=None, target_size=None, img=None):
+    def preprocess(
+        self,
+        image_path=None,
+        target_size=None,
+        img=None,
+        resize_mode='letterbox'
+    ):
         if target_size is None:
             target_size = (self.input_width, self.input_height)
+        if resize_mode not in {'letterbox', 'stretch'}:
+            raise ValueError("resize_mode must be 'letterbox' or 'stretch'")
+
         # Load image
         if img is None:
             img = utils.imread_with_exif(image_path)
@@ -63,40 +72,45 @@ class YOLOInference:
 
         h, w = img.shape[:2]
         target_w, target_h = target_size
-        
-        # Letterbox: resize maintaining aspect ratio, pad with gray
-        ratio = min(target_w / w, target_h / h)
-        new_w = int(w * ratio)
-        new_h = int(h * ratio)
-        
-        img_resized = utils.resize_image_quality(img, (new_w, new_h))
-        
-        # Center the resized image on a padded canvas
-        pad_w = (target_w - new_w) // 2
-        pad_h = (target_h - new_h) // 2
-        
-        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
-        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = img_resized
-        
-        # Preprocess: BGR -> RGB, float32, 0-1
-        blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
-        
-        # Center the resized image on a padded canvas
-        pad_w = (target_w - new_w) // 2
-        pad_h = (target_h - new_h) // 2
-        
-        padded = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
-        padded[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = img_resized
+        if target_w <= 0 or target_h <= 0:
+            raise ValueError('target_size must contain positive dimensions')
+
+        if resize_mode == 'letterbox':
+            ratio = min(target_w / w, target_h / h)
+            new_w = max(1, int(round(w * ratio)))
+            new_h = max(1, int(round(h * ratio)))
+            img_resized = utils.resize_image_quality(img, (new_w, new_h))
+            pad_w = (target_w - new_w) // 2
+            pad_h = (target_h - new_h) // 2
+            processed = np.full((target_h, target_w, 3), 114, dtype=np.uint8)
+            processed[pad_h:pad_h + new_h, pad_w:pad_w + new_w] = img_resized
+            scale_x = ratio
+            scale_y = ratio
+        else:
+            processed = utils.resize_image_quality(img, (target_w, target_h))
+            pad_w = 0
+            pad_h = 0
+            scale_x = target_w / w
+            scale_y = target_h / h
         
         # Preprocess: BGR -> RGB, float32, 0-1
-        blob = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
+        blob = cv2.cvtColor(processed, cv2.COLOR_BGR2RGB)
         blob = blob.astype(np.float32) / 255.0
         blob = blob.transpose(2, 0, 1) # CHW
         blob = np.expand_dims(blob, axis=0) # Batch dimension
         
-        return blob, (w, h), ratio, (pad_w, pad_h)
+        return blob, (w, h), (scale_x, scale_y), (pad_w, pad_h)
 
-    def predict(self, image_path, conf_threshold=0.25, iou_threshold=0.45, ioh_threshold=0.50, region=None):
+    def predict(
+        self,
+        image_path,
+        conf_threshold=0.25,
+        iou_threshold=0.45,
+        ioh_threshold=0.50,
+        region=None,
+        image_size=None,
+        resize_mode='letterbox'
+    ):
         self.ensure_session()
         if not self.session:
             return {'error': f'Model not found at {self.model_path}. Please ensure the file exists.'}
@@ -122,11 +136,44 @@ class YOLOInference:
             offset_x = rx1
             offset_y = ry1
 
-        # 1. Preprocess (letterbox)
+        if image_size is None:
+            target_w = self.input_width
+            target_h = self.input_height
+        else:
+            try:
+                target_w = int(image_size)
+                target_h = int(image_size)
+            except (TypeError, ValueError):
+                return {'error': 'image_size must be a positive integer'}
+            if target_w <= 0:
+                return {'error': 'image_size must be a positive integer'}
+
+        input_shape = self.session.get_inputs()[0].shape
+        if len(input_shape) == 4:
+            static_h = input_shape[2] if isinstance(input_shape[2], int) else None
+            static_w = input_shape[3] if isinstance(input_shape[3], int) else None
+            if (
+                (static_h is not None and static_h != target_h)
+                or (static_w is not None and static_w != target_w)
+            ):
+                return {
+                    'error': (
+                        f'Model ONNX dùng input cố định {static_w}x{static_h}; '
+                        f'không thể chạy imgsz {target_w}. Hãy chọn đúng kích thước '
+                        'hoặc export ONNX với dynamic=True.'
+                    )
+                }
+
+        # 1. Preprocess using the experiment's selected input geometry.
         try:
-            input_tensor, (orig_w, orig_h), ratio, (pad_w, pad_h) = self.preprocess(img=img)
+            input_tensor, (orig_w, orig_h), scales, (pad_w, pad_h) = self.preprocess(
+                img=img,
+                target_size=(target_w, target_h),
+                resize_mode=resize_mode
+            )
         except Exception as e:
             return {'error': str(e)}
+        scale_x, scale_y = scales
         
         # 2. Inference
         outputs = self.session.run(None, {self.input_name: input_tensor})
@@ -136,7 +183,12 @@ class YOLOInference:
         if output is None or output.size == 0 or output.ndim != 2 or output.shape[1] < 5:
             return {'success': True, 'boxes': []}
 
-        if self._is_end2end_output(output, conf_threshold):
+        if self._is_end2end_output(
+            output,
+            conf_threshold,
+            input_width=target_w,
+            input_height=target_h
+        ):
             return self._postprocess_end2end_output(
                 output,
                 conf_threshold,
@@ -144,12 +196,15 @@ class YOLOInference:
                 full_h,
                 orig_w,
                 orig_h,
-                ratio,
+                scale_x,
+                scale_y,
                 pad_w,
                 pad_h,
                 offset_x,
                 offset_y,
-                ioh_threshold=ioh_threshold
+                ioh_threshold=ioh_threshold,
+                input_width=target_w,
+                input_height=target_h
             )
 
         boxes = []
@@ -184,19 +239,16 @@ class YOLOInference:
             cx, cy, bw, bh = filtered_boxes[i]
 
             if max(abs(cx), abs(cy), abs(bw), abs(bh)) <= 2.0:
-                cx *= self.input_width
-                bw *= self.input_width
-                cy *= self.input_height
-                bh *= self.input_height
+                cx *= target_w
+                bw *= target_w
+                cy *= target_h
+                bh *= target_h
             
-            # Undo letterbox: remove padding, then divide by ratio
-            x = ((cx - bw / 2) - pad_w) / ratio
-            y = ((cy - bh / 2) - pad_h) / ratio
-            w = bw / ratio
-            h = bh / ratio
-            y = ((cy - bh / 2) - pad_h) / ratio
-            w = bw / ratio
-            h = bh / ratio
+            # Map coordinates from the selected input geometry to the source image.
+            x = ((cx - bw / 2) - pad_w) / scale_x
+            y = ((cy - bh / 2) - pad_h) / scale_y
+            w = bw / scale_x
+            h = bh / scale_y
             
             boxes.append([x, y, w, h])
             confidences.append(float(filtered_scores[i]))
@@ -290,7 +342,13 @@ class YOLOInference:
             return False
         return str(value).strip().lower() in ('1', 'true', 'yes', 'y')
 
-    def _is_end2end_output(self, rows, conf_threshold):
+    def _is_end2end_output(
+        self,
+        rows,
+        conf_threshold,
+        input_width=None,
+        input_height=None
+    ):
         if rows.shape[1] < 6:
             return False
 
@@ -314,11 +372,13 @@ class YOLOInference:
             return False
 
         boxes = rows[candidates, :4]
+        actual_input_width = input_width or self.input_width
+        actual_input_height = input_height or self.input_height
         if np.max(np.abs(boxes)) <= 2.0:
-            x1 = boxes[:, 0] * self.input_width
-            y1 = boxes[:, 1] * self.input_height
-            x2 = boxes[:, 2] * self.input_width
-            y2 = boxes[:, 3] * self.input_height
+            x1 = boxes[:, 0] * actual_input_width
+            y1 = boxes[:, 1] * actual_input_height
+            x2 = boxes[:, 2] * actual_input_width
+            y2 = boxes[:, 3] * actual_input_height
         else:
             x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
 
@@ -333,12 +393,15 @@ class YOLOInference:
         full_h,
         orig_w,
         orig_h,
-        ratio,
+        scale_x,
+        scale_y,
         pad_w,
         pad_h,
         offset_x,
         offset_y,
-        ioh_threshold=0.50
+        ioh_threshold=0.50,
+        input_width=None,
+        input_height=None
     ):
         results = []
         for row in rows:
@@ -352,16 +415,18 @@ class YOLOInference:
             class_id = int(round(float(row[5])))
             x1, y1, x2, y2 = [float(v) for v in row[:4]]
 
+            actual_input_width = input_width or self.input_width
+            actual_input_height = input_height or self.input_height
             if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 2.0:
-                x1 *= self.input_width
-                x2 *= self.input_width
-                y1 *= self.input_height
-                y2 *= self.input_height
+                x1 *= actual_input_width
+                x2 *= actual_input_width
+                y1 *= actual_input_height
+                y2 *= actual_input_height
 
-            x1 = (x1 - pad_w) / ratio
-            y1 = (y1 - pad_h) / ratio
-            x2 = (x2 - pad_w) / ratio
-            y2 = (y2 - pad_h) / ratio
+            x1 = (x1 - pad_w) / scale_x
+            y1 = (y1 - pad_h) / scale_y
+            x2 = (x2 - pad_w) / scale_x
+            y2 = (y2 - pad_h) / scale_y
 
             x1 = np.clip(x1, 0, orig_w)
             y1 = np.clip(y1, 0, orig_h)
