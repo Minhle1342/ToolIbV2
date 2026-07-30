@@ -556,6 +556,47 @@
                             <div id="trainingWorkerList" class="space-y-2"></div>
                         </div>
                     </details>
+
+                    <details id="trainingStorageCleanupPanel" class="bg-surface border border-amber-700/60 rounded-lg p-3">
+                        <summary class="flex items-center justify-between gap-2 cursor-pointer list-none">
+                            <h4 class="text-xs font-semibold text-content">
+                                <i class="fa-solid fa-broom text-amber-400 mr-1"></i>
+                                Don dep du lieu training
+                            </h4>
+                            <span class="text-[10px] text-content-muted">Dry-run truoc khi xoa</span>
+                        </summary>
+                        <div class="mt-3 space-y-3">
+                            <p class="text-xs text-content-muted leading-relaxed">
+                                Chi don batch/task da ket thuc, dataset khong con tham chieu va checkpoint cu.
+                                Job dang chay, job co the resume va model da import luon duoc bao ve.
+                            </p>
+                            <div class="grid grid-cols-1 sm:grid-cols-[160px_auto_auto] gap-2 items-end">
+                                <label class="text-xs text-content-muted">
+                                    Giu du lieu gan day (ngay)
+                                    <input id="trainingCleanupRetentionDays" type="number" value="30" min="0" max="3650" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                                </label>
+                                <button id="trainingCleanupPreviewBtn" type="button" onclick="previewTrainingStorageCleanup()" class="text-xs text-sky-300 border border-sky-800 rounded px-3 py-2 hover:bg-sky-950/40">
+                                    <i class="fa-solid fa-magnifying-glass mr-1"></i>Xem truoc
+                                </button>
+                                <button id="trainingCleanupExecuteBtn" type="button" onclick="executeTrainingStorageCleanup()" disabled class="text-xs text-rose-200 border border-rose-800 rounded px-3 py-2 hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed">
+                                    <i class="fa-solid fa-trash-can mr-1"></i>Don du lieu
+                                </button>
+                            </div>
+                            <div id="trainingCleanupStatus" class="text-[11px] text-content-muted" aria-live="polite">
+                                Bam Xem truoc de tinh so record va dung luong co the don.
+                            </div>
+                            <div id="trainingCleanupSummary" class="hidden grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                <div class="border border-border rounded p-2"><span class="text-content-muted">DB records</span><strong id="trainingCleanupDbRows" class="block text-content mt-1">0</strong></div>
+                                <div class="border border-border rounded p-2"><span class="text-content-muted">Batch / task</span><strong id="trainingCleanupBatchTasks" class="block text-content mt-1">0 / 0</strong></div>
+                                <div class="border border-border rounded p-2"><span class="text-content-muted">Local</span><strong id="trainingCleanupLocalBytes" class="block text-content mt-1">0 B</strong></div>
+                                <div class="border border-border rounded p-2"><span class="text-content-muted">R2</span><strong id="trainingCleanupObjectBytes" class="block text-content mt-1">0 B</strong></div>
+                            </div>
+                            <div id="trainingCleanupCandidates" class="hidden text-[10px] text-content-muted border border-border rounded p-2 whitespace-pre-wrap break-words"></div>
+                            <p class="text-[10px] text-amber-300">
+                                Xoa model tren trang Models se don ca file runtime, artifact local va object R2 cua model do.
+                            </p>
+                        </div>
+                    </details>
                 </div>
 
                 <details id="legacyNotebookGeneratorSettings" class="bg-panel border border-amber-700/60 rounded-xl p-4 shadow-sm">
@@ -2892,6 +2933,144 @@ print("Initialized YOLO-NAS Training Configuration")
                 button.disabled = false;
                 button.removeAttribute("aria-busy");
                 button.innerHTML = idleButtonHtml;
+            }
+        }
+
+        let trainingStorageCleanupPlan = null;
+
+        function readTrainingCleanupRetentionDays() {
+            const value = Number(
+                document.getElementById("trainingCleanupRetentionDays").value
+            );
+            if (!Number.isInteger(value) || value < 0 || value > 3650) {
+                throw new Error("So ngay luu du lieu phai tu 0 den 3650.");
+            }
+            return value;
+        }
+
+        function formatTrainingCleanupBytes(value) {
+            const bytes = Number(value || 0);
+            if (bytes < 1024) return `${bytes} B`;
+            const units = ["KB", "MB", "GB", "TB"];
+            let amount = bytes / 1024;
+            let unitIndex = 0;
+            while (amount >= 1024 && unitIndex < units.length - 1) {
+                amount /= 1024;
+                unitIndex += 1;
+            }
+            return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+        }
+
+        function renderTrainingStorageCleanup(plan) {
+            trainingStorageCleanupPlan = plan;
+            const summary = plan.summary || {};
+            const status = document.getElementById("trainingCleanupStatus");
+            const executeButton = document.getElementById("trainingCleanupExecuteBtn");
+            document.getElementById("trainingCleanupSummary").classList.remove("hidden");
+            document.getElementById("trainingCleanupDbRows").textContent =
+                String(summary.database_rows || 0);
+            document.getElementById("trainingCleanupBatchTasks").textContent =
+                `${summary.batches || 0} / ${summary.tasks || 0}`;
+            document.getElementById("trainingCleanupLocalBytes").textContent =
+                formatTrainingCleanupBytes(summary.local_bytes);
+            document.getElementById("trainingCleanupObjectBytes").textContent =
+                formatTrainingCleanupBytes(summary.object_bytes);
+
+            const batchNames = (plan.items?.batches || [])
+                .slice(0, 8)
+                .map(batch => `- ${batch.name} (${batch.status}, ${batch.tasks} task)`);
+            const candidates = document.getElementById("trainingCleanupCandidates");
+            const protectedBatches = plan.protected?.batches || {};
+            const lines = [
+                `Cutoff: ${plan.cutoff}`,
+                `Dataset co the don: ${summary.datasets || 0}`,
+                `Checkpoint co the don: ${summary.checkpoints || 0}`,
+                `Bao ve: ${protectedBatches.active_or_nonterminal || 0} batch dang hoat dong; ${protectedBatches.imported_model || 0} batch co model da import.`,
+                ...batchNames
+            ];
+            candidates.textContent = lines.join("\n");
+            candidates.classList.remove("hidden");
+
+            executeButton.disabled = !plan.can_execute || !(summary.database_rows > 0);
+            if (!plan.can_execute) {
+                status.textContent = plan.storage?.error
+                    ? `Khong the thuc thi: ${plan.storage.error}`
+                    : "Khong the thuc thi: plan co object R2 nhung cau hinh object storage dang tat.";
+                status.className = "text-[11px] text-rose-300";
+            } else if (summary.database_rows > 0) {
+                status.textContent = "Dry-run hoan tat. Kiem tra so lieu roi moi bam Don du lieu.";
+                status.className = "text-[11px] text-amber-300";
+            } else {
+                status.textContent = "Khong co du lieu nao dat dieu kien don dep.";
+                status.className = "text-[11px] text-emerald-300";
+            }
+        }
+
+        async function previewTrainingStorageCleanup() {
+            const button = document.getElementById("trainingCleanupPreviewBtn");
+            const status = document.getElementById("trainingCleanupStatus");
+            button.disabled = true;
+            status.textContent = "Dang tinh dry-run...";
+            status.className = "text-[11px] text-sky-300";
+            try {
+                const retentionDays = readTrainingCleanupRetentionDays();
+                const plan = await localTrainingApiFetch(
+                    `/api/training-storage-cleanup?retention_days=${retentionDays}`
+                );
+                renderTrainingStorageCleanup(plan);
+            } catch (error) {
+                trainingStorageCleanupPlan = null;
+                document.getElementById("trainingCleanupExecuteBtn").disabled = true;
+                status.textContent = `Dry-run loi: ${error.message}`;
+                status.className = "text-[11px] text-rose-300";
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function executeTrainingStorageCleanup() {
+            const retentionDays = readTrainingCleanupRetentionDays();
+            if (
+                !trainingStorageCleanupPlan
+                || trainingStorageCleanupPlan.retention_days !== retentionDays
+            ) {
+                await previewTrainingStorageCleanup();
+            }
+            const plan = trainingStorageCleanupPlan;
+            if (!plan?.can_execute || !(plan.summary?.database_rows > 0)) return;
+            const message = [
+                `Xoa ${plan.summary.database_rows} record DB?`,
+                `Local: ${formatTrainingCleanupBytes(plan.summary.local_bytes)}`,
+                `R2: ${formatTrainingCleanupBytes(plan.summary.object_bytes)}`,
+                "Model da import va job dang hoat dong se duoc giu lai."
+            ].join("\n");
+            if (!window.confirm(message)) return;
+
+            const button = document.getElementById("trainingCleanupExecuteBtn");
+            const status = document.getElementById("trainingCleanupStatus");
+            button.disabled = true;
+            status.textContent = "Dang don local, R2 va database...";
+            status.className = "text-[11px] text-sky-300";
+            try {
+                const result = await localTrainingApiFetch(
+                    "/api/training-storage-cleanup",
+                    {
+                        method: "POST",
+                        body: { retention_days: retentionDays, confirm: true }
+                    }
+                );
+                status.textContent = `Da don ${result.deleted.database_rows} record DB.`;
+                status.className = "text-[11px] text-emerald-300";
+                showToast("Da don du lieu training cu.");
+                await Promise.all([
+                    loadTrainingControlPlane(true),
+                    loadColabTrainingHistory(),
+                    initializeColabTrainingDatasets()
+                ]);
+                await previewTrainingStorageCleanup();
+            } catch (error) {
+                status.textContent = `Don du lieu loi: ${error.message}`;
+                status.className = "text-[11px] text-rose-300";
             }
         }
 

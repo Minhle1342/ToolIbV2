@@ -73,6 +73,12 @@ from training_control_plane import (
     worker_supports_finetune,
 )
 from training_model_catalog import public_training_model_catalog
+from artifact_object_store import ObjectStoreError
+from training_cleanup import (
+    build_training_storage_cleanup_plan,
+    cleanup_model_storage,
+    execute_training_storage_cleanup,
+)
 
 # Initialize Inference Engines
 inference_engine = None
@@ -3516,6 +3522,38 @@ def list_training_batches():
     return jsonify([batch.to_dict() for batch in batches])
 
 
+@api_bp.route('/training-storage-cleanup', methods=['GET', 'POST'])
+def manage_training_storage_cleanup():
+    payload = (
+        request.get_json(silent=True) or {}
+        if request.method == 'POST'
+        else {}
+    )
+    retention_days = (
+        payload.get('retention_days')
+        if request.method == 'POST'
+        else request.args.get('retention_days')
+    )
+    try:
+        if request.method == 'GET':
+            return jsonify(build_training_storage_cleanup_plan(retention_days))
+        if payload.get('confirm') is not True:
+            return jsonify({
+                'error': 'confirm=true is required to execute storage cleanup.'
+            }), 400
+        return jsonify(execute_training_storage_cleanup(retention_days))
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except ObjectStoreError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 503
+    except OSError as exc:
+        db.session.rollback()
+        current_app.logger.exception('Training storage cleanup failed')
+        return jsonify({'error': f'Could not clean local storage: {exc}'}), 500
+
+
 @api_bp.route('/training-model-catalog', methods=['GET'])
 def get_training_model_catalog():
     return jsonify(public_training_model_catalog())
@@ -4186,16 +4224,14 @@ def delete_model(model_id):
     try:
         was_active = m.is_active
         was_type = m.model_type
-        external_artifact_paths = [
-            artifact.storage_path
-            for artifact in m.artifacts
-            if (
-                m.source_kind == 'external_pt'
-                and artifact.kind == 'parent_pt'
-            )
-        ]
-        models_dir = os.path.join(os.getcwd(), 'models')
-        model_path = os.path.join(models_dir, m.filename)
+        models_dir = str(
+            Path(
+                current_app.config.get(
+                    'MODEL_STORAGE_ROOT',
+                    os.path.join(BASE_DIR, 'models'),
+                )
+            ).resolve()
+        )
         remaining_classification_models = 0
 
         if was_type == 'classification':
@@ -4204,8 +4240,7 @@ def delete_model(model_id):
                 AIModel.id != m.id
             ).count()
 
-        if os.path.exists(model_path):
-            os.remove(model_path)
+        cleanup_result = cleanup_model_storage(m)
 
         if was_type == 'classification' and remaining_classification_models == 0:
             mapping_path = os.path.join(models_dir, 'class_mapping.json')
@@ -4214,23 +4249,6 @@ def delete_model(model_id):
 
         db.session.delete(m)
         db.session.commit()
-        artifact_root = Path(
-            current_app.config.get(
-                'MODEL_ARTIFACT_ROOT',
-                os.path.join(BASE_DIR, 'model_artifacts'),
-            )
-        ).resolve()
-        for raw_path in external_artifact_paths:
-            artifact_path = Path(raw_path).resolve()
-            try:
-                artifact_path.relative_to(artifact_root)
-            except ValueError:
-                continue
-            artifact_path.unlink(missing_ok=True)
-            try:
-                artifact_path.parent.rmdir()
-            except OSError:
-                pass
         if was_active:
             if was_type == 'classification':
                 global classifier_engine
@@ -4238,7 +4256,10 @@ def delete_model(model_id):
             else:
                 global inference_engine
                 inference_engine = None
-        return jsonify({'message': 'Deleted'})
+        return jsonify({'message': 'Deleted', 'storage_cleanup': cleanup_result})
+    except ObjectStoreError as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 503
     except Exception as e:
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
