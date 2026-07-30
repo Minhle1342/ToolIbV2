@@ -317,6 +317,186 @@ def test_merge_uses_exact_destination_path_not_dataset_ancestor(isolated_app, cl
         assert os.path.exists(os.path.join(merge_dest, dest_fn2))
         assert not os.path.exists(os.path.join(parent_dataset, dest_fn1))
 
+
+def test_merge_single_project_preserves_metadata_and_persists_tags(isolated_app, client):
+    temp_dir = isolated_app.config['TEMP_DIR']
+    source_dir = os.path.join(temp_dir, 'single_source')
+    os.makedirs(os.path.join(source_dir, 'images', 'train'))
+    os.makedirs(os.path.join(source_dir, 'labels', 'train'))
+    with open(os.path.join(source_dir, 'images', 'train', 'sample.jpg'), 'w') as f:
+        f.write('image')
+    with open(os.path.join(source_dir, 'labels', 'train', 'sample.txt'), 'w') as f:
+        f.write('0 0.5 0.5 0.2 0.2\n')
+
+    destination = os.path.join(temp_dir, 'single_copy')
+
+    with isolated_app.app_context():
+        source = Project(name='Single Source', root_path=source_dir)
+        db.session.add(source)
+        db.session.commit()
+        utils.save_classes(source, ['bottle'])
+        utils.scan_and_sync_images(source)
+
+        image = Image.query.filter_by(project_id=source.id).one()
+        tag = Tag(name='approved', color='#22c55e', project_id=source.id)
+        db.session.add(tag)
+        image.tags.append(tag)
+        image.is_reviewed = True
+        image.flag_status = 'Review'
+        image.split_type = 'val'
+        db.session.commit()
+
+        response = client.post('/api/projects/merge', json={
+            'project_ids': [source.id],
+            'name': 'Single Copy',
+            'root_path': destination,
+            'collision_policy': 'rename',
+        })
+
+        assert response.status_code == 200, response.json
+        assert response.json['copied_images'] == 1
+        copied_project = Project.query.get(response.json['project']['id'])
+        copied_image = Image.query.filter_by(project_id=copied_project.id).one()
+        assert copied_image.is_reviewed is True
+        assert copied_image.flag_status == 'Review'
+        assert copied_image.split_type == 'val'
+        assert [item.name for item in copied_image.tags] == ['approved']
+
+        tags_path = os.path.join(destination, 'dataset_tags.json')
+        assert os.path.exists(tags_path)
+        with open(tags_path, 'r', encoding='utf-8') as f:
+            tags_payload = json.load(f)
+        assert tags_payload['project_tags'] == [
+            {'id': copied_image.tags[0].id, 'name': 'approved', 'color': '#22c55e'}
+        ]
+        assert tags_payload['images'][copied_image.filename] == ['approved']
+
+
+def test_merge_sources_support_per_project_tag_filters(isolated_app, client):
+    temp_dir = isolated_app.config['TEMP_DIR']
+
+    def create_source(name, image_names, class_name):
+        root = os.path.join(temp_dir, name)
+        os.makedirs(os.path.join(root, 'images', 'train'))
+        os.makedirs(os.path.join(root, 'labels', 'train'))
+        for image_name in image_names:
+            with open(os.path.join(root, 'images', 'train', image_name), 'w') as f:
+                f.write(image_name)
+            label_name = os.path.splitext(image_name)[0] + '.txt'
+            with open(os.path.join(root, 'labels', 'train', label_name), 'w') as f:
+                f.write('0 0.5 0.5 0.2 0.2\n')
+
+        project = Project(name=name, root_path=root)
+        db.session.add(project)
+        db.session.commit()
+        utils.save_classes(project, [class_name])
+        utils.scan_and_sync_images(project)
+        return project
+
+    with isolated_app.app_context():
+        project_a = create_source('project_a', ['keep_a.jpg', 'drop_a.jpg'], 'class_a')
+        project_b = create_source('project_b', ['keep_b.jpg', 'drop_b.jpg'], 'class_b')
+
+        tag_a = Tag(name='selected-a', project_id=project_a.id)
+        tag_b = Tag(name='selected-b', project_id=project_b.id)
+        db.session.add_all([tag_a, tag_b])
+        db.session.flush()
+        keep_a = Image.query.filter_by(
+            project_id=project_a.id,
+            filename='images/train/keep_a.jpg',
+        ).one()
+        keep_b = Image.query.filter_by(
+            project_id=project_b.id,
+            filename='images/train/keep_b.jpg',
+        ).one()
+        keep_a.tags.append(tag_a)
+        keep_b.tags.append(tag_b)
+        db.session.commit()
+
+        destination = os.path.join(temp_dir, 'tag_filtered_merge')
+        payload = {
+            'sources': [
+                {
+                    'project_id': project_a.id,
+                    'selection': {'mode': 'tags', 'tag_ids': [tag_a.id], 'match': 'any'},
+                },
+                {
+                    'project_id': project_b.id,
+                    'selection': {'mode': 'tags', 'tag_ids': [tag_b.id], 'match': 'any'},
+                },
+            ],
+            'name': 'Tag Filtered Merge',
+            'root_path': destination,
+            'collision_policy': 'rename',
+        }
+
+        preflight = client.post('/api/projects/merge/preflight', json=payload)
+        assert preflight.status_code == 200, preflight.json
+        assert preflight.json['total_images'] == 2
+        assert [item['matched_image_count'] for item in preflight.json['source_summaries']] == [1, 1]
+        assert preflight.json['can_merge'] is True
+
+        mixed_preflight = client.post('/api/projects/merge/preflight', json={
+            **payload,
+            'root_path': os.path.join(temp_dir, 'mixed_merge'),
+            'sources': [
+                payload['sources'][0],
+                {
+                    'project_id': project_b.id,
+                    'selection': {'mode': 'all'},
+                },
+            ],
+        })
+        assert mixed_preflight.status_code == 200, mixed_preflight.json
+        assert mixed_preflight.json['total_images'] == 3
+        assert [
+            item['matched_image_count']
+            for item in mixed_preflight.json['source_summaries']
+        ] == [1, 2]
+
+        response = client.post('/api/projects/merge', json=payload)
+        assert response.status_code == 200, response.json
+        merged_project_id = response.json['project']['id']
+        merged_images = Image.query.filter_by(project_id=merged_project_id).order_by(Image.id).all()
+        assert len(merged_images) == 2
+        assert {os.path.basename(image.filename) for image in merged_images} == {
+            f'{project_a.id}_{keep_a.id}_keep_a.jpg',
+            f'{project_b.id}_{keep_b.id}_keep_b.jpg',
+        }
+        assert {tag.name for image in merged_images for tag in image.tags} == {
+            'selected-a',
+            'selected-b',
+        }
+        assert response.json['merged_classes'] == ['class_a', 'class_b']
+
+
+def test_merge_rejects_tag_from_another_project(isolated_app, client):
+    temp_dir = isolated_app.config['TEMP_DIR']
+    with isolated_app.app_context():
+        project_a = Project(name='A', root_path=os.path.join(temp_dir, 'a'))
+        project_b = Project(name='B', root_path=os.path.join(temp_dir, 'b'))
+        os.makedirs(project_a.root_path)
+        os.makedirs(project_b.root_path)
+        db.session.add_all([project_a, project_b])
+        db.session.commit()
+        foreign_tag = Tag(name='foreign', project_id=project_b.id)
+        db.session.add(foreign_tag)
+        db.session.commit()
+
+        response = client.post('/api/projects/merge/preflight', json={
+            'sources': [{
+                'project_id': project_a.id,
+                'selection': {'mode': 'tags', 'tag_ids': [foreign_tag.id]},
+            }],
+            'name': 'Invalid',
+            'root_path': os.path.join(temp_dir, 'invalid'),
+            'collision_policy': 'rename',
+        })
+
+        assert response.status_code == 400
+        assert 'do not belong to project' in response.json['error']
+
+
 def test_data_yaml_classes_txt(isolated_app):
     temp_dir = isolated_app.config['TEMP_DIR']
     project_dir = os.path.join(temp_dir, 'proj_yaml')

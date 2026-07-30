@@ -4605,10 +4605,72 @@ def restore_project(project_id):
         return jsonify({'error': str(e)}), 500
 
 
-def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
+def normalize_project_merge_sources(data):
+    raw_sources = data.get('sources')
+    if raw_sources is None:
+        project_ids = require_json_int_list(data.get('project_ids', []), 'project_ids')
+        raw_sources = [
+            {'project_id': project_id, 'selection': {'mode': 'all'}}
+            for project_id in project_ids
+        ]
+
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError('At least one source project is required.')
+
+    sources = []
+    seen_project_ids = set()
+    for index, raw_source in enumerate(raw_sources):
+        if not isinstance(raw_source, dict):
+            raise ValueError(f'sources[{index}] must be an object.')
+
+        project_id = require_json_int(
+            raw_source.get('project_id'),
+            f'sources[{index}].project_id',
+        )
+        if project_id in seen_project_ids:
+            raise ValueError(f'Project ID {project_id} is selected more than once.')
+        seen_project_ids.add(project_id)
+
+        selection = raw_source.get('selection')
+        if selection is None:
+            selection = {}
+        elif not isinstance(selection, dict):
+            raise ValueError(f'sources[{index}].selection must be an object.')
+
+        mode = str(selection.get('mode', 'all')).strip().lower()
+        if mode not in {'all', 'tags'}:
+            raise ValueError(f'Invalid selection mode for project {project_id}: {mode}')
+
+        tag_ids = []
+        if mode == 'tags':
+            tag_ids = require_json_int_list(
+                selection.get('tag_ids', []),
+                f'sources[{index}].selection.tag_ids',
+            )
+            tag_ids = list(dict.fromkeys(tag_ids))
+            if not tag_ids:
+                raise ValueError(f'Choose at least one tag for project {project_id}.')
+
+            match = str(selection.get('match', 'any')).strip().lower()
+            if match != 'any':
+                raise ValueError('Tag selection currently supports match="any" only.')
+
+        sources.append({
+            'project_id': project_id,
+            'selection': {
+                'mode': mode,
+                'tag_ids': tag_ids,
+                'match': 'any',
+            },
+        })
+
+    return sources
+
+
+def plan_project_merge_impl(sources, name, root_path, collision_policy):
     # Validations
-    if not project_ids or len(project_ids) < 2:
-        raise ValueError("At least two source projects are required.")
+    if not sources:
+        raise ValueError("At least one source project is required.")
     if not name or not name.strip():
         raise ValueError("Merged project name is required.")
     if not root_path or not root_path.strip():
@@ -4620,17 +4682,58 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
 
     # Load projects
     projects = []
-    for pid in project_ids:
+    source_summaries = []
+    all_source_images = []
+    project_order = {}
+    for source_index, source in enumerate(sources):
+        pid = source['project_id']
         p = Project.query.get(pid)
         if not p:
             raise ValueError(f"Project with ID {pid} does not exist.")
         projects.append(p)
 
+        selection = source['selection']
+        image_query = Image.query.filter_by(project_id=pid)
+        selected_tags = []
+        if selection['mode'] == 'tags':
+            selected_tags = Tag.query.filter(
+                Tag.project_id == pid,
+                Tag.id.in_(selection['tag_ids']),
+            ).order_by(Tag.id.asc()).all()
+            found_tag_ids = {tag.id for tag in selected_tags}
+            missing_tag_ids = [
+                tag_id for tag_id in selection['tag_ids']
+                if tag_id not in found_tag_ids
+            ]
+            if missing_tag_ids:
+                raise ValueError(
+                    f"Tags {missing_tag_ids} do not belong to project {pid}."
+                )
+            image_query = image_query.filter(
+                Image.tags.any(Tag.id.in_(selection['tag_ids']))
+            )
+
+        selected_images = image_query.order_by(Image.id.asc()).all()
+        project_order[pid] = source_index
+        all_source_images.extend(selected_images)
+        source_summaries.append({
+            'project_id': p.id,
+            'project_name': p.name,
+            'selection_mode': selection['mode'],
+            'tag_ids': selection['tag_ids'],
+            'tag_names': [tag.name for tag in selected_tags],
+            'available_image_count': Image.query.filter_by(project_id=pid).count(),
+            'matched_image_count': len(selected_images),
+        })
+
     # Build merged class list and class mappings
     merged_classes = []
     class_map = {} # project_id -> { old_class_id: new_class_id }
+    contributing_project_ids = {img.project_id for img in all_source_images}
     for p in projects:
         class_map[p.id] = {}
+        if p.id not in contributing_project_ids:
+            continue
         p_classes = utils.get_classes(p)
         for old_idx, cls_name in enumerate(p_classes):
             if cls_name not in merged_classes:
@@ -4638,10 +4741,7 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
             new_idx = merged_classes.index(cls_name)
             class_map[p.id][old_idx] = new_idx
 
-    # Get all source images in deterministic order
-    # Order: by the order in project_ids list, then by image.id
-    project_order = {pid: idx for idx, pid in enumerate(project_ids)}
-    all_source_images = Image.query.filter(Image.project_id.in_(project_ids)).all()
+    # Order: by the order in sources list, then by image.id
     all_source_images.sort(key=lambda img: (project_order.get(img.project_id, 999), img.id))
 
     # Group images by lowercase basename to identify collisions
@@ -4660,6 +4760,11 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
     duplicate_groups = []
     missing_files = []
     warnings = []
+    for source_summary in source_summaries:
+        if source_summary['matched_image_count'] == 0:
+            warnings.append(
+                f"Project '{source_summary['project_name']}' has no images matching its source filter."
+            )
 
     planned_dest_names = set()
 
@@ -4798,6 +4903,10 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
 
     return {
         'source_project_count': len(projects),
+        'source_summaries': source_summaries,
+        'available_image_count': sum(
+            source['available_image_count'] for source in source_summaries
+        ),
         'total_images': total_images,
         'missing_files': missing_files,
         'merged_classes': merged_classes,
@@ -4810,22 +4919,24 @@ def plan_project_merge_impl(project_ids, name, root_path, collision_policy):
         'duplicate_groups': duplicate_groups,
         'warnings': warnings,
         'plans': plans,
-        'can_merge': len(projects) >= 2 and final_image_count > 0
+        'can_merge': len(projects) >= 1 and final_image_count > 0
     }
 
 
 @api_bp.route('/projects/merge/preflight', methods=['POST'])
 def merge_projects_preflight():
     data = request.json or {}
-    project_ids = data.get('project_ids', [])
     name = data.get('name', '')
     root_path = data.get('root_path', '')
     collision_policy = data.get('collision_policy', 'rename')
 
     try:
-        plan = plan_project_merge_impl(project_ids, name, root_path, collision_policy)
+        sources = normalize_project_merge_sources(data)
+        plan = plan_project_merge_impl(sources, name, root_path, collision_policy)
         res = {
             'source_project_count': plan['source_project_count'],
+            'source_summaries': plan['source_summaries'],
+            'available_image_count': plan['available_image_count'],
             'total_images': plan['total_images'],
             'missing_files': plan['missing_files'],
             'merged_classes': plan['merged_classes'],
@@ -4849,13 +4960,13 @@ def merge_projects_preflight():
 @api_bp.route('/projects/merge', methods=['POST'])
 def merge_projects():
     data = request.json or {}
-    project_ids = data.get('project_ids', [])
     name = data.get('name', '')
     root_path = data.get('root_path', '')
     collision_policy = data.get('collision_policy', 'rename')
 
     try:
-        plan = plan_project_merge_impl(project_ids, name, root_path, collision_policy)
+        sources = normalize_project_merge_sources(data)
+        plan = plan_project_merge_impl(sources, name, root_path, collision_policy)
         if not plan['can_merge']:
             return jsonify({'error': 'Cannot execute merge with the given input.'}), 400
     except ValueError as ve:
@@ -4978,11 +5089,15 @@ def merge_projects():
             if os.path.exists(yaml_path):
                 copied_files.append(yaml_path)
 
+        tags_path = utils.persist_dataset_tags(new_project)
+        copied_files.append(tags_path)
+
         db.session.commit()
 
         return jsonify({
             'project': new_project.to_dict(),
             'copied_images': plan['final_image_count'],
+            'source_summaries': plan['source_summaries'],
             'merged_classes': plan['merged_classes'],
             'warnings': plan['warnings'],
             'collision_policy': collision_policy,

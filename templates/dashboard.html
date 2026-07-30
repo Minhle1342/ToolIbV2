@@ -86,8 +86,8 @@
         <form id="mergeProjectsForm" class="space-y-4 overflow-y-auto pr-1 flex-1">
             <!-- Source Projects Selection -->
             <div class="space-y-2">
-                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_selectSourceProjects">Chọn các dự án nguồn (Chọn tối thiểu 2)</label>
-                <div class="bg-surface/50 border border-border rounded-lg p-4 max-h-[160px] overflow-y-auto space-y-2" id="mergeSourceList">
+                <label class="block text-sm font-medium text-content-muted" data-i18n="dashboard_selectSourceProjects">Chọn các dự án nguồn (Chọn tối thiểu 1)</label>
+                <div class="bg-surface/50 border border-border rounded-lg p-3 overflow-y-auto space-y-2" id="mergeSourceList" style="max-height: 280px;">
                     <!-- Checkboxes of projects will be dynamically populated here -->
                 </div>
             </div>
@@ -156,6 +156,8 @@
                         <div class="text-base font-bold text-content text-primary" id="preflightFinalImages">0</div>
                     </div>
                 </div>
+
+                <div id="preflightSourceDetails" class="space-y-1.5"></div>
 
                 <!-- Classes detail -->
                 <div class="text-xs space-y-1 bg-surface/50 border border-border rounded p-2.5">
@@ -1082,6 +1084,11 @@
     document.getElementById('deleteProjectRemoveFolderBtn').addEventListener('click', () => resolveDeleteProjectChoice('delete_folder'));
 
     let preflightTimeout = null;
+    const mergeSourceTagsCache = new Map();
+
+    function mergeText(key, fallback) {
+        return window.t ? window.t(key) : fallback;
+    }
 
     function debouncePreflight() {
         if (preflightTimeout) clearTimeout(preflightTimeout);
@@ -1091,20 +1098,38 @@
     function openMergeModal() {
         const container = document.getElementById('mergeSourceList');
         if (!container) return;
+        mergeSourceTagsCache.clear();
 
         if (allProjects.length === 0) {
             container.innerHTML = `<div class="text-xs text-content-muted italic">Không có dự án nào khả dụng. Hãy tạo dự án trước.</div>`;
         } else {
             container.innerHTML = allProjects.map(p => `
-                <label class="flex items-center gap-3 text-sm text-content cursor-pointer hover:bg-surface/80 p-2 rounded-md transition-colors border border-transparent hover:border-border">
-                    <input type="checkbox" name="source_projects" value="${p.id}" onchange="runMergePreflight()" class="rounded border-border text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
-                    <div class="flex-1 min-w-0">
-                        <div class="font-semibold truncate text-content">${p.name}</div>
-                        <div class="text-[11px] text-content-muted truncate flex items-center gap-1">
-                            <i class="fa-regular fa-folder text-[10px]"></i> ${p.root_path}
+                <div class="merge-source-card border border-border rounded-lg bg-surface/50 overflow-hidden" data-project-id="${p.id}">
+                    <label class="flex items-center gap-3 text-sm text-content cursor-pointer hover:bg-surface/80 p-3 transition-colors">
+                        <input type="checkbox" name="source_projects" value="${p.id}" onchange="toggleMergeSource(${p.id})" class="rounded border-border text-primary focus:ring-primary focus:ring-offset-background h-4 w-4">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold truncate text-content">${p.name}</div>
+                            <div class="text-[11px] text-content-muted truncate flex items-center gap-1">
+                                <i class="fa-regular fa-folder text-[10px]"></i> ${p.root_path}
+                            </div>
+                        </div>
+                        <span id="mergeSourceBadge-${p.id}" class="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">${mergeText('dashboard_mergeScopeAll', 'All images')}</span>
+                    </label>
+                    <div id="mergeSourceOptions-${p.id}" class="hidden border-t border-border p-3 bg-panel space-y-2">
+                        <label class="block text-[11px] font-medium text-content-muted">${mergeText('dashboard_mergeScope', 'Source scope')}</label>
+                        <select id="mergeSourceMode-${p.id}" onchange="handleMergeSourceModeChange(${p.id})"
+                            class="w-full bg-surface border border-border rounded px-2.5 py-1.5 text-xs text-content focus:outline-none focus:border-primary">
+                            <option value="all">${mergeText('dashboard_mergeScopeAll', 'All images')}</option>
+                            <option value="tags">${mergeText('dashboard_mergeScopeTags', 'Only images matching tags')}</option>
+                        </select>
+                        <div id="mergeSourceTags-${p.id}" class="hidden space-y-1.5">
+                            <div class="text-[11px] text-content-muted">${mergeText('dashboard_mergeTagRule', 'Matching rule: image has any selected tag.')}</div>
+                            <div id="mergeSourceTagList-${p.id}" class="overflow-y-auto border border-border rounded p-2 bg-surface space-y-1" style="max-height: 7rem;">
+                                <div class="text-[11px] text-content-muted italic">${mergeText('dashboard_mergeLoadTagsHint', 'Select tag mode to load tags.')}</div>
+                            </div>
                         </div>
                     </div>
-                </label>
+                </div>
             `).join('');
         }
 
@@ -1120,6 +1145,93 @@
         submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
 
         openModal('mergeProjectsModal');
+    }
+
+    async function toggleMergeSource(projectId) {
+        const checkbox = document.querySelector(`input[name="source_projects"][value="${projectId}"]`);
+        const options = document.getElementById(`mergeSourceOptions-${projectId}`);
+        if (!checkbox || !options) return;
+
+        options.classList.toggle('hidden', !checkbox.checked);
+        if (checkbox.checked && document.getElementById(`mergeSourceMode-${projectId}`)?.value === 'tags') {
+            await loadMergeSourceTags(projectId);
+        }
+        runMergePreflight();
+    }
+
+    async function handleMergeSourceModeChange(projectId) {
+        const mode = document.getElementById(`mergeSourceMode-${projectId}`)?.value || 'all';
+        const tagsContainer = document.getElementById(`mergeSourceTags-${projectId}`);
+        const badge = document.getElementById(`mergeSourceBadge-${projectId}`);
+        tagsContainer?.classList.toggle('hidden', mode !== 'tags');
+        if (badge) {
+            badge.textContent = mode === 'tags'
+                ? mergeText('dashboard_mergeFilteredByTags', 'Filtered by tags')
+                : mergeText('dashboard_mergeScopeAll', 'All images');
+        }
+
+        if (mode === 'tags') {
+            await loadMergeSourceTags(projectId);
+        }
+        runMergePreflight();
+    }
+
+    async function loadMergeSourceTags(projectId) {
+        const container = document.getElementById(`mergeSourceTagList-${projectId}`);
+        if (!container) return;
+
+        if (mergeSourceTagsCache.has(projectId)) {
+            if (!container.querySelector('input[type="checkbox"]')) {
+                renderMergeSourceTags(projectId, mergeSourceTagsCache.get(projectId));
+            }
+            return;
+        }
+
+        container.innerHTML = `<div class="text-[11px] text-content-muted"><i class="fa-solid fa-spinner fa-spin mr-1"></i>${mergeText('dashboard_mergeLoadingTags', 'Loading tags...')}</div>`;
+        try {
+            const response = await fetch(`/api/projects/${projectId}/tags`);
+            const tags = await response.json();
+            if (!response.ok) throw new Error(tags.error || 'Cannot load tags.');
+            mergeSourceTagsCache.set(projectId, tags);
+            renderMergeSourceTags(projectId, tags);
+        } catch (error) {
+            container.innerHTML = `<div class="text-[11px] text-red-400">${error.message}</div>`;
+        }
+    }
+
+    function renderMergeSourceTags(projectId, tags) {
+        const container = document.getElementById(`mergeSourceTagList-${projectId}`);
+        if (!container) return;
+        if (!Array.isArray(tags) || tags.length === 0) {
+            container.innerHTML = `<div class="text-[11px] text-content-muted italic">${mergeText('dashboard_mergeNoTags', 'This project has no tags.')}</div>`;
+            return;
+        }
+
+        container.innerHTML = tags.map(tag => `
+            <label class="flex items-center gap-2 text-xs text-content cursor-pointer hover:bg-panel p-1 rounded">
+                <input type="checkbox" name="mergeSourceTags-${projectId}" value="${tag.id}" onchange="runMergePreflight()"
+                    class="rounded border-border text-primary focus:ring-primary h-3.5 w-3.5">
+                <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: ${tag.color}"></span>
+                <span class="flex-1 truncate">${tag.name}</span>
+                <span class="text-[10px] text-content-muted">${tag.image_count || 0}</span>
+            </label>
+        `).join('');
+    }
+
+    function collectMergeSources() {
+        const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
+        return Array.from(checkedBoxes).map(checkbox => {
+            const projectId = parseInt(checkbox.value, 10);
+            const mode = document.getElementById(`mergeSourceMode-${projectId}`)?.value || 'all';
+            const selection = { mode };
+            if (mode === 'tags') {
+                selection.tag_ids = Array.from(
+                    document.querySelectorAll(`input[name="mergeSourceTags-${projectId}"]:checked`)
+                ).map(tagCheckbox => parseInt(tagCheckbox.value, 10));
+                selection.match = 'any';
+            }
+            return { project_id: projectId, selection };
+        });
     }
 
     async function browseMergeDestinationFolder() {
@@ -1164,8 +1276,7 @@
     }
 
     async function runMergePreflight() {
-        const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
-        const projectIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+        const sources = collectMergeSources();
         const name = document.getElementById('merge_name').value.trim();
         const rootPath = document.getElementById('merge_root_path').value.trim();
         const collisionPolicy = document.getElementById('merge_collision_policy').value;
@@ -1178,10 +1289,21 @@
         // Hide old states
         errorDiv.classList.add('hidden');
 
-        if (projectIds.length < 2 || !name || !rootPath) {
+        if (sources.length < 1 || !name || !rootPath) {
             preflightSection.classList.add('hidden');
             submitBtn.disabled = true;
             submitBtn.className = "px-4 py-2 text-sm bg-primary/50 text-content-inv/75 cursor-not-allowed rounded transition-all font-semibold flex items-center gap-1.5";
+            return;
+        }
+
+        const sourceWithoutTags = sources.find(source =>
+            source.selection.mode === 'tags' && source.selection.tag_ids.length === 0
+        );
+        if (sourceWithoutTags) {
+            errorMsg.innerText = mergeText('dashboard_mergeChooseTags', 'Choose at least one tag for every filtered source.');
+            errorDiv.classList.remove('hidden');
+            preflightSection.classList.add('hidden');
+            submitBtn.disabled = true;
             return;
         }
 
@@ -1190,7 +1312,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    project_ids: projectIds,
+                    sources: sources,
                     name: name,
                     root_path: rootPath,
                     collision_policy: collisionPolicy
@@ -1214,6 +1336,25 @@
             document.getElementById('preflightLabelFiles').innerText = data.label_file_count;
             document.getElementById('preflightFinalImages').innerText = data.final_image_count;
             document.getElementById('preflightClassCount').innerText = `${data.merged_classes.length} classes`;
+
+            const sourceDetails = document.getElementById('preflightSourceDetails');
+            sourceDetails.innerHTML = (data.source_summaries || []).map(source => {
+                const scope = source.selection_mode === 'tags'
+                    ? `${mergeText('dashboard_mergeTagsPrefix', 'Tags')}: ${source.tag_names.join(', ')}`
+                    : mergeText('dashboard_mergeScopeAll', 'All images');
+                return `
+                    <div class="flex items-center justify-between gap-3 text-xs bg-surface/50 border border-border rounded px-2.5 py-2">
+                        <div class="min-w-0">
+                            <div class="font-semibold text-content truncate">${source.project_name}</div>
+                            <div class="text-[10px] text-content-muted truncate">${scope}</div>
+                        </div>
+                        <div class="text-right shrink-0">
+                            <div class="font-bold text-primary">${source.matched_image_count}</div>
+                            <div class="text-[10px] text-content-muted">${mergeText('dashboard_mergeOfImages', 'of')} ${source.available_image_count}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
 
             const badgesContainer = document.getElementById('preflightClassBadges');
             if (data.merged_classes.length === 0) {
@@ -1254,13 +1395,16 @@
     }
 
     async function executeMerge() {
-        const checkedBoxes = document.querySelectorAll('input[name="source_projects"]:checked');
-        const projectIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
+        const sources = collectMergeSources();
         const name = document.getElementById('merge_name').value.trim();
         const rootPath = document.getElementById('merge_root_path').value.trim();
         const collisionPolicy = document.getElementById('merge_collision_policy').value;
 
-        if (projectIds.length < 2 || !name || !rootPath) return;
+        if (sources.length < 1 || !name || !rootPath) return;
+        if (sources.some(source => source.selection.mode === 'tags' && source.selection.tag_ids.length === 0)) {
+            window.showToast(mergeText('dashboard_mergeChooseTags', 'Choose at least one tag for every filtered source.'), 'error');
+            return;
+        }
 
         if (collisionPolicy === 'overwrite') {
             const confirmed = confirm("Bạn đã chọn chế độ ghi đè dữ liệu trùng tên (Overwrite). Việc này có thể ghi đè các tệp ảnh và nhãn có cùng tên từ dự án trước đó trong thư mục gộp. Bạn có chắc chắn muốn tiếp tục?");
@@ -1294,7 +1438,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    project_ids: projectIds,
+                    sources: sources,
                     name: name,
                     root_path: rootPath,
                     collision_policy: collisionPolicy
