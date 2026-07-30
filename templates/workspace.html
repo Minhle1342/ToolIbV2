@@ -233,24 +233,43 @@
 
         <!-- Scrollable List Wrapper -->
         <div class="flex-1 min-h-0 relative bg-surface flex flex-col">
+            <div class="bg-surface border-b border-border px-3 py-2 flex items-center justify-between gap-2 text-xs flex-none">
+                <span class="text-content-muted">
+                    Danh sách (<span id="listedCount">0</span>)
+                </span>
+                <button type="button" onclick="selectAllListedImages()"
+                    class="text-primary hover:text-blue-500 font-medium transition-colors">
+                    <i class="fa-solid fa-check-double mr-1"></i>Chọn tất cả
+                </button>
+            </div>
             <!-- Action Panel -->
             <div id="batchActionPanel" class="bg-panel border-b border-border p-3 space-y-2 text-xs flex-none hidden">
                 <div class="flex items-center justify-between">
-                    <span class="font-semibold text-content-muted" id="batchActionTitle">Hành động ảnh</span>
+                    <span class="font-semibold text-content-muted" id="batchActionTitle">
+                        Đã chọn <span id="selectedCount">0</span> ảnh
+                    </span>
                     <button onclick="currentWorkspace.clearImageSelection()"
                         class="text-xs text-primary hover:underline hidden" id="btnClearSelection">Bỏ chọn</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 mt-1">
+                    <button type="button" onclick="openBulkTagSelector('assign')"
+                        class="bg-primary/20 hover:bg-primary text-primary hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-tags"></i> <span>Gắn tag</span>
+                    </button>
+                    <button type="button" onclick="openBulkTagSelector('unassign')"
+                        class="bg-orange-500/20 hover:bg-orange-500 text-orange-400 hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-tag"></i> <span>Gỡ tag</span>
+                    </button>
                 </div>
                 <div class="grid grid-cols-2 gap-2 mt-1">
                     <button onclick="currentWorkspace.deleteSelectedImages()" id="btnDeleteSelected"
                         class="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1 opacity-50 cursor-not-allowed"
                         disabled>
-                        <i class="fa-solid fa-trash-can"></i> <span>Xóa đã chọn (<span
-                                id="selectedCount">0</span>)</span>
+                        <i class="fa-solid fa-trash-can"></i> <span>Xóa đã chọn</span>
                     </button>
                     <button onclick="currentWorkspace.deleteListedImages()"
                         class="bg-red-600/20 hover:bg-red-600 text-red-500 hover:text-white rounded py-1.5 px-2 transition-all font-medium flex items-center justify-center gap-1">
-                        <i class="fa-solid fa-dumpster"></i> <span>Xóa tất cả ds (<span
-                                id="listedCount">0</span>)</span>
+                        <i class="fa-solid fa-dumpster"></i> <span>Xóa tất cả ds</span>
                     </button>
                 </div>
                 <div class="grid grid-cols-1 gap-2 mt-1">
@@ -846,6 +865,35 @@
     </div>
 </div>
 
+<!-- Bulk Tag Selector Modal -->
+<div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="bulkTagSelectorModal">
+    <div class="bg-panel rounded-lg shadow-xl w-full max-w-sm p-6 border border-border flex flex-col max-h-[80vh]">
+        <div class="flex justify-between items-start gap-4 mb-2">
+            <div>
+                <h2 class="text-xl font-bold text-content" id="bulkTagSelectorTitle">Gắn tag hàng loạt</h2>
+                <p class="text-sm text-content-muted mt-1" id="bulkTagSelectorSummary"></p>
+            </div>
+            <button type="button" onclick="closeModal('bulkTagSelectorModal')"
+                class="text-content-muted hover:text-content">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-2 my-4 pr-2" id="bulkTagSelectorList">
+            <!-- Bulk tag checkboxes injected by JS -->
+        </div>
+
+        <div class="flex justify-end gap-2">
+            <button type="button"
+                class="px-4 py-2 text-sm text-content-muted hover:text-content hover:bg-surface rounded transition-colors"
+                onclick="closeModal('bulkTagSelectorModal')">Hủy</button>
+            <button type="button" id="bulkTagSaveBtn"
+                class="px-4 py-2 text-sm bg-primary hover:bg-blue-600 text-white rounded transition-colors"
+                onclick="saveBulkImageTags()">Lưu</button>
+        </div>
+    </div>
+</div>
+
 <!-- Tag Selector Modal -->
 <div class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4" id="tagSelectorModal">
     <div class="bg-panel rounded-lg shadow-xl w-full max-w-sm p-6 border border-border flex flex-col max-h-[80vh]">
@@ -1019,6 +1067,7 @@
 <script src="{{ url_for('static', filename='js/fabric.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
 <script src="{{ url_for('static', filename='js/workspace.js') }}"></script>
+<script src="{{ url_for('static', filename='js/workspace_bulk_tags.js') }}"></script>
 <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/collaboration.js') }}"></script>
 

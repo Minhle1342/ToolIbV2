@@ -497,6 +497,44 @@ def test_merge_rejects_tag_from_another_project(isolated_app, client):
         assert 'do not belong to project' in response.json['error']
 
 
+def test_bulk_assign_tags_updates_only_selected_project_images(isolated_app, client):
+    temp_dir = isolated_app.config['TEMP_DIR']
+    with isolated_app.app_context():
+        project = Project(name='Bulk Tags', root_path=os.path.join(temp_dir, 'bulk_tags'))
+        other_project = Project(name='Other', root_path=os.path.join(temp_dir, 'other'))
+        db.session.add_all([project, other_project])
+        db.session.flush()
+
+        selected = Image(filename='selected.jpg', project_id=project.id)
+        untouched = Image(filename='untouched.jpg', project_id=project.id)
+        foreign = Image(filename='foreign.jpg', project_id=other_project.id)
+        tag = Tag(name='review', project_id=project.id)
+        db.session.add_all([selected, untouched, foreign, tag])
+        db.session.commit()
+
+        response = client.post(f'/api/projects/{project.id}/bulk_assign_tags', json={
+            'image_ids': [selected.id, foreign.id],
+            'tag_ids': [tag.id],
+            'action': 'assign',
+        })
+        assert response.status_code == 200, response.get_json()
+        assert response.get_json()['success'] is True
+
+        db.session.expire_all()
+        assert [item.id for item in db.session.get(Image, selected.id).tags] == [tag.id]
+        assert db.session.get(Image, untouched.id).tags == []
+        assert db.session.get(Image, foreign.id).tags == []
+
+        response = client.post(f'/api/projects/{project.id}/bulk_assign_tags', json={
+            'image_ids': [selected.id],
+            'tag_ids': [tag.id],
+            'action': 'unassign',
+        })
+        assert response.status_code == 200, response.get_json()
+        db.session.expire_all()
+        assert db.session.get(Image, selected.id).tags == []
+
+
 def test_data_yaml_classes_txt(isolated_app):
     temp_dir = isolated_app.config['TEMP_DIR']
     project_dir = os.path.join(temp_dir, 'proj_yaml')

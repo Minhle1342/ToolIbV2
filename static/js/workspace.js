@@ -1294,7 +1294,7 @@ class Workspace {
 
     async openTagSelector() {
         if (!currentImage) return;
-        await this.loadProjectTags();
+        await this.loadProjectTags(true);
         const container = document.getElementById('tagSelectorList');
         if (!this.projectTags || this.projectTags.length === 0) {
             container.innerHTML = '<div class="text-sm text-content-muted p-2">No tags available. Go to Tag Manager to create some.</div>';
