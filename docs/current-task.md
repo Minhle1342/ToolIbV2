@@ -1,13 +1,19 @@
 # Current Task Handoff - Phase C2 Training Parameter Catalog
 
-Updated: 2026-07-29, Asia/Bangkok
+Updated: 2026-07-30, Asia/Bangkok
 
 Repository: `C:\Users\Minh\OneDrive\Desktop\lb\ToolIbV2`
 
-No commit was created. The worktree remains heavily dirty and contains
-unrelated user changes. Phase C2 is implemented and locally validated. Live
-browser/Colab acceptance is still pending because Flask, the scheduler, and
-Colab workers are not running.
+Phase A/C2 va model-experiment work da duoc commit/push qua `f77cb06`,
+`bf9707a` va `22f9991`. Dot non-Colab/GPU tiep theo da duoc dong goi thanh:
+
+- `56f9a6b` - training readiness preflight va Phase 9 read-only inspection;
+- `50de664` - UX `/colab-manager` theo mot flow non-tech duy nhat;
+- commit tai lieu cuoi dot gom runbook UAT WSL2/PostgreSQL, guide test man hinh
+  va handoff nay.
+
+Flask va scheduler hien dang chay; Colab worker da dang ky nhung chua online.
+Live browser interactive/Colab GPU acceptance van pending.
 
 ## 1. Muc tieu cuoi cung
 
@@ -120,17 +126,48 @@ model catalog va unified Fresh/Fine-tune.
 - Them catalog loader/drift tests, C2 validation/default/snapshot tests,
   generated worker contract tests, requested/effective tests va resume snapshot
   regression.
+- Them `scripts/training_preflight.py` de kiem tra read-only:
+  - model/parameter catalog load va version/hash;
+  - generated worker blocks va notebook sync;
+  - Phase 9 schema + migration ledger khi co database URI ro rang;
+  - worker GPU/capability/hash/Ultralytics va scheduler compatibility khi co
+    worker URL + token env;
+  - `--strict` bien runtime `SKIP` thanh `NOT READY`, `--json` cho automation.
+- Them Phase 9 CLI modes an toan:
+  - `--status` bao schema + ledger, khong ghi database;
+  - `--dry-run` liet ke additive actions, khong ghi database;
+  - `--check` legacy schema-only van duoc giu;
+  - real `apply_phase9_migration()` khong bi thay doi va khong duoc chay.
+- Dong bo `docs/HUONG_DAN_TEST_YOLO11_12_26_TREN_MAN_HINH.md` voi 39 fields,
+  optimizer Auto/Explicit va hai recipe `Smoke Auto 1 epoch` / `Smoke Explicit
+  1 epoch`.
+- Chuyen `/colab-manager` thanh flow nguoi dung duy nhat:
+  1. chon model;
+  2. chon du lieu;
+  3. chon cach huan luyen/cau hinh;
+  4. review va bat dau;
+  5. theo doi ket qua.
+- Bo visible `Phase 5`, `Phase 6`, `phase-c2`, scheduler/batch/job wording khoi
+  flow chinh; legacy direct smoke va code generator van duoc giu nhung an trong
+  khu "Cong cu cu danh cho ky thuat".
+- Chuyen thiet lap URL/token/worker xuong sau Buoc 5 va collapse mac dinh de
+  khong chen ngang flow cua user non-tech.
+- Them banner `Tai nguyen huan luyen` luon hien o dau flow. Banner phan biet:
+  chua dang ky worker, da dang ky nhung chua online, va da co worker san sang;
+  nut `Dang ky/Quan ly Colab` mo truc tiep panel URL/token va focus o URL.
+- Them review card dong cho project, model/parent, recipe, so luot chay,
+  blockers va canh bao khong co worker online.
+- Requested/effective/checkpoint/attempt/event van duoc giu nhung nam trong
+  `Chi tiet ky thuat`; khong thay doi API, immutable payload hay scheduler
+  contract.
 
 ## 5. Cac file da tao hoac sua
 
-### Tao moi trong Phase C2
+### Da nam trong release hien tai
 
 - `config/training_parameter_catalog.json`
 - `training_parameter_catalog.py`
 - `tests/test_training_parameter_catalog.py`
-
-### Sua trong Phase C2
-
 - `training_control_plane.py`
 - `templates/colab_manager.html`
 - `notebooks/colab_worker_phase6.py`
@@ -139,40 +176,48 @@ model catalog va unified Fresh/Fine-tune.
 - `tests/test_training_control_plane.py`
 - `tests/test_colab_phase4_contract.py`
 - `tests/test_phase5_ui_contract.py`
-- `docs/current-task.md`
-
-### Phase A/B/C1 files phai giu
-
 - `config/training_model_catalog.json`
 - `training_model_catalog.py`
 - `models.py`
 - `database_support.py`
+- `inference.py`
+- `routes.py`
+- `templates/models_experiment.html`
+- `tests/test_models_experiment.py`
+- `scripts/training_preflight.py`
+- `tests/test_training_preflight.py`
 - `scripts/migrate_phase9_optimizer_contract.py`
 - `tests/test_phase9_migration.py`
+- `templates/colab_manager.html` (non-tech sequential flow)
+- `tests/test_phase5_ui_contract.py`
+- `tests/test_phase7_ui_contract.py`
+- `docs/HUONG_DAN_TEST_YOLO11_12_26_TREN_MAN_HINH.md`
+- `docs/HUONG_DAN_UAT_WSL2_POSTGRESQL.md`
+- `docs/current-task.md`
 
-### Dirty changes ngoai Phase C2 phai giu nguyen
+### Untracked ngoai scope phai giu nguyen
 
-- `docs/colab_fastapi_poc_runbook.md`
-- `inference.py`
-- `routes.py` co catalog va unrelated hunks
-- `static/js/api.js`
-- `static/js/collaboration.js`
-- `static/js/workspace.js`
-- `templates/models_experiment.html`
-- `utils.py`
-- annotation/model-experiment docs/tests/artifacts khac trong `git status`
+- `.claude/`, `.codegraph/`, `AGENTS.md`, `CLAUDE.md`.
+- `context_yolo12_26_upgrade.md`, `final_yolo_patch.patch`.
+- `docs/HUONG_DAN_CHIA_SE_ANH.md`, `docs/PHIM_TAT_GAN_NHAN.md`,
+  `docs/export_datasets_guide.md`.
+- `training_artifacts/`.
 
 ## 6. Trang thai runtime hien tai
 
-Verified sau Phase C2:
+Verified ngay 2026-07-30 sau dot UX non-tech:
 
-- PostgreSQL/Docker listener: `127.0.0.1:54329`, owning PID `1408`.
-- Khong co listener tren port `5000`.
-- Khong co Flask process, `training_scheduler.py`, `run.ps1` runtime hoac Colab
-  worker process.
+- PostgreSQL/Docker listener: `127.0.0.1:54329`, owning PID `4524`
+  (`com.docker.backend`).
+- Flask debug HTTPS dang listen `0.0.0.0:5000`; child PID thay doi khi reloader
+  nhan file change, latest observed listener PID `10180`.
+- `training_scheduler.py` dang chay voi parent/child PIDs `19632` va `22080`.
+- Live API bao `2` worker da dang ky, `0` online, `0` queued task va `0` active
+  task; khong co local Colab worker process duoc xac nhan.
 - Codex khong start/stop/restart Flask, scheduler hoac worker.
 - Khong query hoac thay doi live PostgreSQL schema/Phase 9 migration ledger.
-- Khong co live API/UI/GPU acceptance trong Phase C2.
+- Live HTTPS `/colab-manager` tra `200`; model/parameter/status API read-only
+  deu tra ve binh thuong.
 
 ## 7. Test da chay va ket qua
 
@@ -185,12 +230,14 @@ Command:
   tests\test_training_control_plane.py `
   tests\test_colab_phase4_contract.py `
   tests\test_phase5_ui_contract.py `
+  tests\test_phase7_ui_contract.py `
   tests\test_training_model_catalog.py `
   tests\test_training_parameter_catalog.py `
-  tests\test_phase9_migration.py -q
+  tests\test_phase9_migration.py `
+  tests\test_training_preflight.py -q
 ```
 
-Result: `76 passed, 1 warning`.
+Result: `82 passed, 1 warning`.
 
 Coverage gom:
 
@@ -204,16 +251,38 @@ Coverage gom:
 - generated worker declarations/forward/effective lists;
 - UI schema-driven editor va summary markers;
 - Phase A model catalog va Phase B migration regression.
+- preflight worker/notebook sync, scheduler compatibility va strict readiness;
+- Phase 9 status/dry-run read-only va ledger drift detection.
 
 ### Full suite
 
-Result: `148 passed, 6 skipped, 62 warnings, 8 subtests passed`.
+Result: `153 passed, 6 skipped, 62 warnings, 8 subtests passed`.
+
+Latest focused UI/training regression:
+
+- `82 passed, 1 warning` cho Phase 3/4/5/7 UI contracts, training control
+  plane, model catalog va parameter catalog.
+
+### Preflight va Phase 9 inspection
+
+- `scripts/training_preflight.py` offline:
+  - 3 code checks `PASS`;
+  - database va worker `SKIP` vi khong truyen runtime inputs;
+  - overall `READY`.
+- `scripts/training_preflight.py --strict`:
+  - overall `NOT READY`, exit `1` nhu thiet ke khi runtime checks bi skip.
+- Temporary SQLite CLI validation:
+  - `--status` exit `1` khi thieu effective columns/ledger;
+  - `--dry-run` liet ke 2 column actions + 1 ledger action;
+  - sau inspection `toolib_schema_migrations` van khong ton tai.
+- Khong chay migration that tren SQLite mac dinh hay PostgreSQL live.
 
 ### Static va generated-artifact checks
 
 - Python compile: pass.
 - Notebook JSON: pass, 7 cells.
 - JavaScript syntax: pass, 1 inline script.
+- Duplicate HTML IDs: pass, `147` unique IDs, khong co duplicate.
 - Notebook sync idempotency: pass.
 - Worker SHA-256:
   `32D4A768A8B7E3182D76A3E9CDB0282C59EB47126595CFA82807F9175CCCF5BC`.
@@ -223,26 +292,31 @@ Result: `148 passed, 6 skipped, 62 warnings, 8 subtests passed`.
 
 ### GitNexus
 
-- Index freshness duoc verify truoc edit: ToolIbV2 indexed at commit `93fbb41`,
-  `4860 nodes`, `18358 edges`, `300 processes`, khong bao stale.
-- Pre-edit critical blast radius:
-  - `_normalize_finetune_parameters`: 2 direct callers, 9 processes;
-  - `normalize_finetune_parameter_set_parameters`: 6 direct callers,
-    9 processes.
-- `gitnexus_detect_changes(scope="all")` sau edit:
-  - aggregate risk: `CRITICAL`;
-  - 352 changed symbols;
-  - 83 affected entries;
-  - 18 tracked changed files.
-- Aggregate CRITICAL gom nhieu unrelated inference, annotation,
-  collaboration, dataset export va model-experiment changes. Expected Phase C2
-  flows la preset CRUD/config, Fresh batch, Fine-tune experiment, scheduler
-  dispatch, worker `start_train`, worker `run_training_job`, task sync va
-  checkpoint resume.
+- Index da refresh tai commit `50de664`:
+  `5099 nodes`, `18786 edges`, `300 flows`.
+- Pre-edit impact cho existing symbols bi sua:
+  - `build_parser`: LOW, 1 direct caller (`main`), 1 process;
+  - `main`: LOW, 1 file/entrypoint caller, 0 process.
+- Khong sua training runtime symbol. `apply_phase9_migration()` chi bi dich line
+  do them helper phia tren; implementation apply migration van nguyen ven.
+- `gitnexus_detect_changes(scope="all")` truoc commit code:
+  - aggregate risk: `LOW`;
+  - 0 affected process.
+- Final docs-only detect truoc commit tai lieu:
+  - aggregate risk: `LOW`;
+  - 15 changed Markdown sections trong 1 tracked file;
+  - 0 affected process.
+- Cac file moi khong co trong index cu duoc review bang focused/full tests va
+  static checks; sau commit dau tien, index da duoc refresh de dua chung vao
+  graph.
 
 ## 8. Loi, blocker hoac dieu chua chac chan
 
-- Chua browser-smoke `/colab-manager` vi Flask khong chay.
+- In-app browser connector khong co browser backend (`agent.browsers.list()`
+  tra `[]`), nen chua co screenshot/click-through acceptance desktop/mobile.
+- Live HTTPS source/API smoke da pass, nhung chua thay the visual acceptance:
+  step order, modal, responsive spacing va interaction van can user click tren
+  browser that.
 - Chua co Colab worker contract v3 online de verify Pydantic/runtime behavior
   tren GPU that.
 - Chua co live evidence cho `compile` va `channels_last`; hai option nay phu
@@ -256,43 +330,51 @@ Result: `148 passed, 6 skipped, 62 warnings, 8 subtests passed`.
   danh gia bang contract smoke.
 - Phase A/B/C1 live auto/explicit, YOLO12/YOLO26 va R2 acceptance van pending;
   local Phase C2 tests khong thay the cloud acceptance.
-- Worktree heavily dirty; aggregate GitNexus risk khong the quy rieng cho Phase
-  C2.
+- Chua chay strict preflight voi live PostgreSQL URI/worker URL; schema va
+  migration-ledger state cua PostgreSQL dang chay chua duoc khang dinh.
+- Phase 9 real migration chua duoc apply; chi co status/dry-run tren temporary
+  SQLite.
+- Code, tests va guide cua dot nay da duoc nguoi dung yeu cau commit/push.
 
 ## 9. Cac buoc tiep theo theo dung thu tu
 
-1. Chi khi nguoi dung cho phep, start runtime bang quy trinh hien co; khong tu
-   dong start/restart.
-2. Browser-smoke `/colab-manager`:
+1. Khi nguoi dung cung cap/xac nhan live database URI, chay read-only:
+   `scripts/training_preflight.py --database-uri ...` va
+   `scripts/migrate_phase9_optimizer_contract.py --status`; khong apply.
+2. Giu nguyen Flask va scheduler dang chay; khong restart/stop neu nguoi dung
+   chua yeu cau.
+3. User browser-smoke `/colab-manager` qua `https://127.0.0.1:5000`:
    - mo Add Parameter Set;
    - verify 39 controls render theo 5 catalog groups;
    - verify optimizer auto hide optimizer/lr0;
    - verify explicit show optimizer/lr0;
    - save/reopen mot C2 Parameter Set va doi chieu values.
-3. Mo notebook generated tren Colab va dang ky worker. Health phai co:
+4. Mo notebook generated tren Colab va dang ky worker. Chay strict preflight
+   voi worker URL. Health phai co:
    - `training_parameter_contract_version: 3`;
    - parameter catalog version `phase-c2-training-v1`;
    - parameter catalog hash
      `b201f355fffc6e3dc17ac540e7d22a1db2da9cd8c202e5cc53d9c61394a9f752`;
    - optimizer contract v1, dung model catalog hash va Ultralytics `8.4.110`.
-4. Queue Fresh Auto smoke, de xuat `yolo12s.pt`, `epochs=2`, `batch=4`,
-   `imgsz=512`, `fraction=0.5`, `multi_scale=0.0`, `compile=false`,
+5. Queue Fresh Auto smoke, de xuat `yolo12s.pt`, `epochs=1`, `batch=2`,
+   `imgsz=320`, `fraction=1.0`, `multi_scale=0.0`, `compile=false`,
    `channels_last=false`.
-5. Queue Fine-tune Explicit smoke, de xuat `yolo26s.pt` parent/imported parent,
+6. Queue Fine-tune Explicit smoke, de xuat `yolo26s.pt` parent/imported parent,
    `AdamW + lr0=0.001`, `box=7.5`, `cls=0.5`, `dfl=1.5`, `nbs=64`.
-6. Verify tung task tren UI/API/manifest:
+7. Verify tung task tren UI/API/manifest:
    - requested config co du 39 fields;
    - effective optimizer class va initial LR;
    - `effective_config.training_arguments` co 36 runtime fields, gom 8 C2;
    - retry/resume giu nguyen request payload, snapshot va config hash.
-7. Ghi task IDs, worker IDs, artifact paths va exact live evidence vao file
+8. Ghi task IDs, worker IDs, artifact paths va exact live evidence vao file
    nay.
-8. Sau khi live acceptance pass moi chon phase tiep theo:
+9. Sau khi live acceptance pass moi chon phase tiep theo:
    - AutoBatch/OOM guard;
    - model scales `n/m/l/x`;
    - true random-initialization scratch mode;
    - Colab CLI lifecycle automation.
-9. Chi chay Phase 9 migration ledger khi nguoi dung xac nhan deployment action.
+10. Chi chay Phase 9 migration ledger khi nguoi dung xac nhan deployment
+    action.
 
 ## 10. Nhung viec khong duoc lam lai hoac khong duoc thay doi
 
