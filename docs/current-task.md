@@ -9,7 +9,7 @@ Phase A/C2 va model-experiment work da duoc commit/push qua `f77cb06`,
 
 - `56f9a6b` - training readiness preflight va Phase 9 read-only inspection;
 - `50de664` - UX `/colab-manager` theo mot flow non-tech duy nhat;
-- commit tai lieu cuoi dot gom runbook UAT WSL2/PostgreSQL, guide test man hinh
+- commit tai lieu cuoi dot gom runbook UAT Windows/PostgreSQL, guide test man hinh
   va handoff nay.
 
 Flask va scheduler hien dang chay; Colab worker da dang ky nhung chua online.
@@ -192,7 +192,8 @@ model catalog va unified Fresh/Fine-tune.
 - `tests/test_phase5_ui_contract.py`
 - `tests/test_phase7_ui_contract.py`
 - `docs/HUONG_DAN_TEST_YOLO11_12_26_TREN_MAN_HINH.md`
-- `docs/HUONG_DAN_UAT_WSL2_POSTGRESQL.md`
+- `docs/HUONG_DAN_UAT_WINDOWS_POSTGRESQL.md`
+- `docs/HUONG_DAN_UAT_WSL2_POSTGRESQL.md` (redirect de giu link cu)
 - `docs/current-task.md`
 
 ### Untracked ngoai scope phai giu nguyen
