@@ -1312,27 +1312,38 @@ def export_dataset():
     data = request.get_json(silent=True) or {}
     # Support multiple criteria types
     criteria = {}
-    if 'project_ids' in data:
-        criteria['project_ids'] = data['project_ids']
-    if 'view_id' in data:
-        criteria['view_id'] = data['view_id']
-    if 'image_ids' in data:
-        criteria['image_ids'] = data['image_ids']
+    try:
+        if 'project_ids' in data:
+            criteria['project_ids'] = require_json_int_list(
+                data['project_ids'],
+                'project_ids',
+            )
+        if 'view_id' in data:
+            criteria['view_id'] = require_json_int(data['view_id'], 'view_id')
+        if 'image_ids' in data:
+            criteria['image_ids'] = require_json_int_list(
+                data['image_ids'],
+                'image_ids',
+            )
+        if 'tags' in data:
+            criteria['tags'] = require_json_int_list(data['tags'], 'tags')
 
-    if 'tags' in data:
-        criteria['tags'] = data['tags']
-
-    if 'exclude_flagged' in data:
-        criteria['exclude_flagged'] = data['exclude_flagged']
-
-    if 'has_any_tag' in data:
-        criteria['has_any_tag'] = data['has_any_tag']
-
-    if 'include_untagged' in data:
-        criteria['include_untagged'] = data['include_untagged']
-
-    if 'include_unlabeled' in data:
-        criteria['include_unlabeled'] = bool(data['include_unlabeled'])
+        for field_name in (
+            'exclude_flagged',
+            'has_any_tag',
+            'include_untagged',
+            'include_unlabeled',
+        ):
+            if field_name in data:
+                criteria[field_name] = require_json_bool(
+                    data[field_name],
+                    field_name,
+                )
+    except ValueError as exc:
+        return jsonify({
+            'status': 'error',
+            'message': str(exc),
+        }), 400
 
     if 'tagged_split_assignments' in data:
         criteria['tagged_split_assignments'] = data['tagged_split_assignments']
