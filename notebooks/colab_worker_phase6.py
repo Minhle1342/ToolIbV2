@@ -1500,13 +1500,20 @@ def run_training_job(
         save_dir = Path(str(save_dir_value)).resolve()
         best_pt = save_dir / "weights" / "best.pt"
         last_pt = save_dir / "weights" / "last.pt"
-        if not best_pt.is_file():
+        best_pt_available = best_pt.is_file()
+        selected_checkpoint = best_pt if best_pt_available else last_pt
+        selected_checkpoint_kind = "best" if best_pt_available else "last"
+        if not selected_checkpoint.is_file():
             raise FileNotFoundError(
-                f"Training completed but best.pt was not found: {best_pt}"
+                "Training completed but neither best.pt nor last.pt was found: "
+                f"{best_pt}, {last_pt}"
             )
 
-        update_job(job_id, message="Exporting best.pt to ONNX.")
-        export_model = YOLO(str(best_pt))
+        export_message = f"Exporting {selected_checkpoint.name} to ONNX."
+        if not best_pt_available:
+            export_message += " best.pt was unavailable; using last.pt fallback."
+        update_job(job_id, message=export_message)
+        export_model = YOLO(str(selected_checkpoint))
         export_result = export_model.export(
             format="onnx",
             dynamic=True,
@@ -1517,7 +1524,7 @@ def run_training_job(
         pt_target = artifact_dir / "best.pt"
         last_pt_target = artifact_dir / "last.pt"
         onnx_target = artifact_dir / "best.onnx"
-        shutil.copy2(best_pt, pt_target)
+        shutil.copy2(selected_checkpoint, pt_target)
         if last_pt.is_file():
             shutil.copy2(last_pt, last_pt_target)
         shutil.copy2(exported_onnx, onnx_target)
@@ -1569,6 +1576,8 @@ def run_training_job(
             "effective_config": effective_config,
             "dataset_yaml": dataset_info["runtime_yaml"],
             "training_save_dir": str(save_dir),
+            "selected_checkpoint_kind": selected_checkpoint_kind,
+            "best_pt_available": best_pt_available,
             "metrics": metrics,
             "artifacts": artifacts,
             "finished_at": utc_now(),

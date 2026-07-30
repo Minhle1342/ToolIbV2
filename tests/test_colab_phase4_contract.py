@@ -182,6 +182,25 @@ def test_notebook_exposes_phase7_checkpoint_upload_and_resume_contract():
     assert '"resume_checkpoint"' in public_request_source
 
 
+def test_notebook_falls_back_to_last_checkpoint_when_best_is_missing():
+    source = notebook_source()
+    worker = WORKER_PATH.read_text(encoding='utf-8')
+
+    for generated_source in (worker, source):
+        for expected in (
+            'best_pt_available = best_pt.is_file()',
+            'selected_checkpoint = best_pt if best_pt_available else last_pt',
+            'selected_checkpoint_kind = "best" if best_pt_available else "last"',
+            'if not selected_checkpoint.is_file():',
+            'export_model = YOLO(str(selected_checkpoint))',
+            'shutil.copy2(selected_checkpoint, pt_target)',
+            '"selected_checkpoint_kind": selected_checkpoint_kind',
+            '"best_pt_available": best_pt_available',
+        ):
+            assert expected in generated_source
+        assert 'if not best_pt.is_file():' not in generated_source
+
+
 def test_notebook_exposes_phase8_direct_object_transport_contract():
     source = notebook_source()
 
