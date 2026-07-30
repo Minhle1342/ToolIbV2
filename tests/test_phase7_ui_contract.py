@@ -16,6 +16,6 @@ def test_colab_manager_displays_checkpoint_and_resume_state():
         'resume ${task.resume_count}/${task.max_resume_count}',
         'latestAttempt.attempt_kind || "initial"',
         'latestAttempt.resumed_from_epoch',
-        '"Await failover"',
+        '"Chờ kết nối lại"',
     ):
         assert expected in source

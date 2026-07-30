@@ -3,22 +3,22 @@
 <div class="h-full flex flex-col flex-1 bg-surface text-content overflow-hidden min-h-0" id="colabManagerApp">
 
     <!-- HEADER / CRUD BAR -->
-    <header class="h-16 bg-panel border-b border-border px-6 flex items-center justify-between shrink-0">
+    <header class="min-h-16 bg-panel border-b border-border px-4 md:px-6 py-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0">
         <div class="flex items-center gap-3">
             <div class="p-2 bg-gradient-to-tr from-amber-500 to-orange-600 rounded-lg text-white font-bold shadow-lg">
                 <i class="fa-solid fa-code"></i>
             </div>
             <div>
                 <h1 class="font-bold text-base text-content flex items-center gap-2">
-                    YOLO Training Control Plane
-                    <span id="trainingModelCatalogSummary" class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">Đang tải catalog...</span>
+                    Huấn luyện mô hình YOLO
+                    <span id="trainingModelCatalogSummary" class="text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-normal">Đang tải danh sách model...</span>
                 </h1>
-                <p class="text-xs text-content-muted">Fresh training, fine-tune, parameter presets và multi-worker Colab</p>
+                <p class="text-xs text-content-muted">Chọn mô hình → chọn dữ liệu → chọn cách huấn luyện → kiểm tra → bắt đầu</p>
             </div>
         </div>
 
         <!-- Template Selector & Action Controls -->
-        <div class="flex items-center gap-3">
+        <div class="hidden items-center gap-3" aria-hidden="true">
             <button id="legacyGeneratorToggleBtn" type="button" onclick="toggleLegacyCodeGenerator()" class="bg-surface hover:bg-panel text-content-muted border border-border text-xs px-3 py-2 rounded-lg font-medium transition">
                 <i class="fa-solid fa-flask mr-1"></i> Legacy generator
             </button>
@@ -54,63 +54,87 @@
         <div id="trainingControlsColumn" class="w-full bg-surface/50 flex flex-col h-full min-h-0">
             <div class="p-3 bg-panel border-b border-border flex items-center justify-between shrink-0">
                 <span class="text-xs font-semibold text-content uppercase tracking-wider flex items-center gap-2">
-                    <i class="fa-solid fa-sliders text-amber-400"></i> Bảng Tinh Chỉnh Thông Số
+                    <i class="fa-solid fa-route text-amber-400"></i> Quy trình huấn luyện
                 </span>
-                <span id="paramCountBadge" class="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-medium">
-                    ⚡ Mã Colab bên phải có ghi chú # tác dụng từng thông số
+                <span id="paramCountBadge" class="text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-medium">
+                    5 bước · cấu hình nâng cao được ẩn mặc định
                 </span>
             </div>
 
             <!-- Scrollable Control Form -->
-            <div class="flex-1 overflow-y-auto p-4 space-y-6">
+            <div class="flex-1 overflow-y-auto p-3 md:p-5 space-y-5">
+
+                <div id="nonTechnicalTrainingFlow" class="grid grid-cols-2 sm:grid-cols-5 gap-2" aria-label="Các bước huấn luyện">
+                    <div class="rounded-lg border border-amber-700/50 bg-amber-950/20 px-3 py-2 text-xs"><strong class="text-amber-300">1</strong> · Chọn mô hình</div>
+                    <div class="rounded-lg border border-violet-700/50 bg-violet-950/20 px-3 py-2 text-xs"><strong class="text-violet-300">2</strong> · Chọn dữ liệu</div>
+                    <div class="rounded-lg border border-cyan-700/50 bg-cyan-950/20 px-3 py-2 text-xs"><strong class="text-cyan-300">3</strong> · Chọn cách huấn luyện</div>
+                    <div class="rounded-lg border border-emerald-700/50 bg-emerald-950/20 px-3 py-2 text-xs"><strong class="text-emerald-300">4</strong> · Kiểm tra & bắt đầu</div>
+                    <div class="rounded-lg border border-sky-700/50 bg-sky-950/20 px-3 py-2 text-xs"><strong class="text-sky-300">5</strong> · Theo dõi kết quả</div>
+                </div>
+
+                <div id="trainingResourceBanner" class="rounded-xl border border-amber-700/60 bg-amber-950/20 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="flex items-start gap-3">
+                        <div class="mt-0.5 rounded-lg bg-amber-500/15 p-2 text-amber-300">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                        </div>
+                        <div>
+                            <div class="text-xs font-semibold text-content">Tài nguyên huấn luyện</div>
+                            <div id="trainingResourceStatus" class="text-sm font-semibold text-amber-300">Đang kiểm tra máy Colab...</div>
+                            <div id="trainingResourceHelp" class="text-xs text-content-muted mt-0.5">Cần ít nhất một máy Colab online để bắt đầu xử lý hàng đợi.</div>
+                        </div>
+                    </div>
+                    <button id="trainingResourceSetupBtn" type="button" onclick="openTrainingWorkerSetup()" class="shrink-0 rounded-lg border border-amber-600 bg-amber-700/30 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-700/50">
+                        <i class="fa-solid fa-plus mr-1"></i>Đăng ký Colab
+                    </button>
+                </div>
                 
                 <!-- SECTION 1: SUPPORTED REMOTE TRAINING MODELS -->
-                <div class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
+                <div id="trainingModelStep" class="bg-panel border border-border rounded-xl p-4 space-y-4 shadow-sm">
                     <h3 class="text-sm font-semibold text-amber-400 flex items-center justify-between border-b border-border pb-2">
-                        <span class="flex items-center gap-2"><i class="fa-solid fa-layer-group"></i> Model detection được hỗ trợ</span>
-                        <span class="text-xs font-mono text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-800/60" id="yolo_badge">Ultralytics 8.4.110</span>
+                        <span class="flex items-center gap-2"><i class="fa-solid fa-cube"></i> 1. Chọn mô hình</span>
+                        <span class="hidden" id="yolo_badge">Ultralytics 8.4.110</span>
                     </h3>
                     
-                    <div class="grid grid-cols-2 gap-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <!-- Dropdown 1: Họ Phiên Bản YOLO (17 Versions) -->
                         <div>
                             <label class="text-xs text-content font-semibold mb-1.5 flex items-center justify-between">
                                 <span class="flex items-center gap-1.5">
-                                    <span>Họ model</span>
-                                    <span class="group relative inline-flex items-center cursor-help text-amber-400 hover:text-amber-300 transition-colors" title="Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.">
+                                    <span>Phiên bản YOLO</span>
+                                    <span class="group relative inline-flex items-center cursor-help text-amber-400 hover:text-amber-300 transition-colors" title="Chọn phiên bản YOLO muốn huấn luyện.">
                                         <i class="fa-solid fa-circle-question text-xs"></i>
                                         <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-72 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
-                                            Chọn họ kiến trúc YOLO (YOLOv1 -> YOLO26). Định hình cấu trúc mô hình, cơ chế NMS, tốc độ suy luận và độ chính xác mAP.
+                                            YOLO11 là baseline ổn định; YOLO12 và YOLO26 dùng để so sánh các thế hệ mới hơn.
                                         </span>
                                     </span>
                                 </span>
-                                <span class="text-[10px] text-content-muted font-normal">Catalog worker hiện tại</span>
+                                <span class="text-[11px] text-content-muted font-normal">Chọn một phiên bản</span>
                             </label>
                             <select id="yolo_family" onchange="onYoloFamilyChange()" class="w-full bg-surface border border-amber-500/40 text-sm rounded-lg p-2.5 text-amber-400 font-medium focus:border-amber-400 focus:outline-none">
-                                <option value="">Đang tải catalog...</option>
+                                <option value="">Đang tải danh sách...</option>
                             </select>
                         </div>
 
                         <!-- Dropdown 2: Scale from the backend catalog -->
                         <div>
                             <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
-                                <span>Scale</span>
-                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.">
+                                <span>Kích thước model</span>
+                                <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Hiện hệ thống dùng bản Small để cân bằng tốc độ, VRAM và độ chính xác.">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
                                     <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
-                                        Kích thước trọng số (Nano, Small, Medium, Large, XLarge). Trọng số nhỏ chạy nhanh tốn ít VRAM, trọng số lớn mAP cao hơn nhưng train lâu.
+                                        Bản Small phù hợp cho phần lớn lần huấn luyện và smoke test hiện tại.
                                     </span>
                                 </span>
                             </label>
                             <select id="model_version" onchange="renderCode('model_version')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
-                                <option value="">Đang tải catalog...</option>
+                                <option value="">Đang tải danh sách...</option>
                             </select>
                         </div>
 
                         <!-- Task Type -->
                         <div>
                             <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
-                                <span>Task Bài Toán</span>
+                                <span>Loại nhận diện</span>
                                 <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Loại bài toán: Object Detection (nhận diện vật thể), Instance Segmentation (phân vùng pixel), Image Classification (phân loại), Pose Estimation (tư thế).">
                                     <i class="fa-solid fa-circle-question text-xs"></i>
                                     <span class="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden w-64 rounded-lg bg-panel border border-border p-2.5 text-[11px] font-normal leading-relaxed text-content shadow-2xl group-hover:block z-50">
@@ -120,12 +144,12 @@
                             </label>
                             <input id="task_type" type="hidden" value="detect">
                             <div class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content">
-                                Object Detection
+                                Nhận diện vật thể (Object Detection)
                             </div>
                         </div>
 
-                        <!-- Epochs & Batch -->
-                        <div>
+                        <!-- Legacy generator-only values; hidden from the primary training flow. -->
+                        <div class="hidden" aria-hidden="true">
                             <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Số Epochs Huấn Luyện</span>
                                 <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Số lần toàn bộ tập ảnh train đi qua mô hình. Quá ít gây Underfitting, quá nhiều gây Overfitting.">
@@ -137,7 +161,7 @@
                             </label>
                             <input type="number" id="epochs" value="100" min="1" max="1000" oninput="renderCode('epochs')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
                         </div>
-                        <div>
+                        <div class="hidden" aria-hidden="true">
                             <label class="text-xs text-content-muted font-medium flex items-center gap-1.5 mb-1">
                                 <span>Batch Size</span>
                                 <span class="group relative inline-flex items-center cursor-help text-content-muted hover:text-amber-400 transition-colors" title="Số lượng ảnh xử lý cùng lúc trong 1 bước cập nhật gradient. Batch lớn giúp gradient ổn định nhưng đòi hỏi VRAM GPU cao.">
@@ -153,7 +177,7 @@
                 </div>
 
                 <!-- PHASE 2: TEMPORARY REMOTE COLAB API -->
-                <details id="legacyRemoteColabPanel" class="bg-panel border border-sky-500/40 rounded-xl p-4 shadow-sm">
+                <details id="legacyRemoteColabPanel" class="hidden bg-panel border border-sky-500/40 rounded-xl p-4 shadow-sm">
                     <summary class="text-sm font-semibold text-sky-400 flex items-center justify-between cursor-pointer">
                         <span class="flex items-center gap-2">
                             <i class="fa-solid fa-satellite-dish"></i>
@@ -265,163 +289,126 @@
                     </div>
                 </details>
 
-                <!-- PHASE 5: PRODUCTION TRAINING CONTROL PLANE -->
+                <!-- PRIMARY TRAINING FLOW -->
                 <div class="bg-panel border border-emerald-500/40 rounded-xl p-4 space-y-4 shadow-sm">
                     <div class="flex items-center justify-between gap-3 border-b border-border pb-2">
                         <h3 class="text-sm font-semibold text-emerald-400 flex items-center gap-2">
-                            <i class="fa-solid fa-diagram-project"></i>
-                            Phase 5 · Multi-worker Training Control Plane
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            Huấn luyện tự động
                         </h3>
-                        <button type="button" onclick="loadTrainingControlPlane()" class="text-[10px] text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
-                            <i class="fa-solid fa-rotate mr-1"></i> Refresh
+                        <button type="button" onclick="loadTrainingControlPlane()" class="text-xs text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
+                            <i class="fa-solid fa-rotate mr-1"></i> Cập nhật
                         </button>
                     </div>
 
-                    <p class="text-[11px] text-content-muted leading-relaxed">
-                        ToolIbV2 giữ queue, lease, retry và artifacts. Colab chỉ là worker GPU có thể thay thế.
-                        Token worker được mã hóa trong local control plane và không được trả lại qua API.
+                    <p class="text-xs text-content-muted leading-relaxed">
+                        Làm lần lượt các bước bên dưới. ToolIb sẽ tự tạo dữ liệu, xếp hàng và giao việc cho máy Colab phù hợp.
                     </p>
 
-                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
-                        <div class="flex items-center justify-between gap-2">
-                            <h4 class="text-xs font-semibold text-content">
-                                <i class="fa-solid fa-server text-emerald-400 mr-1"></i>
-                                Worker registry
-                            </h4>
-                            <span id="trainingWorkerSummary" class="text-[10px] text-content-muted">0 worker</span>
-                        </div>
-                        <div class="grid grid-cols-1 gap-2">
-                            <label class="text-[10px] text-content-muted">
-                                Quick Tunnel API URL
-                                <input
-                                    type="url"
-                                    id="colabRemoteEndpoint"
-                                    placeholder="https://example.trycloudflare.com"
-                                    autocomplete="url"
-                                    spellcheck="false"
-                                    class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
-                                >
-                            </label>
-                            <label class="text-[10px] text-content-muted">
-                                Worker bearer token
-                                <input
-                                    type="password"
-                                    id="colabRemoteToken"
-                                    placeholder="TOOLIB_COLAB_API_TOKEN"
-                                    autocomplete="off"
-                                    spellcheck="false"
-                                    class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
-                                >
-                            </label>
-                        </div>
-                        <div class="grid grid-cols-[1fr_auto] gap-2">
-                            <input id="trainingWorkerName" type="text" placeholder="Ví dụ: Colab T4 account A" class="bg-panel border border-border rounded p-2 text-xs text-content focus:border-emerald-500 focus:outline-none">
-                            <button id="trainingWorkerRegisterBtn" type="button" onclick="registerCurrentColabWorker()" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
-                                <i class="fa-solid fa-plus mr-1"></i> Đăng ký API hiện tại
-                            </button>
-                        </div>
-                        <div class="text-[10px] text-content-muted">
-                            Nhập URL/token của từng Colab runtime, đăng ký rồi Probe worker.
-                        </div>
-                        <div id="trainingWorkerEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
-                            Chưa có worker.
-                        </div>
-                        <div id="trainingWorkerList" class="space-y-2"></div>
-                    </div>
-
-                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                    <div id="trainingDatasetStep" class="bg-surface border border-border rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-content">
                                 <i class="fa-solid fa-layer-group text-violet-400 mr-1"></i>
-                                1. Dataset và queue
+                                2. Chọn dữ liệu
                             </h4>
-                            <span class="text-[10px] text-content-muted">Ctrl/Shift để chọn nhiều project</span>
+                            <span class="text-xs text-content-muted">Có thể chọn một hoặc nhiều dự án</span>
                         </div>
-                        <input id="trainingBatchName" type="text" placeholder="Tên batch, ví dụ: vial-models-july" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-violet-500 focus:outline-none">
+                        <label class="block text-xs text-content-muted">
+                            Tên lần huấn luyện
+                            <input id="trainingBatchName" type="text" placeholder="Ví dụ: Nhận diện chai - tháng 7" class="mt-1 w-full bg-panel border border-border rounded p-2 text-sm text-content focus:border-violet-500 focus:outline-none">
+                        </label>
+                        <label class="block text-xs text-content-muted">
+                            Dự án chứa ảnh đã gán nhãn
                         <select id="trainingBatchProjects" multiple size="5" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-violet-500 focus:outline-none">
                             <option disabled>Đang tải projects...</option>
                         </select>
-                        <div class="grid grid-cols-3 gap-2">
-                            <label class="text-[10px] text-content-muted">
-                                Train %
+                        </label>
+                        <details class="border border-border rounded p-2">
+                            <summary class="text-xs text-content-muted cursor-pointer">Tùy chọn dữ liệu và chạy lại</summary>
+                            <div class="mt-3 space-y-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <label class="text-xs text-content-muted">
+                                Dữ liệu dùng để học (%)
                                 <input id="colabDatasetTrainSplit" type="number" value="80" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
-                            <label class="text-[10px] text-content-muted">
-                                Val %
+                            <label class="text-xs text-content-muted">
+                                Dữ liệu kiểm tra trong lúc học (%)
                                 <input id="colabDatasetValSplit" type="number" value="20" min="1" max="99" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
-                            <label class="text-[10px] text-content-muted">
-                                Test %
+                            <label class="text-xs text-content-muted">
+                                Dữ liệu đánh giá cuối (%)
                                 <input id="colabDatasetTestSplit" type="number" value="0" min="0" max="98" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
                         </div>
-                        <div class="flex flex-wrap gap-3 text-[10px] text-content-muted">
+                        <div class="flex flex-wrap gap-3 text-xs text-content-muted">
                             <label class="flex items-center gap-1.5">
                                 <input id="colabDatasetExcludeFlagged" type="checkbox" checked>
-                                Loại ảnh flagged
+                                Bỏ qua ảnh đã đánh dấu cần xem lại
                             </label>
                             <label class="flex items-center gap-1.5">
                                 <input id="colabDatasetIncludeUnlabeled" type="checkbox">
-                                Gồm ảnh background chưa label
+                                Dùng cả ảnh nền chưa gán nhãn
                             </label>
                         </div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <label class="text-[10px] text-content-muted">
-                                Max attempts
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <label class="text-xs text-content-muted">
+                                Số lần thử tối đa
                                 <input id="trainingBatchMaxAttempts" type="number" value="3" min="1" max="10" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
-                            <label class="text-[10px] text-content-muted">
-                                Priority
+                            <label class="text-xs text-content-muted">
+                                Độ ưu tiên
                                 <input id="trainingBatchPriority" type="number" value="0" min="-100" max="100" class="mt-1 w-full bg-panel border border-border rounded p-1.5 text-content">
                             </label>
                         </div>
+                            </div>
+                        </details>
                     </div>
 
                     <div id="finetunePhase6Panel" class="bg-surface border border-cyan-500/40 rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-cyan-300">
                                 <i class="fa-solid fa-code-branch mr-1"></i>
-                                2. Training recipe
+                                3. Chọn cách huấn luyện
                             </h4>
-                            <span id="finetuneFeatureStatus" class="text-[10px] text-amber-300">Đang tải...</span>
+                            <span id="finetuneFeatureStatus" class="text-xs text-amber-300">Đang kiểm tra...</span>
                         </div>
-                        <p class="text-[10px] text-content-muted leading-relaxed">
-                            Cùng một thư viện bộ tham số dùng cho fresh training và fine-tune.
+                        <p class="text-xs text-content-muted leading-relaxed">
+                            Chọn mục tiêu huấn luyện và một cấu hình có sẵn. Chỉ mở “Thông số nâng cao” khi thật sự cần tùy chỉnh.
                         </p>
 
-                        <label class="block text-[10px] text-content-muted">
-                            Training mode
+                        <label class="block text-xs text-content-muted">
+                            Bạn muốn làm gì?
                             <select id="trainingExperimentMode" onchange="updateUnifiedTrainingMode()" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
-                                <option value="fresh" selected>Fresh - bắt đầu từ official pretrained checkpoint</option>
-                                <option value="finetune">Fine-tune - tiếp tục từ parent .pt</option>
+                                <option value="fresh" selected>Tạo model mới từ model YOLO chuẩn</option>
+                                <option value="finetune">Tiếp tục cải thiện model .pt hiện có</option>
                             </select>
                         </label>
-                        <div id="trainingFreshModelSummary" class="text-[10px] text-amber-200 border border-amber-900/70 rounded p-2">
-                            Fresh model lấy từ Family và Scale trong catalog backend ở đầu trang.
+                        <div id="trainingFreshModelSummary" class="text-xs text-amber-200 border border-amber-900/70 rounded p-2">
+                            Model được chọn ở Bước 1 sẽ là điểm bắt đầu.
                         </div>
 
                         <div id="finetuneOnlyFields" class="hidden space-y-2">
                         <div class="border border-border rounded p-2 space-y-2">
-                            <strong class="text-[10px] text-content">1. Import parent checkpoint</strong>
-                            <input id="finetuneParentName" type="text" placeholder="Ví dụ: V14.7 external" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
+                            <strong class="text-xs text-content">Tải model .pt hiện có</strong>
+                            <input id="finetuneParentName" type="text" placeholder="Ví dụ: Model chai phiên bản 14" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
                             <input id="finetuneParentFile" type="file" accept=".pt" class="w-full bg-panel border border-border rounded p-2 text-[10px] text-content">
                             <button id="finetuneParentUploadBtn" type="button" onclick="uploadFinetuneParentModel()" class="w-full bg-cyan-800 hover:bg-cyan-700 text-white rounded px-3 py-2 text-xs font-medium">
                                 <i class="fa-solid fa-shield-halved mr-1"></i>
-                                Upload và xác thực bằng worker
+                                Tải lên và kiểm tra
                             </button>
                             <div id="finetuneParentUploadStatus" class="text-[10px] text-content-muted"></div>
                         </div>
 
                         <div class="border border-border rounded p-2 space-y-2">
-                            <strong class="text-[10px] text-content">Parent model</strong>
-                            <label class="block text-[10px] text-content-muted">
-                                Parent model
+                            <strong class="text-xs text-content">Model dùng làm điểm bắt đầu</strong>
+                            <label class="block text-xs text-content-muted">
+                                Chọn model đã kiểm tra
                                 <select id="finetuneParentModel" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
                                     <option value="">Chưa có parent model hợp lệ</option>
                                 </select>
                             </label>
                             <button id="finetuneParentValidateBtn" type="button" onclick="validateSelectedFinetuneParent()" class="w-full text-cyan-300 border border-cyan-800 rounded px-3 py-1.5 text-[10px] hover:bg-cyan-950/40">
-                                Xác thực lại parent đang chọn
+                                Kiểm tra lại model đã chọn
                             </button>
                         </div>
                         </div>
@@ -430,26 +417,39 @@
                             <div class="border border-cyan-900/70 rounded p-2 space-y-2">
                                 <div class="flex items-center justify-between gap-2">
                                     <div>
-                                        <strong class="text-[10px] text-content">Training parameter library</strong>
-                                        <div id="finetuneParameterSetSelectionSummary" class="text-[10px] text-cyan-300">
+                                        <strong class="text-xs text-content">Chọn cấu hình huấn luyện</strong>
+                                        <div class="text-[11px] text-content-muted">Mỗi cấu hình tạo một kết quả để so sánh.</div>
+                                        <div id="finetuneParameterSetSelectionSummary" class="text-xs text-cyan-300">
                                             Đang tải...
                                         </div>
                                     </div>
-                                    <button id="finetuneParameterSetAddBtn" type="button" onclick="openFinetuneParameterSetEditor()" class="text-[10px] text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
-                                        <i class="fa-solid fa-plus mr-1"></i>Thêm bộ tham số
+                                    <button id="finetuneParameterSetAddBtn" type="button" onclick="openFinetuneParameterSetEditor()" class="text-xs text-emerald-300 border border-emerald-800 rounded px-2 py-1 hover:bg-emerald-950/40">
+                                        <i class="fa-solid fa-plus mr-1"></i>Tạo cấu hình riêng
                                     </button>
                                 </div>
                                 <div id="finetuneParameterSetList" class="space-y-2"></div>
                                 <details id="finetuneArchivedParameterSetSection" class="hidden border-t border-border pt-2">
-                                    <summary class="text-[10px] text-content-muted cursor-pointer">
-                                        Bộ tham số đã lưu trữ
+                                    <summary class="text-xs text-content-muted cursor-pointer">
+                                        Cấu hình đã lưu trữ
                                     </summary>
                                     <div id="finetuneArchivedParameterSetList" class="space-y-2 mt-2"></div>
                                 </details>
                             </div>
-                            <button id="trainingBatchCreateBtn" type="button" onclick="createUnifiedTrainingExperiment()" class="w-full bg-emerald-700 hover:bg-emerald-600 disabled:opacity-60 disabled:cursor-wait text-white rounded px-3 py-2 text-xs font-medium">
+                            <div id="trainingReviewCard" class="rounded-lg border border-emerald-800/70 bg-emerald-950/20 p-3 space-y-3">
+                                <h4 class="text-sm font-semibold text-emerald-300">
+                                    <i class="fa-solid fa-clipboard-check mr-1"></i>4. Kiểm tra trước khi bắt đầu
+                                </h4>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+                                    <div class="rounded border border-border p-2"><span class="text-content-muted">Dữ liệu</span><strong id="trainingReviewProjects" class="block mt-1 text-content">Chưa chọn</strong></div>
+                                    <div class="rounded border border-border p-2"><span class="text-content-muted">Model</span><strong id="trainingReviewModel" class="block mt-1 text-content">Đang tải</strong></div>
+                                    <div class="rounded border border-border p-2"><span class="text-content-muted">Cấu hình</span><strong id="trainingReviewRecipes" class="block mt-1 text-content">Chưa chọn</strong></div>
+                                    <div class="rounded border border-border p-2"><span class="text-content-muted">Số lượt chạy</span><strong id="trainingReviewJobs" class="block mt-1 text-content">0</strong></div>
+                                </div>
+                                <div id="trainingReviewReadiness" class="text-xs text-amber-300" role="status" aria-live="polite">Đang kiểm tra lựa chọn...</div>
+                            </div>
+                            <button id="trainingBatchCreateBtn" type="button" onclick="createUnifiedTrainingExperiment()" class="w-full bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-wait text-white rounded-lg px-4 py-3 text-sm font-semibold shadow-sm">
                                 <i class="fa-solid fa-play mr-1"></i>
-                                Queue training jobs
+                                Bắt đầu huấn luyện
                             </button>
                             <div id="finetuneExperimentSubmitStatus" class="hidden rounded border border-sky-800 bg-sky-950/30 px-3 py-2 text-[10px] text-sky-200" role="status" aria-live="polite"></div>
                         </div>
@@ -458,7 +458,7 @@
                             <div class="max-w-2xl mx-auto bg-panel border border-cyan-700 rounded-xl p-4 space-y-3 shadow-2xl">
                                 <div class="flex items-center justify-between">
                                     <h4 id="finetuneParameterSetModalTitle" class="text-sm font-semibold text-cyan-300">
-                                        Thêm bộ tham số
+                                        Thêm cấu hình
                                     </h4>
                                     <button type="button" onclick="closeFinetuneParameterSetEditor()" class="text-content-muted hover:text-white">
                                         <i class="fa-solid fa-xmark"></i>
@@ -466,7 +466,7 @@
                                 </div>
                                 <input id="finetuneParameterSetEditorId" type="hidden">
                                 <label class="block text-[10px] text-content-muted">
-                                    Tên bộ tham số
+                                    Tên cấu hình
                                     <input id="finetuneParameterSetName" type="text" maxlength="120" class="mt-1 w-full bg-surface border border-border rounded p-2 text-xs text-content">
                                 </label>
                                 <label class="block text-[10px] text-content-muted">
@@ -480,42 +480,102 @@
                                 </details>
                                 <div class="flex justify-end gap-2">
                                     <button type="button" onclick="closeFinetuneParameterSetEditor()" class="text-xs text-content-muted border border-border rounded px-3 py-2">Hủy</button>
-                                    <button id="finetuneParameterSetSaveBtn" type="button" onclick="saveFinetuneParameterSet()" class="text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2">Lưu bộ tham số</button>
+                                    <button id="finetuneParameterSetSaveBtn" type="button" onclick="saveFinetuneParameterSet()" class="text-xs bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2">Lưu cấu hình</button>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="bg-surface border border-border rounded-lg p-3 space-y-3">
+                    <div id="trainingProgressStep" class="bg-surface border border-border rounded-lg p-3 space-y-3">
                         <div class="flex items-center justify-between gap-2">
                             <h4 class="text-xs font-semibold text-content">
                                 <i class="fa-solid fa-gauge-high text-sky-400 mr-1"></i>
-                                Scheduler & batches
+                                5. Theo dõi kết quả
                             </h4>
-                            <button id="trainingDispatchBtn" type="button" onclick="dispatchTrainingControlPlane()" class="text-[10px] text-sky-300 border border-sky-800 rounded px-2 py-1 hover:bg-sky-950/40">
-                                Dispatch now
+                            <button id="trainingDispatchBtn" type="button" onclick="dispatchTrainingControlPlane()" class="hidden text-xs text-sky-300 border border-sky-800 rounded px-2 py-1 hover:bg-sky-950/40">
+                                Phân công ngay
                             </button>
                         </div>
-                        <div id="trainingControlPlaneStatus" class="grid grid-cols-4 gap-2 text-[10px]">
-                            <div class="border border-border rounded p-2"><span class="text-content-muted">Workers:</span> <strong id="trainingStatusWorkers">0/0</strong></div>
-                            <div class="border border-border rounded p-2"><span class="text-content-muted">Queued:</span> <strong id="trainingStatusQueued">0</strong></div>
-                            <div class="border border-border rounded p-2"><span class="text-content-muted">Active:</span> <strong id="trainingStatusActive">0</strong></div>
-                            <div class="border border-border rounded p-2"><span class="text-content-muted">Object store:</span> <strong id="trainingStatusObjectStore">disabled</strong></div>
+                        <div id="trainingControlPlaneStatus" class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Máy sẵn sàng:</span> <strong id="trainingStatusWorkers">0/0</strong></div>
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Đang chờ:</span> <strong id="trainingStatusQueued">0</strong></div>
+                            <div class="border border-border rounded p-2"><span class="text-content-muted">Đang chạy:</span> <strong id="trainingStatusActive">0</strong></div>
+                            <div class="hidden"><span>Object store:</span> <strong id="trainingStatusObjectStore">disabled</strong></div>
                         </div>
-                        <div id="trainingBatchEmpty" class="text-[11px] text-content-muted italic border border-border rounded p-3">
-                            Chưa có automated batch.
+                        <div id="trainingBatchEmpty" class="text-xs text-content-muted italic border border-border rounded p-3">
+                            Chưa có lần huấn luyện nào.
                         </div>
                         <div id="trainingBatchList" class="space-y-2"></div>
                     </div>
+
+                    <details id="trainingWorkerSetupPanel" class="bg-surface border border-border rounded-lg p-3">
+                        <summary class="flex items-center justify-between gap-2 cursor-pointer list-none">
+                            <h4 class="text-xs font-semibold text-content">
+                                <i class="fa-solid fa-server text-emerald-400 mr-1"></i>
+                                Thiết lập máy huấn luyện <span class="font-normal text-content-muted">(dành cho quản trị)</span>
+                            </h4>
+                            <span id="trainingWorkerSummary" class="text-xs text-content-muted">0 máy</span>
+                        </summary>
+                        <div class="mt-3 space-y-3">
+                            <div class="grid grid-cols-1 gap-2">
+                                <label class="text-xs text-content-muted">
+                                    Địa chỉ kết nối Colab
+                                    <input
+                                        type="url"
+                                        id="colabRemoteEndpoint"
+                                        placeholder="https://example.trycloudflare.com"
+                                        autocomplete="url"
+                                        spellcheck="false"
+                                        class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
+                                    >
+                                </label>
+                                <label class="text-xs text-content-muted">
+                                    Mã bảo mật của Colab
+                                    <input
+                                        type="password"
+                                        id="colabRemoteToken"
+                                        placeholder="TOOLIB_COLAB_API_TOKEN"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                        class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content font-mono focus:border-emerald-500 focus:outline-none"
+                                    >
+                                </label>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                                <input id="trainingWorkerName" type="text" placeholder="Ví dụ: Máy Colab T4 - tài khoản A" class="bg-panel border border-border rounded p-2 text-xs text-content focus:border-emerald-500 focus:outline-none">
+                                <button id="trainingWorkerRegisterBtn" type="button" onclick="registerCurrentColabWorker()" class="bg-emerald-700 hover:bg-emerald-600 text-white rounded px-3 py-2 text-xs font-medium">
+                                    <i class="fa-solid fa-plus mr-1"></i> Thêm máy
+                                </button>
+                            </div>
+                            <div class="text-xs text-content-muted">
+                                Mỗi Colab là một máy huấn luyện. Sau khi thêm, bấm “Kiểm tra kết nối”.
+                            </div>
+                            <div id="trainingWorkerEmpty" class="text-xs text-content-muted italic border border-border rounded p-3">
+                                Chưa có máy huấn luyện nào.
+                            </div>
+                            <div id="trainingWorkerList" class="space-y-2"></div>
+                        </div>
+                    </details>
                 </div>
 
                 <details id="legacyNotebookGeneratorSettings" class="bg-panel border border-amber-700/60 rounded-xl p-4 shadow-sm">
                     <summary class="text-sm font-semibold text-content-muted cursor-pointer flex items-center gap-2">
                         <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
-                        Legacy code generator - does not control scheduler training
+                        Công cụ cũ dành cho kỹ thuật
                     </summary>
-                    <div class="mt-3 rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-[11px] text-amber-200">
-                        Letterbox, HSV, flip and Albumentations controls below only generate manual sample code. Fresh and Fine-tune jobs use the Parameter Sets above.
+                    <div class="mt-3 rounded border border-amber-700/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+                        Các công cụ này chỉ phục vụ kiểm tra tương thích cũ và không điều khiển flow huấn luyện chính phía trên.
+                    </div>
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button type="button" onclick="toggleLegacyCodeGenerator()" class="text-xs text-amber-200 border border-amber-700 rounded px-3 py-2 hover:bg-amber-950/40">
+                            Mở trình tạo mã Colab cũ
+                        </button>
+                        <button type="button" onclick="toggleLegacyDirectTraining()" class="text-xs text-sky-200 border border-sky-700 rounded px-3 py-2 hover:bg-sky-950/40">
+                            Hiện direct smoke test cũ
+                        </button>
+                        <button type="button" onclick="dispatchTrainingControlPlane()" class="text-xs text-content-muted border border-border rounded px-3 py-2 hover:bg-surface">
+                            Phân công hàng đợi ngay
+                        </button>
                     </div>
                     <div class="mt-4 space-y-6">
 
@@ -1118,6 +1178,61 @@
         let trainingControlPlaneRefreshTimer = null;
         let trainingControlPlaneLoading = false;
 
+        const FRIENDLY_PARAMETER_SETS = {
+            "fresh-baseline": {
+                name: "Cân bằng cho model mới",
+                description: "Cấu hình mặc định để huấn luyện toàn bộ model từ checkpoint YOLO chính thức."
+            },
+            "baseline": {
+                name: "Cân bằng",
+                description: "Điểm bắt đầu an toàn khi tiếp tục cải thiện một model đã tin cậy."
+            },
+            "conservative-lr": {
+                name: "Giữ kiến thức model cũ",
+                description: "Thay đổi nhẹ hơn để hạn chế làm mất kiến thức đã học."
+            },
+            "adaptive-lr": {
+                name: "Thích nghi mạnh hơn",
+                description: "Phù hợp khi dữ liệu mới khác đáng kể so với dữ liệu của model cũ."
+            },
+            "shallow-unfreeze": {
+                name: "Cho phép học sâu hơn",
+                description: "Mở thêm các lớp để model thích nghi nhiều hơn với dữ liệu mới."
+            },
+            "resolution-variant": {
+                name: "Ưu tiên vật thể nhỏ",
+                description: "Dùng ảnh lớn hơn để quan sát vật thể nhỏ hoặc ở xa rõ hơn."
+            }
+        };
+
+        const FRIENDLY_PARAMETER_GROUPS = {
+            core: "Thiết lập cơ bản",
+            optimizer: "Cách model học",
+            runtime: "Bộ nhớ và hiệu năng",
+            loss: "Độ ưu tiên khi nhận diện",
+            augmentation: "Tăng cường dữ liệu"
+        };
+
+        const FRIENDLY_TRAINING_STATUSES = {
+            queued: "Đang chờ",
+            preparing_dataset: "Đang chuẩn bị dữ liệu",
+            uploading_dataset: "Đang gửi dữ liệu",
+            uploading_parent_model: "Đang gửi model gốc",
+            submitting: "Đang khởi tạo",
+            running: "Đang chạy",
+            remote_running: "Đang huấn luyện",
+            downloading_artifacts: "Đang nhận kết quả",
+            importing_model: "Đang nhập model",
+            succeeded: "Hoàn thành",
+            partial_failed: "Hoàn thành một phần",
+            failed: "Thất bại",
+            cancelled: "Đã hủy",
+            worker_lost: "Mất kết nối máy",
+            online: "Sẵn sàng",
+            offline: "Ngoại tuyến",
+            disabled: "Tạm ngưng"
+        };
+
         window.addEventListener('DOMContentLoaded', () => {
             loadTemplatesFromStorage();
             populateTemplateDropdown();
@@ -1126,6 +1241,169 @@
             initializeColabTrainingDatasets();
             initializeTrainingControlPlane();
         });
+        window.addEventListener('DOMContentLoaded', initializeNonTechnicalTrainingFlow);
+
+        function friendlyParameterSetName(parameterSet) {
+            return FRIENDLY_PARAMETER_SETS[parameterSet.system_key]?.name
+                || parameterSet.name;
+        }
+
+        function friendlyParameterSetDescription(parameterSet) {
+            return FRIENDLY_PARAMETER_SETS[parameterSet.system_key]?.description
+                || parameterSet.description
+                || "Cấu hình tùy chỉnh đã lưu.";
+        }
+
+        function trainingStatusLabel(status) {
+            return FRIENDLY_TRAINING_STATUSES[status] || status || "Chưa xác định";
+        }
+
+        function initializeNonTechnicalTrainingFlow() {
+            const watchedIds = [
+                "yolo_family",
+                "model_version",
+                "trainingBatchName",
+                "trainingBatchProjects",
+                "trainingExperimentMode",
+                "finetuneParentModel"
+            ];
+            for (const id of watchedIds) {
+                const element = document.getElementById(id);
+                if (!element) continue;
+                element.addEventListener("change", renderTrainingReview);
+                if (element.tagName === "INPUT") {
+                    element.addEventListener("input", renderTrainingReview);
+                }
+            }
+            renderTrainingResourceStatus();
+            renderTrainingReview();
+        }
+
+        function renderTrainingResourceStatus() {
+            const banner = document.getElementById("trainingResourceBanner");
+            const status = document.getElementById("trainingResourceStatus");
+            const help = document.getElementById("trainingResourceHelp");
+            const button = document.getElementById("trainingResourceSetupBtn");
+            if (!banner || !status || !help || !button) return;
+
+            const totalWorkers = trainingControlPlaneWorkers.length;
+            const onlineWorkers = trainingControlPlaneWorkers.filter(
+                worker => worker.enabled && worker.status === "online"
+            ).length;
+
+            if (!totalWorkers) {
+                banner.className = "rounded-xl border border-amber-700/60 bg-amber-950/20 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3";
+                status.className = "text-sm font-semibold text-amber-300";
+                status.textContent = "Chưa đăng ký máy Colab";
+                help.textContent = "Đăng ký URL và mã bảo mật từ notebook Colab trước khi huấn luyện.";
+                button.innerHTML = '<i class="fa-solid fa-plus mr-1"></i>Đăng ký Colab';
+                return;
+            }
+
+            if (!onlineWorkers) {
+                banner.className = "rounded-xl border border-sky-700/60 bg-sky-950/20 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3";
+                status.className = "text-sm font-semibold text-sky-300";
+                status.textContent = `${totalWorkers} máy đã đăng ký · chưa máy nào online`;
+                help.textContent = "Mở notebook Colab, chạy worker rồi kiểm tra lại kết nối.";
+                button.innerHTML = '<i class="fa-solid fa-server mr-1"></i>Quản lý Colab';
+                return;
+            }
+
+            banner.className = "rounded-xl border border-emerald-700/60 bg-emerald-950/20 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3";
+            status.className = "text-sm font-semibold text-emerald-300";
+            status.textContent = `${onlineWorkers}/${totalWorkers} máy Colab sẵn sàng`;
+            help.textContent = "Hệ thống đã có tài nguyên để nhận lượt huấn luyện.";
+            button.innerHTML = '<i class="fa-solid fa-server mr-1"></i>Quản lý Colab';
+        }
+
+        function openTrainingWorkerSetup() {
+            const panel = document.getElementById("trainingWorkerSetupPanel");
+            if (!panel) return;
+            panel.open = true;
+            panel.scrollIntoView({ behavior: "smooth", block: "start" });
+            window.setTimeout(
+                () => document.getElementById("colabRemoteEndpoint")?.focus(),
+                350
+            );
+        }
+
+        function renderTrainingReview() {
+            const projectSelect = document.getElementById("trainingBatchProjects");
+            const modeSelect = document.getElementById("trainingExperimentMode");
+            const button = document.getElementById("trainingBatchCreateBtn");
+            if (!projectSelect || !modeSelect || !button) return;
+
+            const selectedProjects = Array.from(projectSelect.selectedOptions)
+                .filter(option => option.value);
+            const selectedParameterSets = finetuneParameterSets.filter(
+                parameterSet => finetuneSelectedParameterSetIds.has(parameterSet.id)
+            );
+            const isFinetune = modeSelect.value === "finetune";
+            const selectedModel = trainingModelCatalogEntries.find(
+                model => model.checkpoint === document.getElementById("model_version")?.value
+            );
+            const parentModelId = Number(
+                document.getElementById("finetuneParentModel")?.value || 0
+            );
+            const parentModel = finetuneModels.find(model => model.id === parentModelId);
+            const onlineWorkers = trainingControlPlaneWorkers.filter(
+                worker => worker.enabled && worker.status === "online"
+            ).length;
+            const jobCount = selectedProjects.length * selectedParameterSets.length;
+
+            document.getElementById("trainingReviewProjects").textContent =
+                selectedProjects.length === 0
+                    ? "Chưa chọn"
+                    : selectedProjects.length === 1
+                        ? selectedProjects[0].textContent
+                        : `${selectedProjects.length} dự án`;
+            document.getElementById("trainingReviewModel").textContent = isFinetune
+                ? (parentModel?.name || "Chưa chọn model gốc")
+                : (selectedModel
+                    ? `${selectedModel.family_label} · ${selectedModel.scale_label}`
+                    : "Đang tải model");
+            document.getElementById("trainingReviewRecipes").textContent =
+                selectedParameterSets.length === 0
+                    ? "Chưa chọn"
+                    : selectedParameterSets.length === 1
+                        ? friendlyParameterSetName(selectedParameterSets[0])
+                        : `${selectedParameterSets.length} cấu hình`;
+            document.getElementById("trainingReviewJobs").textContent =
+                `${jobCount} lượt`;
+
+            const blockers = [];
+            if (!selectedProjects.length) blockers.push("chọn dữ liệu");
+            if (!selectedParameterSets.length) blockers.push("chọn cấu hình");
+            if (isFinetune && selectedProjects.length !== 1) {
+                blockers.push("fine-tune cần đúng một dự án");
+            }
+            if (isFinetune && !parentModelId) blockers.push("chọn model gốc");
+
+            const readiness = document.getElementById("trainingReviewReadiness");
+            if (blockers.length) {
+                readiness.textContent = `Cần hoàn tất: ${blockers.join("; ")}.`;
+                readiness.className = "text-xs text-amber-300";
+            } else if (!onlineWorkers) {
+                readiness.textContent = "Cấu hình hợp lệ. Chưa có máy online nên lượt huấn luyện sẽ chờ; dùng nút Đăng ký/Quản lý Colab ở đầu trang.";
+                readiness.className = "text-xs text-sky-300";
+            } else {
+                readiness.textContent = `Đã sẵn sàng tạo ${jobCount} lượt huấn luyện.`;
+                readiness.className = "text-xs text-emerald-300";
+            }
+            if (button.getAttribute("aria-busy") !== "true") {
+                button.disabled = blockers.length > 0;
+            }
+        }
+
+        function toggleLegacyDirectTraining() {
+            const panel = document.getElementById("legacyRemoteColabPanel");
+            const shouldShow = panel.classList.contains("hidden");
+            panel.classList.toggle("hidden", !shouldShow);
+            panel.open = shouldShow;
+            if (shouldShow) {
+                panel.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        }
 
         function loadTemplatesFromStorage() {
             const stored = localStorage.getItem('colab_templates_v3');
@@ -1181,12 +1459,11 @@
             }
 
             const summary = document.getElementById("trainingModelCatalogSummary");
-            summary.textContent = trainingModelCatalogEntries
-                .map(model => model.checkpoint)
-                .join(" · ");
+            summary.textContent = `${trainingModelCatalogEntries.length} model sẵn sàng`;
             document.getElementById("yolo_badge").textContent = (
                 `Catalog ${catalog.version} · ${catalog.hash.slice(0, 8)}`
             );
+            renderTrainingReview();
         }
 
         function populateTrainingModelFamilies(selectedFamily = null) {
@@ -1865,7 +2142,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 const section = document.createElement("section");
                 const title = document.createElement("div");
                 title.className = "text-[10px] font-semibold text-cyan-300 mb-1";
-                title.textContent = group.label;
+                title.textContent = FRIENDLY_PARAMETER_GROUPS[group.id] || group.label;
                 const grid = document.createElement("div");
                 grid.className = "grid grid-cols-2 md:grid-cols-3 gap-2";
                 for (const field of fields) {
@@ -1906,11 +2183,11 @@ print("Initialized YOLO-NAS Training Configuration")
             }
             const featureStatus = document.getElementById("finetuneFeatureStatus");
             featureStatus.textContent = config.enabled
-                ? `${config.version} · fresh + fine-tune`
-                : `${config.version} · fresh only`;
+                ? "Hỗ trợ model mới và cải thiện model"
+                : "Hiện chỉ hỗ trợ tạo model mới";
             featureStatus.className = config.enabled
-                ? "text-[10px] text-emerald-300"
-                : "text-[10px] text-amber-300";
+                ? "text-xs text-emerald-300"
+                : "text-xs text-amber-300";
             const finetuneOption = document.querySelector(
                 '#trainingExperimentMode option[value="finetune"]'
             );
@@ -1935,8 +2212,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     const option = document.createElement("option");
                     option.value = model.id;
                     option.textContent = (
-                        `${model.name} · ${model.finetune_status} · `
-                        + `${model.class_names?.length || 0} classes`
+                        `${model.name} · ${model.class_names?.length || 0} lớp nhận diện`
                     );
                     parentSelector.appendChild(option);
                 }
@@ -1952,12 +2228,15 @@ print("Initialized YOLO-NAS Training Configuration")
         function finetuneParameterSummary(parameterSet) {
             const parameters = parameterSet.parameters || {};
             const optimizerSummary = parameters.optimizer_mode === "explicit"
-                ? `${parameters.optimizer} · requested lr0 ${parameters.lr0}`
-                : "auto optimizer · lr0 resolved at runtime";
+                ? `${parameters.optimizer} · tốc độ học ${parameters.lr0}`
+                : "hệ thống tự chọn cách học";
+            const freezeSummary = Number(parameters.freeze || 0) > 0
+                ? `giữ nguyên ${parameters.freeze} lớp đầu`
+                : "học lại toàn bộ model";
             return (
-                `epochs ${parameters.epochs} · batch ${parameters.batch} · `
-                + `imgsz ${parameters.imgsz} · ${optimizerSummary} · `
-                + `freeze ${parameters.freeze}`
+                `${parameters.epochs} vòng · ${parameters.batch} ảnh/lượt · `
+                + `ảnh ${parameters.imgsz}px · ${optimizerSummary} · `
+                + freezeSummary
             );
         }
 
@@ -1995,7 +2274,6 @@ print("Initialized YOLO-NAS Training Configuration")
 
             for (const parameterSet of activeParameterSets) {
                 const card = document.createElement("div");
-                card.className = "border border-border rounded p-2 space-y-1 bg-panel";
 
                 const header = document.createElement("div");
                 header.className = "flex items-start justify-between gap-2";
@@ -2005,6 +2283,9 @@ print("Initialized YOLO-NAS Training Configuration")
                 checkbox.type = "checkbox";
                 checkbox.value = String(parameterSet.id);
                 checkbox.checked = finetuneSelectedParameterSetIds.has(parameterSet.id);
+                card.className = checkbox.checked
+                    ? "border border-emerald-700/70 rounded-lg p-3 space-y-2 bg-emerald-950/20"
+                    : "border border-border rounded-lg p-3 space-y-2 bg-panel";
                 checkbox.addEventListener("change", () => {
                     if (checkbox.checked) {
                         finetuneSelectedParameterSetIds.add(parameterSet.id);
@@ -2014,29 +2295,28 @@ print("Initialized YOLO-NAS Training Configuration")
                     renderFinetuneParameterSets();
                 });
                 const title = document.createElement("span");
-                title.className = "text-[11px] text-content font-semibold break-words";
-                title.textContent = `${parameterSet.name} · v${parameterSet.version}`;
+                title.className = "text-sm text-content font-semibold break-words";
+                title.textContent = friendlyParameterSetName(parameterSet);
                 selector.append(checkbox, title);
                 header.appendChild(selector);
 
                 const badges = document.createElement("span");
-                badges.className = "text-[9px] text-content-muted whitespace-nowrap";
+                badges.className = "text-[11px] text-content-muted whitespace-nowrap";
                 badges.textContent = parameterSet.is_system
-                    ? `system · used ${parameterSet.usage_count}`
-                    : `custom · used ${parameterSet.usage_count}`;
+                    ? "Có sẵn"
+                    : "Tự tạo";
+                badges.title = `Phiên bản ${parameterSet.version} · đã dùng ${parameterSet.usage_count} lần`;
                 header.appendChild(badges);
                 card.appendChild(header);
 
                 const details = document.createElement("div");
-                details.className = "text-[10px] text-cyan-200 font-mono break-words";
+                details.className = "text-xs text-cyan-200 break-words";
                 details.textContent = finetuneParameterSummary(parameterSet);
                 card.appendChild(details);
-                if (parameterSet.description) {
-                    const description = document.createElement("div");
-                    description.className = "text-[10px] text-content-muted";
-                    description.textContent = parameterSet.description;
-                    card.appendChild(description);
-                }
+                const description = document.createElement("div");
+                description.className = "text-xs text-content-muted";
+                description.textContent = friendlyParameterSetDescription(parameterSet);
+                card.appendChild(description);
 
                 const actions = document.createElement("div");
                 actions.className = "flex flex-wrap gap-1 pt-1";
@@ -2063,8 +2343,8 @@ print("Initialized YOLO-NAS Training Configuration")
                 const card = document.createElement("div");
                 card.className = "border border-border rounded p-2 bg-surface";
                 const title = document.createElement("div");
-                title.className = "text-[10px] text-content";
-                title.textContent = `${parameterSet.name} · v${parameterSet.version} · used ${parameterSet.usage_count}`;
+                title.className = "text-xs text-content";
+                title.textContent = `${friendlyParameterSetName(parameterSet)} · đã dùng ${parameterSet.usage_count} lần`;
                 card.appendChild(title);
                 const actions = document.createElement("div");
                 actions.className = "flex gap-1 mt-1";
@@ -2087,12 +2367,13 @@ print("Initialized YOLO-NAS Training Configuration")
 
             const selectedCount = finetuneSelectedParameterSetIds.size;
             summary.textContent = selectedCount
-                ? `Đã chọn ${selectedCount} bộ tham số cho training jobs`
-                : "Chưa chọn bộ tham số nào";
+                ? `Đã chọn ${selectedCount} cấu hình · mỗi dự án tạo ${selectedCount} kết quả`
+                : "Chưa chọn cấu hình nào";
             summary.className = selectedCount
-                ? "text-[10px] text-emerald-300"
-                : "text-[10px] text-amber-300";
+                ? "text-xs text-emerald-300"
+                : "text-xs text-amber-300";
             createButton.disabled = selectedCount === 0;
+            renderTrainingReview();
         }
 
         function finetuneEditorFieldMap() {
@@ -2162,8 +2443,8 @@ print("Initialized YOLO-NAS Training Configuration")
             const parameters = parameterSet?.parameters || defaults;
             document.getElementById("finetuneParameterSetEditorId").value = parameterSet?.id || "";
             document.getElementById("finetuneParameterSetModalTitle").textContent = parameterSet
-                ? `Sửa bộ tham số · v${parameterSet.version}`
-                : "Thêm bộ tham số";
+                ? `Sửa cấu hình · v${parameterSet.version}`
+                : "Thêm cấu hình";
             document.getElementById("finetuneParameterSetName").value = parameterSet?.name || "";
             document.getElementById("finetuneParameterSetDescription").value = parameterSet?.description || "";
             for (const [parameterName, field] of Object.entries(finetuneEditorFieldMap())) {
@@ -2366,6 +2647,7 @@ print("Initialized YOLO-NAS Training Configuration")
             );
             await loadFinetuneOptions();
             document.getElementById("finetuneParentModel").value = String(modelId);
+            renderTrainingReview();
             return validated;
         }
 
@@ -2380,7 +2662,7 @@ print("Initialized YOLO-NAS Training Configuration")
             const button = document.getElementById("finetuneParentValidateBtn");
             const statusBox = document.getElementById("finetuneParentUploadStatus");
             button.disabled = true;
-            statusBox.textContent = "Đang xác thực parent bằng Phase 6 worker...";
+            statusBox.textContent = "Đang gửi model sang máy huấn luyện để kiểm tra...";
             try {
                 const validated = await validateFinetuneParentModel(modelId);
                 statusBox.textContent = (
@@ -2431,16 +2713,17 @@ print("Initialized YOLO-NAS Training Configuration")
             if (!isFinetune) {
                 const state = getUIFormState("temp");
                 freshSummary.textContent = (
-                    `Fresh training từ ${state.model_version}. `
-                    + "Mỗi project × bộ tham số sẽ tạo một job riêng."
+                    `Bắt đầu từ ${state.model_version}. `
+                    + "Mỗi dự án × cấu hình sẽ tạo một lượt huấn luyện riêng."
                 );
             }
             const button = document.getElementById("trainingBatchCreateBtn");
             if (button && !finetuneExperimentSubmitting) {
                 button.innerHTML = isFinetune
-                    ? '<i class="fa-solid fa-play mr-1"></i>Queue fine-tune jobs'
-                    : '<i class="fa-solid fa-play mr-1"></i>Queue fresh training jobs';
+                    ? '<i class="fa-solid fa-play mr-1"></i>Bắt đầu cải thiện model'
+                    : '<i class="fa-solid fa-play mr-1"></i>Bắt đầu huấn luyện model mới';
             }
+            renderTrainingReview();
         }
 
         async function createUnifiedTrainingExperiment() {
@@ -2464,7 +2747,7 @@ print("Initialized YOLO-NAS Training Configuration")
             ).map(option => Number(option.value)).filter(Boolean);
             if (!parentModelId || selectedProjectIds.length !== 1) {
                 showColabRemoteError(
-                    "Fine-tune cần một parent đã xác thực và đúng một project."
+                    "Để cải thiện model, hãy chọn đúng một dự án và một model gốc đã kiểm tra."
                 );
                 return;
             }
@@ -2474,17 +2757,17 @@ print("Initialized YOLO-NAS Training Configuration")
             );
             if (!selectedParent?.fine_tune_eligible) {
                 showColabRemoteError(
-                    "Parent chưa Ready. Bấm “Xác thực lại parent đang chọn” trước."
+                    "Model gốc chưa sẵn sàng. Bấm “Kiểm tra lại model đã chọn” trước."
                 );
                 return;
             }
             const parameterSetIds = [...finetuneSelectedParameterSetIds];
             if (!parameterSetIds.length) {
-                showColabRemoteError("Chọn ít nhất một bộ tham số trong thư viện.");
+                showColabRemoteError("Chọn ít nhất một cấu hình huấn luyện.");
                 return;
             }
             if (selectedProjectIds.length * parameterSetIds.length > 100) {
-                showColabRemoteError("Một batch tối đa 100 jobs. Giảm số project hoặc bộ tham số.");
+                showColabRemoteError("Mỗi lần bắt đầu tối đa 100 lượt. Hãy giảm số dự án hoặc cấu hình.");
                 return;
             }
 
@@ -2598,7 +2881,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     `Yêu cầu chưa hoàn tất: ${error.message}. `
                     + "Bấm lại sẽ dùng cùng mã an toàn, không tạo batch trùng."
                 );
-                showColabRemoteError(`Tạo fine-tune experiment lỗi: ${error.message}`);
+                showColabRemoteError(`Không thể bắt đầu cải thiện model: ${error.message}`);
             } finally {
                 await loadTrainingControlPlane(true);
                 if (createdBatchId !== null) {
@@ -2647,6 +2930,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     ? "text-emerald-300"
                     : (status.object_store?.error ? "text-rose-300" : "text-amber-300");
                 objectStoreStatus.title = status.object_store?.error || "";
+                renderTrainingReview();
             } catch (error) {
                 if (!silent) {
                     showColabRemoteError(`Control plane: ${error.message}`);
@@ -2663,13 +2947,14 @@ print("Initialized YOLO-NAS Training Configuration")
                 worker => worker.enabled && worker.status === "online"
             ).length;
             document.getElementById("trainingWorkerSummary").textContent =
-                `${onlineCount}/${trainingControlPlaneWorkers.length} online`;
+                `${onlineCount}/${trainingControlPlaneWorkers.length} máy sẵn sàng`;
+            renderTrainingResourceStatus();
             list.innerHTML = "";
             empty.classList.toggle("hidden", trainingControlPlaneWorkers.length > 0);
 
             for (const worker of trainingControlPlaneWorkers) {
                 const card = document.createElement("div");
-                card.className = "border border-border rounded-lg p-2.5 text-[10px] space-y-1.5";
+                card.className = "border border-border rounded-lg p-3 text-xs space-y-2";
 
                 const header = document.createElement("div");
                 header.className = "flex items-center justify-between gap-2";
@@ -2677,8 +2962,8 @@ print("Initialized YOLO-NAS Training Configuration")
                 name.className = "text-content";
                 name.textContent = worker.name;
                 const status = document.createElement("span");
-                status.className = `${trainingStatusClasses(worker.status)} font-mono`;
-                status.textContent = worker.status;
+                status.className = `${trainingStatusClasses(worker.status)} font-medium`;
+                status.textContent = trainingStatusLabel(worker.status);
                 header.append(name, status);
 
                 const detail = document.createElement("div");
@@ -2691,25 +2976,26 @@ print("Initialized YOLO-NAS Training Configuration")
                     worker.capabilities?.training_parameter_sets
                 );
                 detail.textContent = (
-                    `${worker.provider} · GPU ${worker.gpu_name || (worker.gpu_available ? "available" : "unavailable")} · `
-                    + `capacity ${worker.active_leases}/${worker.capacity} · `
-                    + `Presets ${supportsTrainingPresets ? "ready" : "upgrade worker"} · `
-                    + `Phase 6 ${supportsFinetune ? "ready" : "not supported"} · ${worker.api_url}`
+                    `GPU ${worker.gpu_name || (worker.gpu_available ? "sẵn sàng" : "không khả dụng")} · `
+                    + `đang chạy ${worker.active_leases}/${worker.capacity} · `
+                    + `cấu hình ${supportsTrainingPresets ? "sẵn sàng" : "cần cập nhật"} · `
+                    + `cải thiện model ${supportsFinetune ? "được hỗ trợ" : "chưa hỗ trợ"}`
                 );
+                detail.title = `${worker.provider} · ${worker.api_url}`;
 
                 const actions = document.createElement("div");
                 actions.className = "flex flex-wrap gap-1.5";
                 const probeButton = document.createElement("button");
                 probeButton.type = "button";
                 probeButton.className = "text-sky-300 border border-sky-800 rounded px-2 py-1";
-                probeButton.textContent = "Probe";
+                probeButton.textContent = "Kiểm tra kết nối";
                 probeButton.addEventListener("click", () => probeTrainingWorker(worker.id));
                 actions.appendChild(probeButton);
                 const reconnectButton = document.createElement("button");
                 reconnectButton.type = "button";
                 reconnectButton.className = "text-violet-300 border border-violet-800 rounded px-2 py-1";
-                reconnectButton.textContent = "Use current API";
-                reconnectButton.title = "Replace this worker's URL/token with the current Colab API fields.";
+                reconnectButton.textContent = "Cập nhật địa chỉ";
+                reconnectButton.title = "Dùng địa chỉ và mã bảo mật đang nhập cho máy này.";
                 reconnectButton.addEventListener(
                     "click",
                     () => reconnectTrainingWorker(worker.id, worker.name, worker.capacity)
@@ -2719,7 +3005,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     const disableButton = document.createElement("button");
                     disableButton.type = "button";
                     disableButton.className = "text-rose-300 border border-rose-900 rounded px-2 py-1";
-                    disableButton.textContent = "Disable";
+                    disableButton.textContent = "Tạm ngưng";
                     disableButton.addEventListener("click", () => disableTrainingWorker(worker.id));
                     actions.appendChild(disableButton);
                 }
@@ -2734,6 +3020,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 }
                 list.appendChild(card);
             }
+            renderTrainingReview();
         }
 
         async function registerCurrentColabWorker() {
@@ -2825,7 +3112,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 document.getElementById("trainingBatchProjects").selectedOptions
             ).map(option => Number(option.value)).filter(Boolean);
             if (!selectedProjectIds.length) {
-                showColabRemoteError("Chọn ít nhất một ToolIb project cho automated batch.");
+                showColabRemoteError("Chọn ít nhất một dự án chứa ảnh đã gán nhãn.");
                 return;
             }
 
@@ -2834,12 +3121,12 @@ print("Initialized YOLO-NAS Training Configuration")
                 state.task_type !== "detect"
                 || !trainingModelAllowedCheckpoints.has(state.model_version)
             ) {
-                showColabRemoteError("Fresh training chỉ chấp nhận model detection đang enabled trong catalog backend.");
+                showColabRemoteError("Model đã chọn hiện chưa sẵn sàng để huấn luyện.");
                 return;
             }
             const parameterSetIds = [...finetuneSelectedParameterSetIds];
             if (!parameterSetIds.length) {
-                showColabRemoteError("Chọn ít nhất một bộ tham số trong thư viện.");
+                showColabRemoteError("Chọn ít nhất một cấu hình huấn luyện.");
                 return;
             }
 
@@ -2856,7 +3143,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 || splits.val <= 0
                 || splits.train + splits.val + splits.test !== 100
             ) {
-                showColabRemoteError("Split batch phải là số nguyên, Train/Val > 0 và tổng bằng 100.");
+                showColabRemoteError("Tỷ lệ Train/Val/Test phải là số nguyên, Train và Val lớn hơn 0, tổng bằng 100.");
                 return;
             }
 
@@ -2894,13 +3181,14 @@ print("Initialized YOLO-NAS Training Configuration")
                         jobs
                     }
                 });
-                showToast(`Đã queue ${batch.total_jobs} job trong batch ${batch.batch_id.slice(0, 8)}.`);
+                showToast(`Đã tạo ${batch.total_jobs} lượt huấn luyện.`);
                 await dispatchTrainingControlPlane(true);
             } catch (error) {
-                showColabRemoteError(`Tạo batch lỗi: ${error.message}`);
+                showColabRemoteError(`Không thể bắt đầu huấn luyện: ${error.message}`);
             } finally {
                 createButton.disabled = finetuneSelectedParameterSetIds.size === 0;
                 await loadTrainingControlPlane(true);
+                renderTrainingReview();
             }
         }
 
@@ -2938,32 +3226,31 @@ print("Initialized YOLO-NAS Training Configuration")
                 const card = document.createElement("div");
                 card.id = `training-batch-${batch.id}`;
                 card.dataset.batchId = batch.batch_id;
-                card.className = "border border-border rounded-lg p-2.5 text-[10px] space-y-2";
+                card.className = "border border-border rounded-lg p-3 text-xs space-y-3";
 
                 const header = document.createElement("div");
                 header.className = "flex items-center justify-between gap-2";
                 const title = document.createElement("strong");
                 title.className = "text-content";
                 const experimentLabel = batch.experiment_type === "finetune_sweep"
-                    ? "Fine-tune sweep"
-                    : "Fresh batch";
-                title.textContent = `${experimentLabel} · ${batch.name} · ${batch.batch_id.slice(0, 8)}`;
+                    ? "Cải thiện model"
+                    : "Huấn luyện model mới";
+                title.textContent = `${experimentLabel} · ${batch.name}`;
+                title.title = `Batch ${batch.batch_id}`;
                 const status = document.createElement("span");
-                status.className = `${trainingStatusClasses(batch.status)} font-mono`;
-                status.textContent = batch.status;
+                status.className = `${trainingStatusClasses(batch.status)} font-medium`;
+                status.textContent = trainingStatusLabel(batch.status);
                 header.append(title, status);
 
                 const summary = document.createElement("div");
                 summary.className = "text-content-muted";
                 summary.textContent = (
-                    `${batch.succeeded_jobs}/${batch.total_jobs} succeeded · `
-                    + `${batch.failed_jobs} failed · ${batch.cancelled_jobs} cancelled`
-                    + (
-                        batch.training_dataset_id
-                            ? ` · shared dataset #${batch.training_dataset_id}`
-                            : ""
-                    )
+                    `${batch.succeeded_jobs}/${batch.total_jobs} hoàn thành · `
+                    + `${batch.failed_jobs} thất bại · ${batch.cancelled_jobs} đã hủy`
                 );
+                summary.title = batch.training_dataset_id
+                    ? `shared dataset #${batch.training_dataset_id}`
+                    : "";
 
                 const tasks = document.createElement("div");
                 tasks.className = "space-y-1";
@@ -2980,19 +3267,27 @@ print("Initialized YOLO-NAS Training Configuration")
                 }
                 for (const task of displayedTasks) {
                     const row = document.createElement("div");
-                    row.className = "flex items-start justify-between gap-2 border-t border-border/70 pt-1.5";
+                    row.className = "flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 border-t border-border/70 pt-2";
                     const info = document.createElement("div");
                     info.className = "min-w-0";
                     const taskStatus = document.createElement("div");
-                    taskStatus.className = `${trainingStatusClasses(task.status)} font-mono`;
+                    taskStatus.className = `${trainingStatusClasses(task.status)} font-medium`;
                     taskStatus.textContent = (
                         `${task.candidate_name || `Project #${task.project_id}`} · `
-                        + `${task.status} · attempt ${task.attempt_count}/${task.max_attempts}`
+                        + trainingStatusLabel(task.status)
                     );
                     const message = document.createElement("div");
                     message.className = "text-content-muted break-words";
                     message.textContent = task.error || task.message || task.stage;
                     info.append(taskStatus, message);
+
+                    const technicalDetails = document.createElement("details");
+                    technicalDetails.className = "mt-1 rounded border border-border/70 p-2";
+                    const technicalSummary = document.createElement("summary");
+                    technicalSummary.className = "cursor-pointer text-content-muted";
+                    technicalSummary.textContent = "Chi tiết kỹ thuật";
+                    const technicalContent = document.createElement("div");
+                    technicalContent.className = "mt-2 space-y-1 font-mono text-[11px]";
 
                     if (task.config_hash) {
                         const configDetail = document.createElement("div");
@@ -3008,7 +3303,7 @@ print("Initialized YOLO-NAS Training Configuration")
                             `Requested ${task.config_hash.slice(0, 10)} · ${requestedOptimizer}`
                             + (requestedParameters ? ` · ${requestedParameters}` : "")
                         );
-                        info.appendChild(configDetail);
+                        technicalContent.appendChild(configDetail);
                     }
 
                     if (task.effective_config) {
@@ -3018,7 +3313,7 @@ print("Initialized YOLO-NAS Training Configuration")
                             `Effective ${task.effective_config.optimizer_class} · `
                             + `initial lr=${task.effective_config.initial_lr}`
                         );
-                        info.appendChild(effectiveDetail);
+                        technicalContent.appendChild(effectiveDetail);
                         const effectiveArgs = task.effective_config.training_arguments;
                         if (effectiveArgs) {
                             const argumentsDetail = document.createElement("div");
@@ -3026,7 +3321,7 @@ print("Initialized YOLO-NAS Training Configuration")
                             argumentsDetail.textContent = `Runtime ${summarizeTrainingParameters(
                                 effectiveArgs
                             )}`;
-                            info.appendChild(argumentsDetail);
+                            technicalContent.appendChild(argumentsDetail);
                         }
                     }
 
@@ -3049,7 +3344,7 @@ print("Initialized YOLO-NAS Training Configuration")
                             + ` · ${(Number(checkpoint.size_bytes || 0) / (1024 * 1024)).toFixed(1)} MB`
                             + ` · resume ${task.resume_count}/${task.max_resume_count}`
                         );
-                        info.appendChild(checkpointDetail);
+                        technicalContent.appendChild(checkpointDetail);
                     }
 
                     const latestAttempt = (task.attempts || []).at(-1);
@@ -3069,7 +3364,7 @@ print("Initialized YOLO-NAS Training Configuration")
                             + ` · remote ${latestAttempt.remote_job_id || "not submitted"}`
                             + ` · ${latestAttempt.status}`
                         );
-                        info.appendChild(attemptDetail);
+                        technicalContent.appendChild(attemptDetail);
                     }
 
                     const latestEvent = (task.events || []).at(-1);
@@ -3077,22 +3372,26 @@ print("Initialized YOLO-NAS Training Configuration")
                         const eventDetail = document.createElement("div");
                         eventDetail.className = "text-content-muted break-words";
                         eventDetail.textContent = `Last event: ${latestEvent.event_type} · ${latestEvent.message || ""}`;
-                        info.appendChild(eventDetail);
+                        technicalContent.appendChild(eventDetail);
+                    }
+                    if (technicalContent.childElementCount) {
+                        technicalDetails.append(technicalSummary, technicalContent);
+                        info.appendChild(technicalDetails);
                     }
                     row.appendChild(info);
                     if (["failed", "cancelled"].includes(task.status)) {
                         const retryButton = document.createElement("button");
                         retryButton.type = "button";
                         retryButton.className = "shrink-0 text-amber-300 border border-amber-800 rounded px-2 py-1";
-                        retryButton.textContent = "Retry";
+                        retryButton.textContent = "Chạy lại";
                         retryButton.addEventListener("click", () => retryTrainingTask(task.id));
                         row.appendChild(retryButton);
                     } else if (task.status === "worker_lost") {
                         const reconnectHint = document.createElement("span");
                         reconnectHint.className = "shrink-0 text-amber-300";
                         reconnectHint.textContent = task.latest_checkpoint
-                            ? "Await failover"
-                            : "Await reconnect";
+                            ? "Đang tìm máy khác"
+                            : "Chờ kết nối lại";
                         reconnectHint.title = task.latest_checkpoint
                             ? "The scheduler first waits for the original worker, then resumes from this checkpoint on another compatible worker."
                             : "No verified cloud checkpoint is available; reconnect and probe the same worker to resume its existing remote job.";
@@ -3107,7 +3406,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     const cancelButton = document.createElement("button");
                     cancelButton.type = "button";
                     cancelButton.className = "text-rose-300 border border-rose-900 rounded px-2 py-1";
-                    cancelButton.textContent = "Cancel queued";
+                    cancelButton.textContent = "Hủy các lượt đang chờ";
                     cancelButton.addEventListener("click", () => cancelTrainingBatch(batch.id));
                     actions.appendChild(cancelButton);
                 }

@@ -22,7 +22,7 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'async function createUnifiedTrainingExperiment()',
         'async function dispatchTrainingControlPlane(',
         '/api/training-control-plane/status',
-        'Await reconnect',
+        'Chờ kết nối lại',
         'latestAttempt',
         'latestEvent',
         'finetunePhase6Panel',
@@ -36,7 +36,7 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'openFinetuneParameterSetEditor(',
         'finetuneParameterPrimaryGroups',
         'updateFinetuneParameterDependencies',
-        'auto optimizer · lr0 resolved at runtime',
+        'auto optimizer · lr0 delegated',
         'task.requested_config || task.request || {}',
         'task.effective_config.optimizer_class',
         'saveFinetuneParameterSet()',
@@ -51,13 +51,69 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         '/api/finetune-experiments',
         'parameter_set_ids: parameterSetIds',
         'shared dataset #',
-        'Phase 6 ${supportsFinetune ? "ready" : "not supported"}',
+        'cải thiện model ${supportsFinetune ? "được hỗ trợ" : "chưa hỗ trợ"}',
         'legacyRemoteColabPanel',
         'legacyCodeGeneratorPanel',
         'toggleLegacyCodeGenerator()',
     )
     for marker in required_contract:
         assert marker in template
+
+
+def test_colab_manager_primary_flow_is_sequential_and_non_technical():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    ordered_steps = (
+        'id="trainingModelStep"',
+        'id="trainingDatasetStep"',
+        'id="finetunePhase6Panel"',
+        'id="trainingReviewCard"',
+        'id="trainingProgressStep"',
+    )
+    positions = [template.index(marker) for marker in ordered_steps]
+    assert positions == sorted(positions)
+    assert template.index('id="trainingResourceBanner"') < template.index(
+        'id="trainingModelStep"'
+    )
+    assert template.index('id="trainingWorkerSetupPanel"') > template.index(
+        'id="trainingProgressStep"'
+    )
+
+    for marker in (
+        'id="nonTechnicalTrainingFlow"',
+        'Huấn luyện mô hình YOLO',
+        'Tài nguyên huấn luyện',
+        'Đăng ký Colab',
+        'Thiết lập máy huấn luyện',
+        'Bắt đầu huấn luyện model mới',
+        'Dữ liệu dùng để học (%)',
+        'hệ thống tự chọn cách học',
+        'function renderTrainingReview()',
+        'function renderTrainingResourceStatus()',
+        'function openTrainingWorkerSetup()',
+        'function trainingStatusLabel(status)',
+        'function friendlyParameterSetName(parameterSet)',
+        'Công cụ cũ dành cho kỹ thuật',
+    ):
+        assert marker in template
+
+    for leaked_label in (
+        'Phase 5 · Multi-worker Training Control Plane',
+        'Phase 6 ${supportsFinetune',
+        'Đang xác thực parent bằng Phase 6 worker',
+        'Scheduler & batches',
+        'Queue fresh training jobs',
+        'Queue fine-tune jobs',
+        'Đang tải catalog...',
+    ):
+        assert leaked_label not in template
+
+    assert (
+        'id="legacyRemoteColabPanel" class="hidden '
+        in template
+    )
 
 
 def test_colab_manager_uses_database_parameter_sets_not_candidate_counts():
@@ -149,7 +205,7 @@ def test_colab_manager_exposes_phase_c_parameter_editor_without_legacy_drift():
         'field.ui?.visible_when',
         'field.ui?.exclude_values',
         'renderFinetuneParameterEditor();',
-        'Legacy code generator - does not control scheduler training',
+        'Công cụ cũ dành cho kỹ thuật',
     ):
         assert marker in template
 
