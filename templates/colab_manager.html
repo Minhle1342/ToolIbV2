@@ -626,6 +626,7 @@
                                 <option value="416">416 px</option>
                                 <option value="512">512 px</option>
                                 <option value="640" selected>640 px (Standard)</option>
+                                <option value="768">768 px</option>
                                 <option value="1024">1024 px (High Res)</option>
                             </select>
                         </div>
@@ -1154,7 +1155,7 @@
         const COLAB_REMOTE_ENDPOINT_KEY = "toolib_colab_remote_endpoint_v1";
         const COLAB_REMOTE_TOKEN_KEY = "toolib_colab_remote_token_v1";
         const COLAB_DATASET_PROJECT_KEY = "toolib_colab_dataset_project_v1";
-        const COLAB_REMOTE_ALLOWED_IMAGE_SIZES = new Set([320, 416, 512, 640, 768]);
+        const COLAB_REMOTE_ALLOWED_IMAGE_SIZES = new Set([320, 416, 512, 640, 768, 1024]);
         const COLAB_REMOTE_POLL_INTERVAL_MS = 4000;
         let colabRemotePollTimer = null;
         let colabRemotePollGeneration = 0;
@@ -3980,7 +3981,7 @@ print("Initialized YOLO-NAS Training Configuration")
             if (!modelEligible) {
                 eligibility.textContent = "Remote API chỉ nhận model detection đang enabled trong catalog backend.";
             } else if (!parametersEligible) {
-                eligibility.textContent = "Remote API yêu cầu epochs 1-100, batch 1-32 và imgsz thuộc 320, 416, 512, 640, 768.";
+                eligibility.textContent = "Remote API yêu cầu epochs 1-100, batch 1-32 và imgsz thuộc 320, 416, 512, 640, 768, 1024.";
             } else if (!datasetEligible) {
                 eligibility.textContent = "Hãy Prepare & Upload một dataset snapshot trước khi Start Train.";
             } else if (colabRemoteActiveJobId !== null) {

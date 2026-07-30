@@ -147,6 +147,18 @@ def test_colab_manager_primary_training_ui_only_lists_supported_detection_models
     assert 'id="task_type" type="hidden" value="detect"' in template
 
 
+def test_colab_manager_remote_training_accepts_image_sizes_through_1024():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    assert '<option value="768">768 px</option>' in template
+    assert '<option value="1024">1024 px (High Res)</option>' in template
+    assert 'new Set([320, 416, 512, 640, 768, 1024])' in template
+    assert '320, 416, 512, 640, 768, 1024.' in template
+    assert '1280' not in template
+
+
 def test_finetune_submit_has_immediate_feedback_and_idempotency_guard():
     template = (
         REPOSITORY_ROOT / 'templates' / 'colab_manager.html'

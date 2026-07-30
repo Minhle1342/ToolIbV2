@@ -26,6 +26,8 @@ from training_parameter_catalog import (  # noqa: E402
 NOTEBOOK_PATH = REPOSITORY_ROOT / 'notebooks' / 'Colab_FastAPI_PoC.ipynb'
 WORKER_SOURCE_PATH = REPOSITORY_ROOT / 'notebooks' / 'colab_worker_phase6.py'
 TARGET_CELL_INDEX = 3
+SETUP_CELL_INDEX = 2
+SMOKE_CELL_INDEX = 5
 INTRODUCTION_CELL_INDEX = 0
 CLEANUP_CELL_INDEX = 6
 WORKER_CATALOG_START = '# BEGIN GENERATED TRAINING MODEL CATALOG'
@@ -194,6 +196,68 @@ def sync_worker_catalog():
         WORKER_SOURCE_PATH.write_text(generated_source, encoding='utf-8')
 
 
+def sync_setup_catalog(cells):
+    if len(cells) <= SETUP_CELL_INDEX:
+        raise RuntimeError('Colab notebook does not contain the setup cell.')
+    setup_cell = cells[SETUP_CELL_INDEX]
+    if setup_cell.get('cell_type') != 'code':
+        raise RuntimeError('Colab setup target is not a code cell.')
+
+    allowed_models = ', '.join(
+        json.dumps(checkpoint)
+        for checkpoint in ENABLED_TRAINING_MODEL_CHECKPOINTS
+    )
+    source_lines = ''.join(setup_cell.get('source', [])).splitlines()
+    for index, line in enumerate(source_lines):
+        if line.startswith('ALLOWED_MODELS = '):
+            source_lines[index] = f'ALLOWED_MODELS = {{{allowed_models}}}'
+            break
+    else:
+        raise RuntimeError('Colab setup model catalog line is missing.')
+    setup_cell['source'] = [line + '\n' for line in source_lines]
+    setup_cell['execution_count'] = None
+    setup_cell['outputs'] = []
+
+
+def sync_smoke_parameters(cells):
+    if len(cells) <= SMOKE_CELL_INDEX:
+        raise RuntimeError('Colab notebook does not contain the smoke-test cell.')
+    smoke_cell = cells[SMOKE_CELL_INDEX]
+    if smoke_cell.get('cell_type') != 'code':
+        raise RuntimeError('Colab smoke-test target is not a code cell.')
+
+    image_size_field = next(
+        field
+        for field in TRAINING_PARAMETER_FIELD_SPECS
+        if field['name'] == 'imgsz'
+    )
+    image_sizes = [option['value'] for option in image_size_field['options']]
+    replacements = {
+        'SMOKE_MODEL = ': (
+            'SMOKE_MODEL = "yolo11s.pt"  # @param '
+            + json.dumps(list(ENABLED_TRAINING_MODEL_CHECKPOINTS))
+        ),
+        'SMOKE_IMGSZ = ': (
+            'SMOKE_IMGSZ = 640  # @param '
+            + json.dumps(image_sizes)
+            + ' {type:"raw"}'
+        ),
+    }
+    source_lines = ''.join(smoke_cell.get('source', [])).splitlines()
+    replaced = set()
+    for index, line in enumerate(source_lines):
+        for prefix, replacement in replacements.items():
+            if line.startswith(prefix):
+                source_lines[index] = replacement
+                replaced.add(prefix)
+                break
+    if replaced != set(replacements):
+        raise RuntimeError('Colab smoke-test parameter lines are missing.')
+    smoke_cell['source'] = [line + '\n' for line in source_lines]
+    smoke_cell['execution_count'] = None
+    smoke_cell['outputs'] = []
+
+
 def main():
     sync_worker_catalog()
     notebook = json.loads(NOTEBOOK_PATH.read_text(encoding='utf-8'))
@@ -212,6 +276,8 @@ def main():
     target_cell['source'] = source.splitlines(keepends=True)
     target_cell['execution_count'] = None
     target_cell['outputs'] = []
+    sync_setup_catalog(cells)
+    sync_smoke_parameters(cells)
     cells[INTRODUCTION_CELL_INDEX]['source'] = (
         INTRODUCTION_MARKDOWN.splitlines(keepends=True)
     )

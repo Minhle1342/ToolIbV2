@@ -22,7 +22,7 @@ WORKER_PATH = REPOSITORY_ROOT / 'notebooks' / 'colab_worker_phase6.py'
 
 
 def test_phase_c2_catalog_exposes_exact_training_contract():
-    assert TRAINING_PARAMETER_CATALOG_VERSION == 'phase-c2-training-v1'
+    assert TRAINING_PARAMETER_CATALOG_VERSION == 'phase-c2-training-v2'
     assert TRAINING_PARAMETER_CONTRACT_VERSION == 3
     assert len(TRAINING_PARAMETER_FIELDS) == 39
     assert {
@@ -43,6 +43,12 @@ def test_phase_c2_catalog_exposes_exact_training_contract():
     assert TRAINING_PARAMETER_DEFAULTS['nbs'] == 64
     assert TRAINING_PARAMETER_DEFAULTS['compile'] is False
     assert TRAINING_PARAMETER_DEFAULTS['channels_last'] is False
+
+
+def test_phase_c2_catalog_accepts_1024_image_size_but_not_1280():
+    assert normalize_training_parameters({'imgsz': 1024})['imgsz'] == 1024
+    with pytest.raises(TrainingParameterCatalogError):
+        normalize_training_parameters({'imgsz': 1280})
 
 
 def test_phase_c2_normalization_validates_new_fields_and_legacy_aliases():

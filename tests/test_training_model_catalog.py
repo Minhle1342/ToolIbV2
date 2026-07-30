@@ -20,16 +20,17 @@ from scripts.sync_phase6_notebook import (
 
 
 def test_phase_a_catalog_enables_only_existing_small_checkpoints():
-    assert ENABLED_TRAINING_MODEL_CHECKPOINTS == (
-        'yolo11s.pt',
-        'yolo12s.pt',
-        'yolo26s.pt',
+    expected_checkpoints = tuple(
+        f'yolo{family}{scale}.pt'
+        for family in (11, 12, 26)
+        for scale in ('n', 's', 'm', 'l', 'x')
     )
-    assert all(
-        model['scale'] == 's'
+    assert ENABLED_TRAINING_MODEL_CHECKPOINTS == expected_checkpoints
+    assert {
+        model['scale']
         for model in TRAINING_MODEL_CATALOG['models']
         if model['enabled']
-    )
+    } == {'n', 's', 'm', 'l', 'x'}
 
 
 def test_catalog_hash_is_deterministic_and_public_payload_isolated():
@@ -37,9 +38,13 @@ def test_catalog_hash_is_deterministic_and_public_payload_isolated():
         deepcopy(TRAINING_MODEL_CATALOG)
     ) == TRAINING_MODEL_CATALOG_HASH
 
+    original_checkpoint = TRAINING_MODEL_CATALOG['models'][0]['checkpoint']
     public_payload = public_training_model_catalog()
     public_payload['models'][0]['checkpoint'] = 'modified.pt'
-    assert TRAINING_MODEL_CATALOG['models'][0]['checkpoint'] == 'yolo11s.pt'
+    assert (
+        TRAINING_MODEL_CATALOG['models'][0]['checkpoint']
+        == original_checkpoint
+    )
 
 
 def test_catalog_loader_reads_and_validates_json(tmp_path):

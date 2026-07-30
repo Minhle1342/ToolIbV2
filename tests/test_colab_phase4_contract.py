@@ -51,19 +51,21 @@ def test_colab_remote_catalog_supports_exact_small_detection_models():
     html = TEMPLATE_PATH.read_text(encoding='utf-8')
     source = notebook_source()
     worker = WORKER_PATH.read_text(encoding='utf-8')
-    exact_catalog = '{"yolo11s.pt", "yolo12s.pt", "yolo26s.pt"}'
+    expected_checkpoints = tuple(
+        f'yolo{family}{scale}.pt'
+        for family in (11, 12, 26)
+        for scale in ('n', 's', 'm', 'l', 'x')
+    )
 
     assert '/api/training-model-catalog' in html
     assert 'YOLO_CHECKPOINTS_MAP' not in html
     assert 'COLAB_REMOTE_ALLOWED_MODELS' not in html
     assert 'trainingModelAllowedCheckpoints' in html
-    assert exact_catalog in source
-    assert exact_catalog in worker
-    assert tuple(ENABLED_TRAINING_MODEL_CHECKPOINTS) == (
-        'yolo11s.pt',
-        'yolo12s.pt',
-        'yolo26s.pt',
-    )
+    assert tuple(ENABLED_TRAINING_MODEL_CHECKPOINTS) == expected_checkpoints
+    for checkpoint in expected_checkpoints:
+        assert checkpoint in source
+        assert checkpoint in worker
+    assert '{"yolo11s.pt", "yolo12s.pt", "yolo26s.pt"}' not in source
     for generated in (
         f'TRAINING_MODEL_CATALOG_VERSION = "{TRAINING_MODEL_CATALOG_VERSION}"',
         f'TRAINING_MODEL_CATALOG_HASH = "{TRAINING_MODEL_CATALOG_HASH}"',
@@ -75,10 +77,13 @@ def test_colab_remote_catalog_supports_exact_small_detection_models():
     assert '"ultralytics==8.4.110"' in source
     assert 'model: str = "yolo11s.pt"' in source
     assert 'SMOKE_MODEL = "yolo11s.pt"' in source
+    assert (
+        'SMOKE_IMGSZ = 640  # @param [320, 416, 512, 640, 768, 1024]'
+        in source
+    )
     assert '"allowed_models": sorted(ALLOWED_MODELS)' in source
     assert '"ultralytics_version": ULTRALYTICS_VERSION' in source
     assert 'ULTRALYTICS_PIN = "8.4.110"' in worker
-    assert 'yolo11n.pt' not in source
     assert worker in source
 
 

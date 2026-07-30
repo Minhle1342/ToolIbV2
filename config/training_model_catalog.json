@@ -1,8 +1,19 @@
 {
   "schema_version": 1,
-  "catalog_version": "phase-a-small-v1",
+  "catalog_version": "phase-a-multiscale-v1",
   "default_checkpoint": "yolo26s.pt",
   "models": [
+    {
+      "id": "yolo11n",
+      "family": "yolo11",
+      "family_label": "YOLO11",
+      "scale": "n",
+      "scale_label": "Nano",
+      "checkpoint": "yolo11n.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
     {
       "id": "yolo11s",
       "family": "yolo11",
@@ -12,6 +23,50 @@
       "checkpoint": "yolo11s.pt",
       "task": "detect",
       "status": "validated",
+      "enabled": true
+    },
+    {
+      "id": "yolo11m",
+      "family": "yolo11",
+      "family_label": "YOLO11",
+      "scale": "m",
+      "scale_label": "Medium",
+      "checkpoint": "yolo11m.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo11l",
+      "family": "yolo11",
+      "family_label": "YOLO11",
+      "scale": "l",
+      "scale_label": "Large",
+      "checkpoint": "yolo11l.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo11x",
+      "family": "yolo11",
+      "family_label": "YOLO11",
+      "scale": "x",
+      "scale_label": "XLarge",
+      "checkpoint": "yolo11x.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo12n",
+      "family": "yolo12",
+      "family_label": "YOLO12",
+      "scale": "n",
+      "scale_label": "Nano",
+      "checkpoint": "yolo12n.pt",
+      "task": "detect",
+      "status": "experimental",
       "enabled": true
     },
     {
@@ -26,12 +81,89 @@
       "enabled": true
     },
     {
+      "id": "yolo12m",
+      "family": "yolo12",
+      "family_label": "YOLO12",
+      "scale": "m",
+      "scale_label": "Medium",
+      "checkpoint": "yolo12m.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo12l",
+      "family": "yolo12",
+      "family_label": "YOLO12",
+      "scale": "l",
+      "scale_label": "Large",
+      "checkpoint": "yolo12l.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo12x",
+      "family": "yolo12",
+      "family_label": "YOLO12",
+      "scale": "x",
+      "scale_label": "XLarge",
+      "checkpoint": "yolo12x.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo26n",
+      "family": "yolo26",
+      "family_label": "YOLO26",
+      "scale": "n",
+      "scale_label": "Nano",
+      "checkpoint": "yolo26n.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
       "id": "yolo26s",
       "family": "yolo26",
       "family_label": "YOLO26",
       "scale": "s",
       "scale_label": "Small",
       "checkpoint": "yolo26s.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo26m",
+      "family": "yolo26",
+      "family_label": "YOLO26",
+      "scale": "m",
+      "scale_label": "Medium",
+      "checkpoint": "yolo26m.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo26l",
+      "family": "yolo26",
+      "family_label": "YOLO26",
+      "scale": "l",
+      "scale_label": "Large",
+      "checkpoint": "yolo26l.pt",
+      "task": "detect",
+      "status": "experimental",
+      "enabled": true
+    },
+    {
+      "id": "yolo26x",
+      "family": "yolo26",
+      "family_label": "YOLO26",
+      "scale": "x",
+      "scale_label": "XLarge",
+      "checkpoint": "yolo26x.pt",
       "task": "detect",
       "status": "experimental",
       "enabled": true

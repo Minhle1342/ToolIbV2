@@ -37,13 +37,13 @@ import ultralytics
 from ultralytics import YOLO
 
 # BEGIN GENERATED TRAINING MODEL CATALOG
-TRAINING_MODEL_CATALOG_VERSION = "phase-a-small-v1"
-TRAINING_MODEL_CATALOG_HASH = "54848e500cb3a1b7f7bad04a2d34672111a6b25114215a9cc3b07f6cb2aac9db"
-ALLOWED_MODELS = {"yolo11s.pt", "yolo12s.pt", "yolo26s.pt"}
+TRAINING_MODEL_CATALOG_VERSION = "phase-a-multiscale-v1"
+TRAINING_MODEL_CATALOG_HASH = "18117021c9a1e12215949226b25543f5cd663f97fcba4bf846db1b49c1bce070"
+ALLOWED_MODELS = {"yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt", "yolo11x.pt", "yolo12n.pt", "yolo12s.pt", "yolo12m.pt", "yolo12l.pt", "yolo12x.pt", "yolo26n.pt", "yolo26s.pt", "yolo26m.pt", "yolo26l.pt", "yolo26x.pt"}
 # END GENERATED TRAINING MODEL CATALOG
 # BEGIN GENERATED TRAINING PARAMETER CATALOG
-TRAINING_PARAMETER_CATALOG_VERSION = 'phase-c2-training-v1'
-TRAINING_PARAMETER_CATALOG_HASH = 'b201f355fffc6e3dc17ac540e7d22a1db2da9cd8c202e5cc53d9c61394a9f752'
+TRAINING_PARAMETER_CATALOG_VERSION = 'phase-c2-training-v2'
+TRAINING_PARAMETER_CATALOG_HASH = '2b41eb47190fc39b782b561989beb083a5778bb182ff1cabe01ad0e24c26e252'
 TRAINING_PARAMETER_CONTRACT_VERSION = 3
 TRAINING_PARAMETER_ALWAYS_FORWARD_FIELDS = (
     'epochs',
@@ -128,7 +128,7 @@ TRAINING_PARAMETER_EFFECTIVE_FIELDS = (
 class TrainingParameterRequest(BaseModel):
     epochs: int = Field(default=1, ge=1, le=300)
     batch: int = Field(default=4, ge=1, le=64)
-    imgsz: Literal[320, 416, 512, 640, 768] = 640
+    imgsz: Literal[320, 416, 512, 640, 768, 1024] = 640
     patience: int = Field(default=100, ge=0, le=300)
     fraction: float = Field(default=1.0, gt=0.0, le=1.0)
     freeze: int = Field(default=10, ge=0, le=100)

@@ -514,7 +514,7 @@ class TestTrainingControlPlane:
                 create_training_batch({
                     'jobs': [{
                         'project_id': self.project_ids[0],
-                        'model': 'yolo11n.pt',
+                        'model': 'yolov8n.pt',
                         'epochs': 1,
                         'batch': 4,
                         'imgsz': 640,

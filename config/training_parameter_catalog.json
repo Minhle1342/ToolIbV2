@@ -1,5 +1,5 @@
 {
-  "catalog_version": "phase-c2-training-v1",
+  "catalog_version": "phase-c2-training-v2",
   "contract_version": 3,
   "ultralytics_version": "8.4.110",
   "groups": [
@@ -12,7 +12,7 @@
   "fields": [
     {"name": "epochs", "type": "integer", "default": 50, "worker_default": 1, "minimum": 1, "maximum": 300, "forward": "always", "effective": true, "ui": {"label": "Epochs", "group": "core", "step": 1}},
     {"name": "batch", "type": "integer", "default": 8, "worker_default": 4, "minimum": 1, "maximum": 64, "forward": "always", "effective": true, "ui": {"label": "Batch", "group": "core", "step": 1, "summary": true}},
-    {"name": "imgsz", "type": "enum", "default": 640, "worker_default": 640, "options": [{"value": 320, "label": "320"}, {"value": 416, "label": "416"}, {"value": 512, "label": "512"}, {"value": 640, "label": "640"}, {"value": 768, "label": "768"}], "forward": "always", "effective": true, "ui": {"label": "Image size", "group": "core", "summary": true}},
+    {"name": "imgsz", "type": "enum", "default": 640, "worker_default": 640, "options": [{"value": 320, "label": "320"}, {"value": 416, "label": "416"}, {"value": 512, "label": "512"}, {"value": 640, "label": "640"}, {"value": 768, "label": "768"}, {"value": 1024, "label": "1024"}], "forward": "always", "effective": true, "ui": {"label": "Image size", "group": "core", "summary": true}},
     {"name": "patience", "type": "integer", "default": 100, "minimum": 0, "maximum": 300, "forward": "parameter_set", "effective": true, "ui": {"label": "Early-stop patience", "group": "core", "step": 1, "summary": true}},
     {"name": "fraction", "type": "number", "default": 1.0, "exclusive_minimum": 0.0, "maximum": 1.0, "forward": "parameter_set", "effective": true, "ui": {"label": "Dataset fraction", "group": "core", "step": 0.05, "help": "Fraction of the training split used by Ultralytics.", "summary": true}},
     {"name": "freeze", "type": "integer", "default": 10, "minimum": 0, "maximum": 100, "forward": "parameter_set", "effective": true, "ui": {"label": "Freeze layers", "group": "core", "step": 1}},
