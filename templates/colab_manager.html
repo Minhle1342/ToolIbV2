@@ -2093,6 +2093,9 @@ print("Initialized YOLO-NAS Training Configuration")
                     option.textContent = `${project.name} (#${project.id})`;
                     selector.appendChild(option);
                 }
+                if (projectsWithClasses.length) {
+                    selector.options[0].selected = true;
+                }
                 if (!projectsWithClasses.length) {
                     const option = document.createElement("option");
                     option.disabled = true;
@@ -2248,12 +2251,15 @@ print("Initialized YOLO-NAS Training Configuration")
             const parentSelector = document.getElementById("finetuneParentModel");
             if (!parentSelector) return;
             const previousParent = parentSelector.value;
-            const selectedProjectId = Number(
-                document.getElementById("trainingBatchProjects")?.value
-            );
-            const project = trainingProjects.find(
-                candidate => candidate.id === selectedProjectId
-            );
+            const projectSelector = document.getElementById("trainingBatchProjects");
+            const selectedProjectIds = Array.from(
+                projectSelector?.selectedOptions || []
+            ).map(option => Number(option.value)).filter(Boolean);
+            const project = selectedProjectIds.length === 1
+                ? trainingProjects.find(
+                    candidate => candidate.id === selectedProjectIds[0]
+                )
+                : null;
             const projectClasses = canonicalFinetuneClassNames(
                 project?.class_names
             );
@@ -2275,12 +2281,16 @@ print("Initialized YOLO-NAS Training Configuration")
             parentSelector.innerHTML = "";
             const option = document.createElement("option");
             option.value = "";
-            if (!project || !projectClasses.length) {
-                option.textContent = "Chua co class cua project de doi chieu";
+            if (selectedProjectIds.length !== 1) {
+                option.textContent = "Chọn đúng một project để đối chiếu class";
+                option.disabled = true;
+                parentSelector.appendChild(option);
+            } else if (!projectClasses.length) {
+                option.textContent = "Project chưa có bộ class để đối chiếu";
+                option.disabled = true;
+                parentSelector.appendChild(option);
             } else if (!trainableParents.length) {
-                option.textContent = "Chua co parent .pt dung bo classes cua project";
-            }
-            if (!trainableParents.length) {
+                option.textContent = "Chưa có parent .pt đúng bộ class của project";
                 parentSelector.appendChild(option);
             }
             if (!trainableParents.length) return;
@@ -2288,8 +2298,11 @@ print("Initialized YOLO-NAS Training Configuration")
             for (const model of trainableParents) {
                 const modelOption = document.createElement("option");
                 modelOption.value = model.id;
+                const modelClassCount = canonicalFinetuneClassNames(
+                    model.class_names
+                ).length;
                 modelOption.textContent = (
-                    `${model.name} · ${projectClasses.length} lop nhan dien`
+                    `${model.name} · ${modelClassCount} lớp nhận diện`
                 );
                 parentSelector.appendChild(modelOption);
             }
