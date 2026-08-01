@@ -1164,6 +1164,57 @@ class TestTrainingControlPlane:
                 raise AssertionError('Mismatched parent classes were accepted.')
             assert TrainingDataset.query.count() == 0
 
+    def test_finetune_accepts_append_only_project_classes(self):
+        parent_model_id = self.create_parent_model(class_names=['bottle'])
+        with self.app.app_context():
+            batch, tasks = create_finetune_experiment({
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': self.active_parameter_set_ids(1),
+            })
+
+            dataset = db.session.get(
+                TrainingDataset,
+                batch.training_dataset_id,
+            )
+            assert dataset.class_names == ['bottle', 'cap']
+            assert len(tasks) == 1
+            assert tasks[0].parent_model_id == parent_model_id
+
+    def test_finetune_rejects_reordered_existing_classes(self):
+        parent_model_id = self.create_parent_model(
+            class_names=['cap', 'bottle'],
+        )
+        with self.app.app_context():
+            try:
+                create_finetune_experiment({
+                    'project_id': self.project_ids[0],
+                    'parent_model_id': parent_model_id,
+                    'parameter_set_ids': self.active_parameter_set_ids(1),
+                })
+            except ValueError as exc:
+                assert 'new classes may only be appended' in str(exc)
+            else:
+                raise AssertionError('Reordered parent classes were accepted.')
+            assert TrainingDataset.query.count() == 0
+
+    def test_finetune_rejects_parent_with_more_classes_than_project(self):
+        parent_model_id = self.create_parent_model(
+            class_names=['bottle', 'cap', 'legacy-extra'],
+        )
+        with self.app.app_context():
+            try:
+                create_finetune_experiment({
+                    'project_id': self.project_ids[0],
+                    'parent_model_id': parent_model_id,
+                    'parameter_set_ids': self.active_parameter_set_ids(1),
+                })
+            except ValueError as exc:
+                assert 'new classes may only be appended' in str(exc)
+            else:
+                raise AssertionError('Longer parent class list was accepted.')
+            assert TrainingDataset.query.count() == 0
+
     def test_finetune_experiment_supports_two_candidate_smoke_test(self):
         parent_model_id = self.create_parent_model()
         config = self.client.get('/api/finetune/config').get_json()

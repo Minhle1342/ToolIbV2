@@ -249,6 +249,16 @@ def normalize_class_names(value) -> list[str]:
     return []
 
 
+def finetune_class_names_are_compatible(parent_value, dataset_value) -> bool:
+    parent_classes = normalize_class_names(parent_value)
+    dataset_classes = normalize_class_names(dataset_value)
+    return (
+        bool(parent_classes)
+        and len(dataset_classes) >= len(parent_classes)
+        and dataset_classes[:len(parent_classes)] == parent_classes
+    )
+
+
 class CheckpointUploadTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1343,10 +1353,11 @@ def run_training_job(
                     request_data.parent_artifact_id,
                     request_data.parent_sha256,
                 )
-            if (
-                dataset_info is not None
-                and normalize_class_names(parent_info.get("class_names"))
-                != normalize_class_names(dataset_info.get("class_names"))
+            if dataset_info is not None and not (
+                finetune_class_names_are_compatible(
+                    parent_info.get("class_names"),
+                    dataset_info.get("class_names"),
+                )
             ):
                 raise ValueError(
                     "Parent checkpoint classes do not match dataset classes."
@@ -1760,8 +1771,9 @@ def start_train(request_data: TrainRequest, request: Request):
                 request_data.parent_artifact_id,
                 request_data.parent_sha256,
             )
-            if normalize_class_names(parent_info.get("class_names")) != (
-                normalize_class_names(dataset_info.get("class_names"))
+            if not finetune_class_names_are_compatible(
+                parent_info.get("class_names"),
+                dataset_info.get("class_names"),
             ):
                 raise ValueError(
                     "Parent checkpoint classes do not match dataset classes."

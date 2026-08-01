@@ -2299,11 +2299,29 @@ print("Initialized YOLO-NAS Training Configuration")
                 name => !projectClasses.includes(name)
             );
             const exactMatch = sameFinetuneClassNames(parentClasses, projectClasses);
+            const prefixMatch = parentClasses.length > 0
+                && projectClasses.length >= parentClasses.length
+                && parentClasses.every(
+                    (name, index) => name === projectClasses[index]
+                );
+            const appendOnlyExtension = prefixMatch
+                && projectClasses.length > parentClasses.length;
             return {
                 parentClasses,
                 projectClasses,
                 missingInParent,
                 extraInParent,
+                appendedClasses: appendOnlyExtension
+                    ? projectClasses.slice(parentClasses.length)
+                    : [],
+                appendOnlyExtension,
+                compatible: exactMatch || appendOnlyExtension,
+                prefixMismatch: (
+                    !exactMatch
+                    && !appendOnlyExtension
+                    && parentClasses.length > 0
+                    && projectClasses.length >= parentClasses.length
+                ),
                 orderMismatch: (
                     !exactMatch
                     && missingInParent.length === 0
@@ -2324,6 +2342,9 @@ print("Initialized YOLO-NAS Training Configuration")
             if (comparison.orderMismatch) {
                 reasons.push("đủ tên class nhưng thứ tự không giống dataset");
             }
+            if (comparison.prefixMismatch && !comparison.orderMismatch) {
+                reasons.push("class mới phải nối ở cuối để giữ nguyên class ID cũ");
+            }
             return reasons.join("; ") || "bộ class không trùng khớp";
         }
 
@@ -2341,10 +2362,10 @@ print("Initialized YOLO-NAS Training Configuration")
         function matchingFinetuneProjects(model) {
             const parentClasses = canonicalFinetuneClassNames(model?.class_names);
             if (!parentClasses.length) return [];
-            return trainingProjects.filter(project => sameFinetuneClassNames(
+            return trainingProjects.filter(project => compareFinetuneClassNames(
                 parentClasses,
                 canonicalFinetuneClassNames(project.class_names)
-            ));
+            ).compatible);
         }
 
         function renderFinetuneArchitectureNotice() {
@@ -2391,6 +2412,13 @@ print("Initialized YOLO-NAS Training Configuration")
                 if (comparison.exactMatch) {
                     details.textContent = (
                         `Phù hợp: model và ${project.name} cùng ${projectClasses.length} class, đúng thứ tự.`
+                    );
+                    details.className = "text-[10px] text-emerald-300";
+                } else if (comparison.appendOnlyExtension) {
+                    details.textContent = (
+                        `Phù hợp để mở rộng: giữ nguyên ${comparison.parentClasses.length} class cũ, `
+                        + `nối thêm ${comparison.appendedClasses.length} class ở cuối: `
+                        + `${comparison.appendedClasses.join(", ")}.`
                     );
                     details.className = "text-[10px] text-emerald-300";
                 } else {
@@ -2503,13 +2531,13 @@ print("Initialized YOLO-NAS Training Configuration")
                 ? allTrainableParents.filter(model => compareFinetuneClassNames(
                     model.class_names,
                     projectClasses
-                ).exactMatch)
+                ).compatible)
                 : [];
             const incompatibleParents = projectClasses.length
                 ? allTrainableParents.filter(model => !compareFinetuneClassNames(
                     model.class_names,
                     projectClasses
-                ).exactMatch)
+                ).compatible)
                 : [];
 
             parentSelector.innerHTML = "";
@@ -3042,13 +3070,18 @@ print("Initialized YOLO-NAS Training Configuration")
                     projectClasses
                 );
                 const checksum = validated.artifacts[0].sha256.slice(0, 12);
-                statusBox.textContent = comparison.exactMatch
-                    ? `Đã xác thực · ${validated.class_names.length} class · phù hợp ${project.name} · ${checksum}`
+                statusBox.textContent = comparison.compatible
+                    ? (
+                        comparison.appendOnlyExtension
+                            ? `Đã xác thực · ${validated.class_names.length} class cũ · `
+                                + `mở rộng +${comparison.appendedClasses.length} class với ${project.name} · ${checksum}`
+                            : `Đã xác thực · ${validated.class_names.length} class · phù hợp ${project.name} · ${checksum}`
+                    )
                     : (
                         `File .pt hợp lệ (${validated.class_names.length} class), nhưng chưa dùng được với ${project.name}: `
                         + describeFinetuneClassMismatch(comparison)
                     );
-                statusBox.className = comparison.exactMatch
+                statusBox.className = comparison.compatible
                     ? "text-[10px] text-emerald-300"
                     : "text-[10px] text-rose-300";
                 document.getElementById("finetuneParentName").value = "";
@@ -3056,7 +3089,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 fileInput.value = "";
                 renderFinetuneParentModels();
                 updateFinetuneParentUploadState();
-                if (comparison.exactMatch) {
+                if (comparison.compatible) {
                     showToast(`Parent ${validated.name} đã sẵn sàng để fine-tune.`);
                 }
             } catch (error) {

@@ -4,6 +4,22 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
+def test_finetune_ui_accepts_only_append_only_class_expansion():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    for marker in (
+        'const appendOnlyExtension = prefixMatch',
+        'projectClasses.slice(parentClasses.length)',
+        'compatible: exactMatch || appendOnlyExtension',
+        ').compatible)',
+        'comparison.appendOnlyExtension',
+        'comparison.compatible',
+    ):
+        assert marker in template
+
+
 def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
     template = (
         REPOSITORY_ROOT / 'templates' / 'colab_manager.html'

@@ -155,6 +155,22 @@ def test_notebook_exposes_phase6_parent_cache_finetune_and_artifacts():
         assert expected in source
 
 
+def test_worker_allows_only_append_only_finetune_class_expansion():
+    source = notebook_source()
+    worker = WORKER_PATH.read_text(encoding='utf-8')
+
+    for generated_source in (worker, source):
+        assert 'def finetune_class_names_are_compatible(' in generated_source
+        assert 'len(dataset_classes) >= len(parent_classes)' in generated_source
+        assert (
+            'dataset_classes[:len(parent_classes)] == parent_classes'
+            in generated_source
+        )
+        assert generated_source.count(
+            'finetune_class_names_are_compatible('
+        ) >= 3
+
+
 def test_notebook_exposes_phase7_checkpoint_upload_and_resume_contract():
     source = notebook_source()
 

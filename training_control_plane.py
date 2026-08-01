@@ -1767,6 +1767,16 @@ def _canonical_class_names(value):
     return []
 
 
+def _finetune_class_names_are_compatible(parent_value, dataset_value):
+    parent_classes = _canonical_class_names(parent_value)
+    dataset_classes = _canonical_class_names(dataset_value)
+    return (
+        bool(parent_classes)
+        and len(dataset_classes) >= len(parent_classes)
+        and dataset_classes[:len(parent_classes)] == parent_classes
+    )
+
+
 def parent_artifact_for_model(model):
     artifact = ModelArtifact.query.filter_by(
         model_id=model.id,
@@ -2042,9 +2052,13 @@ def _create_finetune_experiment_once(payload, batch_id=None):
     project_classes = _canonical_class_names(utils.get_classes(project))
     if not parent_classes:
         raise ValueError('Parent model has no validated class metadata.')
-    if parent_classes != project_classes:
+    if not _finetune_class_names_are_compatible(
+        parent_classes,
+        project_classes,
+    ):
         raise ValueError(
-            'Parent model classes must exactly match the selected project '
+            'Parent model classes must match the start of the selected project '
+            'classes; new classes may only be appended '
             f'(model={parent_classes}, project={project_classes}).'
         )
 
@@ -2064,9 +2078,13 @@ def _create_finetune_experiment_once(payload, batch_id=None):
         ),
     )
     dataset_classes = _canonical_class_names(dataset.class_names)
-    if parent_classes != dataset_classes:
+    if not _finetune_class_names_are_compatible(
+        parent_classes,
+        dataset_classes,
+    ):
         raise ValueError(
-            'Parent model classes must exactly match the dataset snapshot '
+            'Parent model classes must match the start of the dataset snapshot '
+            'classes; new classes may only be appended '
             f'(model={parent_classes}, dataset={dataset_classes}).'
         )
 
