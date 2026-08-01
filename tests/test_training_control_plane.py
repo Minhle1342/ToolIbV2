@@ -975,6 +975,15 @@ class TestTrainingControlPlane:
         assert body['fine_tune_eligible'] is True
         assert body['class_names'] == ['bottle', 'cap']
 
+    def test_projects_api_exposes_classes_for_finetune_parent_filter(self):
+        response = self.client.get('/api/projects')
+        assert response.status_code == 200
+        project = next(
+            item for item in response.get_json()
+            if item['id'] == self.project_ids[0]
+        )
+        assert project['class_names'] == ['bottle', 'cap']
+
     def test_finetune_parameter_set_crud_clone_archive_restore_and_delete(self):
         config = self.client.get('/api/finetune/config')
         assert config.status_code == 200
@@ -1139,6 +1148,21 @@ class TestTrainingControlPlane:
             } == set(parameter_set_ids)
             assert all(task.parameter_set_snapshot for task in tasks)
             assert TrainingDataset.query.count() == 1
+
+    def test_finetune_rejects_parent_with_different_project_classes(self):
+        parent_model_id = self.create_parent_model(class_names=['vial'])
+        with self.app.app_context():
+            try:
+                create_finetune_experiment({
+                    'project_id': self.project_ids[0],
+                    'parent_model_id': parent_model_id,
+                    'parameter_set_ids': self.active_parameter_set_ids(1),
+                })
+            except ValueError as exc:
+                assert 'selected project' in str(exc)
+            else:
+                raise AssertionError('Mismatched parent classes were accepted.')
+            assert TrainingDataset.query.count() == 0
 
     def test_finetune_experiment_supports_two_candidate_smoke_test(self):
         parent_model_id = self.create_parent_model()

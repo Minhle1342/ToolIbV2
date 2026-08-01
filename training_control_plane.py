@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+import utils
 from cryptography.fernet import Fernet, InvalidToken
 from flask import current_app
 from requests_toolbelt.multipart.encoder import MultipartEncoder
@@ -2037,6 +2038,16 @@ def _create_finetune_experiment_once(payload, batch_id=None):
             + ', '.join(invalid_tasks)
         )
 
+    parent_classes = _canonical_class_names(parent_model.class_names)
+    project_classes = _canonical_class_names(utils.get_classes(project))
+    if not parent_classes:
+        raise ValueError('Parent model has no validated class metadata.')
+    if parent_classes != project_classes:
+        raise ValueError(
+            'Parent model classes must exactly match the selected project '
+            f'(model={parent_classes}, project={project_classes}).'
+        )
+
     splits = payload.get('splits') or {'train': 80, 'val': 20, 'test': 0}
     dataset = prepare_training_dataset_snapshot(
         project_id=project_id,
@@ -2052,10 +2063,7 @@ def _create_finetune_experiment_once(payload, batch_id=None):
             default_clear_header_callback,
         ),
     )
-    parent_classes = _canonical_class_names(parent_model.class_names)
     dataset_classes = _canonical_class_names(dataset.class_names)
-    if not parent_classes:
-        raise ValueError('Parent model has no validated class metadata.')
     if parent_classes != dataset_classes:
         raise ValueError(
             'Parent model classes must exactly match the dataset snapshot '

@@ -409,7 +409,12 @@ def select_directory():
 @api_bp.route('/projects', methods=['GET'])
 def get_projects():
     projects = Project.query.all()
-    return jsonify([p.to_dict() for p in projects])
+    payloads = []
+    for project in projects:
+        payload = project.to_dict()
+        payload['class_names'] = utils.get_classes(project)
+        payloads.append(payload)
+    return jsonify(payloads)
 
 @api_bp.route('/projects', methods=['POST'])
 def create_project():

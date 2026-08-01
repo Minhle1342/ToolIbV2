@@ -1210,6 +1210,7 @@
         let trainingModelCatalogEntries = [];
         let trainingModelAllowedCheckpoints = new Set();
         let finetuneModels = [];
+        let trainingProjects = [];
         let finetuneConfig = null;
         let finetuneParameterSets = [];
         let finetuneSelectedParameterSetIds = new Set();
@@ -2060,6 +2061,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     localTrainingApiFetch("/api/projects")
                 ]);
                 applyTrainingModelCatalog(catalog);
+                trainingProjects = projects;
                 loadTemplateToUI(activeTemplateId);
                 const selector = document.getElementById("trainingBatchProjects");
                 selector.innerHTML = "";
@@ -2075,6 +2077,7 @@ print("Initialized YOLO-NAS Training Configuration")
                     option.textContent = "Chưa có ToolIb project.";
                     selector.appendChild(option);
                 }
+                selector.addEventListener("change", renderFinetuneParentModels);
                 await loadFinetuneOptions(projects);
             } catch (error) {
                 showColabRemoteError(`Không tải được project cho batch: ${error.message}`);
@@ -2195,6 +2198,80 @@ print("Initialized YOLO-NAS Training Configuration")
             }
         }
 
+        function canonicalFinetuneClassNames(value) {
+            if (Array.isArray(value)) {
+                return value.map(item => String(item));
+            }
+            if (value && typeof value === "object") {
+                return Object.keys(value)
+                    .sort((left, right) => {
+                        const leftNumber = Number(left);
+                        const rightNumber = Number(right);
+                        if (Number.isInteger(leftNumber) && Number.isInteger(rightNumber)) {
+                            return leftNumber - rightNumber;
+                        }
+                        return left.localeCompare(right);
+                    })
+                    .map(key => String(value[key]));
+            }
+            return [];
+        }
+
+        function sameFinetuneClassNames(left, right) {
+            return left.length === right.length
+                && left.every((name, index) => name === right[index]);
+        }
+
+        function renderFinetuneParentModels() {
+            const parentSelector = document.getElementById("finetuneParentModel");
+            if (!parentSelector) return;
+            const previousParent = parentSelector.value;
+            const selectedProjectId = Number(
+                document.getElementById("trainingBatchProjects")?.value
+            );
+            const project = trainingProjects.find(
+                candidate => candidate.id === selectedProjectId
+            );
+            const projectClasses = canonicalFinetuneClassNames(
+                project?.class_names
+            );
+            const trainableParents = finetuneModels.filter(model => (
+                model.model_type === "detection"
+                && (model.artifacts || []).some(
+                    artifact => ["parent_pt", "best_pt"].includes(artifact.kind)
+                )
+                && sameFinetuneClassNames(
+                    canonicalFinetuneClassNames(model.class_names),
+                    projectClasses
+                )
+            ));
+
+            parentSelector.innerHTML = "";
+            const option = document.createElement("option");
+            option.value = "";
+            if (!project || !projectClasses.length) {
+                option.textContent = "Chua co class cua project de doi chieu";
+            } else if (!trainableParents.length) {
+                option.textContent = "Chua co parent .pt dung bo classes cua project";
+            }
+            if (!project || !projectClasses.length || !trainableParents.length) {
+                parentSelector.appendChild(option);
+                return;
+            }
+
+            for (const model of trainableParents) {
+                const modelOption = document.createElement("option");
+                modelOption.value = model.id;
+                modelOption.textContent = (
+                    `${model.name} · ${projectClasses.length} lop nhan dien`
+                );
+                parentSelector.appendChild(modelOption);
+            }
+            if (trainableParents.some(model => String(model.id) === previousParent)) {
+                parentSelector.value = previousParent;
+            }
+        }
+
         async function loadFinetuneOptions(projects = null) {
             const [config, models] = await Promise.all([
                 localTrainingApiFetch("/api/finetune/config"),
@@ -2203,6 +2280,9 @@ print("Initialized YOLO-NAS Training Configuration")
             finetuneConfig = config;
             renderFinetuneParameterEditor();
             finetuneModels = models;
+            if (Array.isArray(projects)) {
+                trainingProjects = projects;
+            }
             finetuneParameterSets = config.parameter_sets || [];
             const activeParameterSets = finetuneParameterSets.filter(
                 parameterSet => parameterSet.is_active
@@ -2263,6 +2343,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 }
             }
 
+            renderFinetuneParentModels();
             renderFinetuneParameterSets();
             updateUnifiedTrainingMode();
         }
