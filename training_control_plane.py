@@ -612,6 +612,44 @@ def _ensure_dataset_object(
     return object_key, reused
 
 
+def publish_training_dataset_object(dataset):
+    store = checkpoint_store()
+    if not store.enabled:
+        return {
+            'published': False,
+            'reused': False,
+            'storage_backend': store.backend_name,
+        }
+
+    if dataset.status not in {'prepared', 'publishing', 'published', 'publish_failed'}:
+        raise ValueError(
+            'Training dataset must be prepared before publishing to object storage.'
+        )
+
+    dataset_id = dataset.id
+    dataset.status = 'publishing'
+    dataset.error = None
+    db.session.commit()
+    try:
+        _object_key, reused = _ensure_dataset_object(dataset, store)
+        dataset.status = 'published'
+        dataset.error = None
+        db.session.commit()
+        return {
+            'published': True,
+            'reused': reused,
+            'storage_backend': store.backend_name,
+        }
+    except Exception as exc:
+        db.session.rollback()
+        persisted = db.session.get(TrainingDataset, dataset_id)
+        if persisted is not None:
+            persisted.status = 'publish_failed'
+            persisted.error = str(exc)[:8000]
+            db.session.commit()
+        raise
+
+
 def _ensure_parent_object(artifact, store):
     artifact_path = Path(artifact.storage_path or '').resolve()
     if not artifact_path.is_file():
@@ -2087,6 +2125,8 @@ def _create_finetune_experiment_once(payload, batch_id=None):
             'classes; new classes may only be appended '
             f'(model={parent_classes}, dataset={dataset_classes}).'
         )
+
+    publish_training_dataset_object(dataset)
 
     jobs = []
     for candidate_index, parameter_set in enumerate(parameter_sets, start=1):

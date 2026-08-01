@@ -1149,6 +1149,92 @@ class TestTrainingControlPlane:
             assert all(task.parameter_set_snapshot for task in tasks)
             assert TrainingDataset.query.count() == 1
 
+    def test_finetune_publishes_dataset_before_queue_without_worker(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(2)
+        object_store = FakeObjectStore()
+
+        with self.app.app_context(), mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            batch, tasks = create_finetune_experiment({
+                'name': 'Prepublished fine-tune dataset',
+                'project_id': self.project_ids[0],
+                'parent_model_id': parent_model_id,
+                'parameter_set_ids': parameter_set_ids,
+            })
+
+            dataset = db.session.get(
+                TrainingDataset,
+                batch.training_dataset_id,
+            )
+            assert TrainingWorker.query.count() == 0
+            assert dataset.status == 'published'
+            assert dataset.object_verified_at is not None
+            assert len(tasks) == 2
+            assert {task.training_dataset_id for task in tasks} == {dataset.id}
+            dataset_uploads = {
+                key: count
+                for key, count in object_store.upload_counts.items()
+                if '/datasets/' in key
+            }
+            assert len(dataset_uploads) == 1
+            assert set(dataset_uploads.values()) == {1}
+
+    def test_scheduler_reuses_prepublished_dataset_without_uploading_again(self):
+        parent_model_id = self.create_parent_model()
+        parameter_set_ids = self.active_parameter_set_ids(1)
+        worker_id = self.add_worker('PrepublishedDatasetWorker')
+        object_store = FakeObjectStore()
+        state = FakeWorkerState()
+
+        with self.app.app_context():
+            worker = db.session.get(TrainingWorker, worker_id)
+            worker.capabilities = {
+                **(worker.capabilities or {}),
+                'object_input_download': True,
+                'artifact_object_upload': True,
+                'object_transport_protocol_version': 1,
+            }
+            db.session.commit()
+
+            with mock.patch(
+                'training_control_plane.checkpoint_store',
+                return_value=object_store,
+            ):
+                create_finetune_experiment({
+                    'name': 'Reuse prepublished dataset',
+                    'project_id': self.project_ids[0],
+                    'parent_model_id': parent_model_id,
+                    'parameter_set_ids': parameter_set_ids,
+                })
+
+        factory = lambda worker: ObjectTransportWorkerAdapter(
+            worker,
+            state,
+            object_store,
+        )
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            result = dispatch_once(
+                self.app,
+                adapter_factory=factory,
+                probe=False,
+                asynchronous=False,
+            )
+
+        assert result['dispatched'] == 1
+        dataset_uploads = {
+            key: count
+            for key, count in object_store.upload_counts.items()
+            if '/datasets/' in key
+        }
+        assert len(dataset_uploads) == 1
+        assert set(dataset_uploads.values()) == {1}
+
     def test_finetune_rejects_parent_with_different_project_classes(self):
         parent_model_id = self.create_parent_model(class_names=['vial'])
         with self.app.app_context():

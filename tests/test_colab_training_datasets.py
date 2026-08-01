@@ -10,7 +10,15 @@ from unittest import mock
 import yaml
 
 import utils
-from models import Image, Project, TrainingDataset, TrainingJob, db
+from artifact_object_store import ObjectStoreError, StoredObject
+from models import (
+    Image,
+    Project,
+    TrainingDataset,
+    TrainingJob,
+    TrainingWorker,
+    db,
+)
 from test_helpers import create_isolated_test_app
 
 
@@ -22,6 +30,33 @@ class FakeUploadResponse:
 
     def json(self):
         return self._payload
+
+
+class FakeDatasetObjectStore:
+    backend_name = 's3'
+    enabled = True
+
+    def __init__(self, fail_uploads=0):
+        self.objects = {}
+        self.upload_count = 0
+        self.fail_uploads = fail_uploads
+
+    @staticmethod
+    def object_key(*parts):
+        return 'toolib/' + '/'.join(str(part) for part in parts)
+
+    def head(self, object_key):
+        if object_key not in self.objects:
+            raise ObjectStoreError(f'Object does not exist: {object_key}')
+        return StoredObject(object_key, len(self.objects[object_key]))
+
+    def upload_file(self, source, object_key):
+        self.upload_count += 1
+        if self.fail_uploads:
+            self.fail_uploads -= 1
+            raise ObjectStoreError('Simulated R2 upload failure.')
+        self.objects[object_key] = Path(source).read_bytes()
+        return self.head(object_key)
 
 
 class ColabTrainingDatasetTests(unittest.TestCase):
@@ -229,6 +264,65 @@ class ColabTrainingDatasetTests(unittest.TestCase):
         self.assertEqual(400, response.status_code)
         self.assertIn('checksum has changed', response.get_json()['error'])
         remote_post.assert_not_called()
+
+    def test_publish_to_object_storage_does_not_require_colab_worker_and_reuses(self):
+        snapshot = self.prepare_snapshot()
+        object_store = FakeDatasetObjectStore()
+
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            published = self.client.post(
+                f"/api/training-datasets/{snapshot['id']}/publish",
+            )
+            reused = self.client.post(
+                f"/api/training-datasets/{snapshot['id']}/publish",
+            )
+
+        self.assertEqual(200, published.status_code, published.get_data(as_text=True))
+        self.assertEqual('published', published.get_json()['status'])
+        self.assertTrue(published.get_json()['object_published'])
+        self.assertFalse(published.get_json()['object_reused'])
+        self.assertTrue(published.get_json()['object_verified_at'])
+        self.assertEqual(200, reused.status_code, reused.get_data(as_text=True))
+        self.assertTrue(reused.get_json()['object_reused'])
+        self.assertEqual(1, object_store.upload_count)
+
+        with self.app.app_context():
+            self.assertEqual(0, TrainingWorker.query.count())
+
+    def test_failed_object_publish_is_retryable(self):
+        snapshot = self.prepare_snapshot()
+        object_store = FakeDatasetObjectStore(fail_uploads=1)
+
+        with mock.patch(
+            'training_control_plane.checkpoint_store',
+            return_value=object_store,
+        ):
+            failed = self.client.post(
+                f"/api/training-datasets/{snapshot['id']}/publish",
+            )
+            with self.app.app_context():
+                failed_dataset = db.session.get(
+                    TrainingDataset,
+                    snapshot['id'],
+                )
+                self.assertEqual('publish_failed', failed_dataset.status)
+                self.assertIn('Simulated R2', failed_dataset.error)
+            retried = self.client.post(
+                f"/api/training-datasets/{snapshot['id']}/publish",
+            )
+
+        self.assertEqual(502, failed.status_code, failed.get_data(as_text=True))
+        self.assertEqual(200, retried.status_code, retried.get_data(as_text=True))
+        self.assertEqual('published', retried.get_json()['status'])
+        self.assertEqual(2, object_store.upload_count)
+
+        with self.app.app_context():
+            dataset = db.session.get(TrainingDataset, snapshot['id'])
+            self.assertEqual('published', dataset.status)
+            self.assertIsNone(dataset.error)
 
     def test_training_job_sync_links_dataset_and_project(self):
         snapshot = self.prepare_snapshot()

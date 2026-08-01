@@ -62,6 +62,7 @@ from training_control_plane import (
     encrypt_worker_token,
     finetune_presets_payload,
     normalize_worker_api_url,
+    publish_training_dataset_object,
     probe_worker,
     retry_task,
     scheduler_status,
@@ -3112,6 +3113,32 @@ def upload_training_dataset(dataset_pk):
             db.session.commit()
         status_code = 400 if isinstance(exc, ValueError) else 502
         return jsonify({'error': str(exc)}), status_code
+
+
+@api_bp.route('/training-datasets/<int:dataset_pk>/publish', methods=['POST'])
+def publish_training_dataset(dataset_pk):
+    dataset = db.session.get(TrainingDataset, dataset_pk)
+    if dataset is None:
+        return jsonify({'error': 'Training dataset not found.'}), 404
+
+    try:
+        publication = publish_training_dataset_object(dataset)
+        response = dataset.to_dict()
+        response['object_published'] = publication['published']
+        response['object_reused'] = publication['reused']
+        return jsonify(response)
+    except ValueError as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 400
+    except (ObjectStoreError, WorkerApiError) as exc:
+        db.session.rollback()
+        return jsonify({'error': str(exc)}), 502
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception('Could not publish training dataset')
+        return jsonify({
+            'error': f'Could not publish training dataset: {exc}'
+        }), 500
 
 
 @api_bp.route('/training-jobs', methods=['GET'])

@@ -1230,6 +1230,13 @@
         let colabPreparedDataset = null;
         let trainingControlPlaneWorkers = [];
         let trainingControlPlaneBatches = [];
+        const trainingTechnicalDetailsOpen = new Set();
+        const TRAINING_TASK_ERROR_STATUSES = new Set([
+            "failed",
+            "worker_lost",
+            "retry_wait",
+            "waiting_for_worker"
+        ]);
         let trainingModelCatalog = null;
         let trainingModelCatalogEntries = [];
         let trainingModelAllowedCheckpoints = new Set();
@@ -3309,14 +3316,14 @@ print("Initialized YOLO-NAS Training Configuration")
             button.setAttribute("aria-busy", "true");
             button.innerHTML = (
                 '<i class="fa-solid fa-spinner fa-spin mr-1"></i>'
-                + 'Đã nhận click · đang tạo và nén snapshot...'
+                + 'Đang tạo snapshot và publish lên R2...'
             );
             submitStatus.className = (
                 "rounded border border-sky-800 bg-sky-950/30 "
                 + "px-3 py-2 text-[10px] text-sky-200"
             );
             submitStatus.textContent = (
-                "Đã nhận yêu cầu. ToolIb đang tạo và nén snapshot; "
+                "Đã nhận yêu cầu. ToolIb đang tạo snapshot, publish và kiểm tra R2; "
                 + "không cần bấm lại."
             );
             let createdBatchId = null;
@@ -3336,7 +3343,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 const replayText = experiment.idempotent_replay
                     ? "Yêu cầu này đã được nhận trước đó; đang mở lại batch cũ."
                     : (
-                        `Snapshot đã xong. Đã queue ${experiment.total_jobs} `
+                        `Snapshot đã sẵn sàng trên R2. Đã queue ${experiment.total_jobs} `
                         + "bộ tham số."
                     );
                 submitStatus.className = (
@@ -3345,7 +3352,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 );
                 submitStatus.textContent = replayText;
                 showToast(
-                    `Đã tạo một snapshot và queue ${experiment.total_jobs} bộ tham số.`
+                    `Dataset đã sẵn sàng; đã queue ${experiment.total_jobs} bộ tham số.`
                 );
                 if (experiment.idempotent_replay) {
                     showToast(
@@ -3891,13 +3898,45 @@ print("Initialized YOLO-NAS Training Configuration")
             }
 
             const createButton = document.getElementById("trainingBatchCreateBtn");
+            const idleButtonHtml = createButton.innerHTML;
             createButton.disabled = true;
+            createButton.setAttribute("aria-busy", "true");
             try {
                 const priority = Number(document.getElementById("trainingBatchPriority").value || 0);
                 const maxAttempts = Number(document.getElementById("trainingBatchMaxAttempts").value || 3);
+                const datasetIdsByProject = new Map();
+                let allDatasetsPublished = true;
+                for (const [projectIndex, projectId] of selectedProjectIds.entries()) {
+                    createButton.innerHTML = (
+                        '<i class="fa-solid fa-spinner fa-spin mr-1"></i>'
+                        + `Đang chuẩn bị dataset ${projectIndex + 1}/${selectedProjectIds.length}...`
+                    );
+                    const prepared = await localTrainingApiFetch("/api/training-datasets", {
+                        method: "POST",
+                        body: {
+                            project_id: projectId,
+                            splits,
+                            exclude_flagged: document.getElementById("colabDatasetExcludeFlagged").checked,
+                            include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
+                        }
+                    });
+                    createButton.innerHTML = (
+                        '<i class="fa-solid fa-cloud-arrow-up mr-1"></i>'
+                        + `Đang publish dataset ${projectIndex + 1}/${selectedProjectIds.length} lên R2...`
+                    );
+                    const published = await localTrainingApiFetch(
+                        `/api/training-datasets/${prepared.id}/publish`,
+                        { method: "POST" }
+                    );
+                    allDatasetsPublished = (
+                        allDatasetsPublished && published.object_published
+                    );
+                    datasetIdsByProject.set(projectId, published.id);
+                }
                 const jobs = selectedProjectIds.flatMap(projectId => (
                     parameterSetIds.map((parameterSetId, index) => ({
                         project_id: projectId,
+                        training_dataset_id: datasetIdsByProject.get(projectId),
                         training_mode: "fresh",
                         model: state.model_version,
                         parameter_set_id: parameterSetId,
@@ -3912,6 +3951,14 @@ print("Initialized YOLO-NAS Training Configuration")
                         include_unlabeled: document.getElementById("colabDatasetIncludeUnlabeled").checked
                     }))
                 ));
+                createButton.innerHTML = (
+                    '<i class="fa-solid fa-list-check mr-1"></i>'
+                    + (
+                        allDatasetsPublished
+                            ? "Dataset đã sẵn sàng trên R2 · đang tạo hàng đợi..."
+                            : "Snapshot đã sẵn sàng · đang tạo hàng đợi..."
+                    )
+                );
                 const batch = await localTrainingApiFetch("/api/training-batches", {
                     method: "POST",
                     body: {
@@ -3924,12 +3971,17 @@ print("Initialized YOLO-NAS Training Configuration")
                         jobs
                     }
                 });
-                showToast(`Đã tạo ${batch.total_jobs} lượt huấn luyện.`);
+                showToast(allDatasetsPublished
+                    ? `Dataset đã sẵn sàng trên R2; đã tạo ${batch.total_jobs} lượt huấn luyện.`
+                    : `R2 chưa bật; đã chuẩn bị snapshot và tạo ${batch.total_jobs} lượt huấn luyện.`
+                );
                 await dispatchTrainingControlPlane(true);
             } catch (error) {
                 showColabRemoteError(`Không thể bắt đầu huấn luyện: ${error.message}`);
             } finally {
                 createButton.disabled = finetuneSelectedParameterSetIds.size === 0;
+                createButton.removeAttribute("aria-busy");
+                createButton.innerHTML = idleButtonHtml;
                 await loadTrainingControlPlane(true);
                 renderTrainingReview();
             }
@@ -3957,6 +4009,13 @@ print("Initialized YOLO-NAS Training Configuration")
                 .filter(field => field.ui?.summary && values[field.name] !== undefined)
                 .map(field => `${field.name}=${values[field.name]}`)
                 .join(" · ");
+        }
+
+        function trainingTaskMessage(task) {
+            if (task.error && TRAINING_TASK_ERROR_STATUSES.has(task.status)) {
+                return task.error;
+            }
+            return task.message || task.stage || task.error;
         }
 
         function renderTrainingBatches() {
@@ -4021,11 +4080,21 @@ print("Initialized YOLO-NAS Training Configuration")
                     );
                     const message = document.createElement("div");
                     message.className = "text-content-muted break-words";
-                    message.textContent = task.error || task.message || task.stage;
+                    message.textContent = trainingTaskMessage(task);
                     info.append(taskStatus, message);
 
                     const technicalDetails = document.createElement("details");
                     technicalDetails.className = "mt-1 rounded border border-border/70 p-2";
+                    const technicalDetailsKey = `${batch.id}:${task.task_id || task.id}`;
+                    technicalDetails.dataset.trainingDetailsKey = technicalDetailsKey;
+                    technicalDetails.open = trainingTechnicalDetailsOpen.has(technicalDetailsKey);
+                    technicalDetails.addEventListener("toggle", () => {
+                        if (technicalDetails.open) {
+                            trainingTechnicalDetailsOpen.add(technicalDetailsKey);
+                        } else {
+                            trainingTechnicalDetailsOpen.delete(technicalDetailsKey);
+                        }
+                    });
                     const technicalSummary = document.createElement("summary");
                     technicalSummary.className = "cursor-pointer text-content-muted";
                     technicalSummary.textContent = "Chi tiết kỹ thuật";
