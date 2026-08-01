@@ -277,6 +277,76 @@ class TestTrainingCleanup:
         assert graph['dataset_path'].exists()
         assert graph['task_path'].exists()
 
+    def test_cleanup_lists_recent_items_and_deletes_only_selected_graph(self):
+        selected_graph = self.add_terminal_graph()
+        retained_graph = self.add_terminal_graph()
+        with self.app.app_context():
+            selected_batch = db.session.get(
+                TrainingBatch,
+                selected_graph['batch_id'],
+            )
+            selected_dataset = db.session.get(
+                TrainingDataset,
+                selected_graph['dataset_id'],
+            )
+            selected_batch.finished_at = datetime.utcnow()
+            selected_dataset.created_at = datetime.utcnow()
+            db.session.commit()
+
+        preview = self.client.get(
+            '/api/training-storage-cleanup?retention_days=30'
+        )
+        assert preview.status_code == 200
+        plan = preview.get_json()
+        assert any(
+            item['id'] == selected_graph['batch_id']
+            and item['reason'] == 'recent'
+            for item in plan['protected_items']['batches']
+        )
+        assert any(
+            item['id'] == selected_graph['dataset_id']
+            and item['reason'] == 'recent_or_nonterminal'
+            for item in plan['protected_items']['datasets']
+        )
+
+        rejected = self.client.post(
+            '/api/training-storage-cleanup',
+            json={
+                'retention_days': 30,
+                'confirm': True,
+                'selection': {
+                    'batches': [],
+                    'datasets': [retained_graph['dataset_id']],
+                    'orphan_jobs': [],
+                    'superseded_checkpoints': [],
+                },
+            },
+        )
+        assert rejected.status_code == 400
+
+        executed = self.client.post(
+            '/api/training-storage-cleanup',
+            json={
+                'retention_days': 30,
+                'confirm': True,
+                'selection': {
+                    'batches': [retained_graph['batch_id']],
+                    'datasets': [retained_graph['dataset_id']],
+                    'orphan_jobs': [],
+                    'superseded_checkpoints': [],
+                },
+            },
+        )
+        assert executed.status_code == 200
+        assert executed.get_json()['deleted']['database_rows'] == 7
+        assert not retained_graph['dataset_path'].exists()
+        assert not retained_graph['task_path'].exists()
+        assert selected_graph['dataset_path'].exists()
+        assert selected_graph['task_path'].exists()
+        with self.app.app_context():
+            assert db.session.get(TrainingBatch, retained_graph['batch_id']) is None
+            assert db.session.get(TrainingBatch, selected_graph['batch_id']) is not None
+
     def test_dry_run_reports_object_store_configuration_error(self):
         self.add_terminal_graph()
         with mock.patch(
@@ -360,6 +430,12 @@ def test_colab_manager_exposes_training_storage_cleanup_controls():
         'previewTrainingStorageCleanup()',
         'executeTrainingStorageCleanup()',
         'function renderTrainingStorageCleanup(plan)',
+        'trainingCleanupProtected',
+        'trainingCleanupShowAllBtn',
+        'function trainingCleanupSelection()',
+        'function previewAllTrainingStorageCleanup()',
+        'selection,',
+        'protected_items',
         '/api/training-storage-cleanup',
         'confirm: true',
     ):

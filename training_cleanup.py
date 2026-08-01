@@ -122,6 +122,34 @@ def _artifact_object_entries(job):
     return entries
 
 
+def _batch_cleanup_item(batch, batch_tasks, reason, model_ids=None):
+    return {
+        'id': batch.id,
+        'batch_id': batch.batch_id,
+        'name': batch.name,
+        'status': batch.status,
+        'tasks': len(batch_tasks),
+        'finished_at': (
+            batch.finished_at.isoformat() if batch.finished_at else None
+        ),
+        'reason': reason,
+        'model_ids': sorted(model_ids or []),
+    }
+
+
+def _dataset_cleanup_item(dataset, reason):
+    return {
+        'id': dataset.id,
+        'dataset_id': dataset.dataset_id,
+        'status': dataset.status,
+        'archive_size': int(dataset.archive_size or 0),
+        'created_at': (
+            dataset.created_at.isoformat() if dataset.created_at else None
+        ),
+        'reason': reason,
+    }
+
+
 def _build_cleanup_state(retention_days):
     retention_days = normalize_retention_days(retention_days)
     cutoff = datetime.utcnow() - timedelta(days=retention_days)
@@ -186,6 +214,7 @@ def _build_cleanup_state(retention_days):
         'recent': 0,
         'imported_model': 0,
     }
+    protected_batch_items = []
     candidate_task_ids = set()
     candidate_job_ids = set()
     for batch in batches:
@@ -195,12 +224,31 @@ def _build_cleanup_state(retention_days):
             or any(task.status not in TERMINAL_TASK_STATUSES for task in batch_tasks)
         ):
             protected_batches['active_or_nonterminal'] += 1
+            protected_batch_items.append(_batch_cleanup_item(
+                batch,
+                batch_tasks,
+                'active_or_nonterminal',
+            ))
             continue
         if not _is_old_enough(batch, cutoff):
             protected_batches['recent'] += 1
+            protected_batch_items.append(_batch_cleanup_item(
+                batch,
+                batch_tasks,
+                'recent',
+            ))
             continue
         if any(task.id in protected_task_ids for task in batch_tasks):
             protected_batches['imported_model'] += 1
+            protected_batch_items.append(_batch_cleanup_item(
+                batch,
+                batch_tasks,
+                'imported_model',
+                {
+                    task.imported_model_id for task in batch_tasks
+                    if task.imported_model_id is not None
+                },
+            ))
             continue
 
         batch_jobs = [
@@ -210,6 +258,15 @@ def _build_cleanup_state(retention_days):
         ]
         if any(job.imported_model_id is not None for job in batch_jobs):
             protected_batches['imported_model'] += 1
+            protected_batch_items.append(_batch_cleanup_item(
+                batch,
+                batch_tasks,
+                'imported_model',
+                {
+                    job.imported_model_id for job in batch_jobs
+                    if job.imported_model_id is not None
+                },
+            ))
             continue
         batch_object_keys = {
             checkpoint.object_key
@@ -224,6 +281,11 @@ def _build_cleanup_state(retention_days):
         )
         if batch_object_keys & model_object_keys:
             protected_batches['imported_model'] += 1
+            protected_batch_items.append(_batch_cleanup_item(
+                batch,
+                batch_tasks,
+                'imported_model',
+            ))
             continue
 
         candidate_batches.append((batch, batch_tasks, batch_jobs))
@@ -270,6 +332,7 @@ def _build_cleanup_state(retention_days):
         'recent_or_nonterminal': 0,
         'unsafe_storage_path': 0,
     }
+    protected_dataset_items = []
     dataset_root = _configured_root('TRAINING_DATASET_ROOT', 'training_datasets')
     for dataset in datasets:
         if (
@@ -277,6 +340,10 @@ def _build_cleanup_state(retention_days):
             or not _is_old_enough(dataset, cutoff)
         ):
             protected_datasets['recent_or_nonterminal'] += 1
+            protected_dataset_items.append(_dataset_cleanup_item(
+                dataset,
+                'recent_or_nonterminal',
+            ))
             continue
         referenced = (
             dataset.id in model_dataset_ids
@@ -298,6 +365,10 @@ def _build_cleanup_state(retention_days):
         )
         if referenced:
             protected_datasets['referenced'] += 1
+            protected_dataset_items.append(_dataset_cleanup_item(
+                dataset,
+                'referenced',
+            ))
             continue
         snapshot_path = _safe_child(dataset_root, dataset.dataset_id)
         if dataset.archive_path:
@@ -307,6 +378,10 @@ def _build_cleanup_state(retention_days):
                 or not _is_within(archive_parent, dataset_root)
             ):
                 protected_datasets['unsafe_storage_path'] += 1
+                protected_dataset_items.append(_dataset_cleanup_item(
+                    dataset,
+                    'unsafe_storage_path',
+                ))
                 continue
             snapshot_path = archive_parent
         candidate_dataset_ids.add(dataset.id)
@@ -361,15 +436,23 @@ def _build_cleanup_state(retention_days):
     }
 
     local_entries = {}
+    local_entries_by_batch = {}
     for _batch, batch_tasks, _batch_jobs in candidate_batches:
+        batch_entries = {}
         for task in batch_tasks:
             path = _safe_child(artifact_root, task.task_id)
             if path.exists():
-                local_entries[str(path)] = _directory_size(path)
+                batch_entries[str(path)] = _directory_size(path)
+        local_entries_by_batch[_batch.id] = batch_entries
+        local_entries.update(batch_entries)
+    local_entries_by_dataset = {}
     for dataset in candidate_datasets:
         path = candidate_dataset_paths[dataset.id]
         if path.exists():
-            local_entries[str(path)] = _directory_size(path)
+            local_entries_by_dataset[dataset.id] = {
+                str(path): _directory_size(path)
+            }
+            local_entries.update(local_entries_by_dataset[dataset.id])
 
     candidate_attempt_ids = {
         attempt.id
@@ -438,29 +521,12 @@ def _build_cleanup_state(retention_days):
         },
         'items': {
             'batches': [
-                {
-                    'id': batch.id,
-                    'batch_id': batch.batch_id,
-                    'name': batch.name,
-                    'status': batch.status,
-                    'tasks': len(batch_tasks),
-                    'finished_at': (
-                        batch.finished_at.isoformat() if batch.finished_at else None
-                    ),
-                }
-                for batch, batch_tasks, _batch_jobs in candidate_batches[:100]
+                _batch_cleanup_item(batch, batch_tasks, 'safe_to_delete')
+                for batch, batch_tasks, _batch_jobs in candidate_batches
             ],
             'datasets': [
-                {
-                    'id': dataset.id,
-                    'dataset_id': dataset.dataset_id,
-                    'status': dataset.status,
-                    'archive_size': int(dataset.archive_size or 0),
-                    'created_at': (
-                        dataset.created_at.isoformat() if dataset.created_at else None
-                    ),
-                }
-                for dataset in candidate_datasets[:100]
+                _dataset_cleanup_item(dataset, 'safe_to_delete')
+                for dataset in candidate_datasets
             ],
             'orphan_jobs': [
                 {
@@ -471,7 +537,7 @@ def _build_cleanup_state(retention_days):
                         job.finished_at.isoformat() if job.finished_at else None
                     ),
                 }
-                for job in orphan_jobs[:100]
+                for job in orphan_jobs
             ],
             'superseded_checkpoints': [
                 {
@@ -480,8 +546,12 @@ def _build_cleanup_state(retention_days):
                     'epoch': checkpoint.epoch,
                     'size_bytes': int(checkpoint.size_bytes or 0),
                 }
-                for checkpoint in superseded_checkpoints[:100]
+                for checkpoint in superseded_checkpoints
             ],
+        },
+        'protected_items': {
+            'batches': protected_batch_items,
+            'datasets': protected_dataset_items,
         },
     }
     return {
@@ -494,12 +564,199 @@ def _build_cleanup_state(retention_days):
         'event_ids': candidate_event_ids,
         'checkpoint_ids': candidate_checkpoint_ids,
         'object_entries': object_entries,
+        'object_references': object_references,
         'local_entries': local_entries,
+        'local_entries_by_batch': local_entries_by_batch,
+        'local_entries_by_dataset': local_entries_by_dataset,
+        'candidate_batches': candidate_batches,
+        'candidate_datasets': candidate_datasets,
+        'orphan_jobs': orphan_jobs,
+        'superseded_checkpoints': superseded_checkpoints,
+        'batches': batches,
+        'tasks': tasks,
+        'jobs': jobs,
     }
 
 
 def build_training_storage_cleanup_plan(retention_days=DEFAULT_RETENTION_DAYS):
     return _build_cleanup_state(retention_days)['public']
+
+
+def _selected_ids(selection, key, allowed_ids):
+    if selection is None:
+        return set(allowed_ids)
+    values = selection.get(key, [])
+    if not isinstance(values, list):
+        raise ValueError(f'selection.{key} must be a list.')
+    selected = set()
+    for value in values:
+        if isinstance(value, bool):
+            raise ValueError(f'selection.{key} must contain integer IDs.')
+        try:
+            selected.add(int(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'selection.{key} must contain integer IDs.'
+            ) from exc
+    unknown = selected - set(allowed_ids)
+    if unknown:
+        raise ValueError(
+            f'selection.{key} contains items that are not safe to delete: '
+            + ', '.join(str(value) for value in sorted(unknown))
+        )
+    return selected
+
+
+def _selected_cleanup_state(state, selection):
+    if selection is not None and not isinstance(selection, dict):
+        raise ValueError('selection must be an object.')
+    if selection is not None:
+        allowed_keys = {
+            'batches',
+            'datasets',
+            'orphan_jobs',
+            'superseded_checkpoints',
+        }
+        unknown_keys = set(selection) - allowed_keys
+        if unknown_keys:
+            raise ValueError(
+                'selection contains unknown fields: '
+                + ', '.join(sorted(unknown_keys))
+            )
+
+    batches_by_id = {
+        batch.id: (batch, batch_tasks, batch_jobs)
+        for batch, batch_tasks, batch_jobs in state['candidate_batches']
+    }
+    datasets_by_id = {
+        dataset.id: dataset for dataset in state['candidate_datasets']
+    }
+    orphan_jobs_by_id = {job.id: job for job in state['orphan_jobs']}
+    checkpoints_by_id = {
+        checkpoint.id: checkpoint for checkpoint in state['superseded_checkpoints']
+    }
+    selected_batch_ids = _selected_ids(
+        selection,
+        'batches',
+        batches_by_id,
+    )
+    selected_dataset_ids = _selected_ids(
+        selection,
+        'datasets',
+        datasets_by_id,
+    )
+    selected_orphan_job_ids = _selected_ids(
+        selection,
+        'orphan_jobs',
+        orphan_jobs_by_id,
+    )
+    selected_superseded_checkpoint_ids = _selected_ids(
+        selection,
+        'superseded_checkpoints',
+        checkpoints_by_id,
+    )
+
+    selected_task_ids = set()
+    selected_batch_job_ids = set()
+    for batch_id in selected_batch_ids:
+        _batch, batch_tasks, batch_jobs = batches_by_id[batch_id]
+        selected_task_ids.update(task.id for task in batch_tasks)
+        selected_batch_job_ids.update(job.id for job in batch_jobs)
+    selected_job_ids = selected_batch_job_ids | selected_orphan_job_ids
+    selected_attempt_ids = {
+        attempt_id
+        for task_id in selected_task_ids
+        for attempt_id in (
+            attempt.id for attempt in TrainingJobAttempt.query.filter_by(
+                task_id=task_id
+            ).all()
+        )
+    }
+    selected_event_ids = {
+        event.id for event in TrainingJobEvent.query.filter(
+            TrainingJobEvent.task_id.in_(selected_task_ids)
+        ).all()
+    } if selected_task_ids else set()
+    selected_checkpoint_ids = {
+        checkpoint.id for checkpoint in TrainingCheckpoint.query.filter(
+            TrainingCheckpoint.task_id.in_(selected_task_ids)
+        ).all()
+    } if selected_task_ids else set()
+    selected_checkpoint_ids.update(selected_superseded_checkpoint_ids)
+
+    for dataset_id in selected_dataset_ids:
+        still_referenced = (
+            any(
+                batch.training_dataset_id == dataset_id
+                and batch.id not in selected_batch_ids
+                for batch in state['batches']
+            )
+            or any(
+                task.training_dataset_id == dataset_id
+                and task.id not in selected_task_ids
+                for task in state['tasks']
+            )
+            or any(
+                job.training_dataset_id == dataset_id
+                and job.id not in selected_job_ids
+                for job in state['jobs']
+            )
+        )
+        if still_referenced:
+            raise ValueError(
+                f'Dataset {dataset_id} is still referenced by training history. '
+                'Select its completed batch too, or keep the dataset.'
+            )
+
+    deletable_references = {
+        *(('checkpoint', checkpoint_id) for checkpoint_id in selected_checkpoint_ids),
+        *(('job', job_id) for job_id in selected_job_ids),
+        *(('dataset', dataset_id) for dataset_id in selected_dataset_ids),
+    }
+    object_entries = {
+        object_key: entry['size_bytes']
+        for object_key, entry in state['object_references'].items()
+        if entry['references'] and entry['references'].issubset(deletable_references)
+    }
+    local_entries = {}
+    for batch_id in selected_batch_ids:
+        local_entries.update(state['local_entries_by_batch'].get(batch_id, {}))
+    for dataset_id in selected_dataset_ids:
+        local_entries.update(state['local_entries_by_dataset'].get(dataset_id, {}))
+    summary = {
+        'batches': len(selected_batch_ids),
+        'tasks': len(selected_task_ids),
+        'jobs': len(selected_job_ids),
+        'datasets': len(selected_dataset_ids),
+        'attempts': len(selected_attempt_ids),
+        'events': len(selected_event_ids),
+        'checkpoints': len(selected_checkpoint_ids),
+        'database_rows': (
+            len(selected_batch_ids)
+            + len(selected_task_ids)
+            + len(selected_job_ids)
+            + len(selected_dataset_ids)
+            + len(selected_attempt_ids)
+            + len(selected_event_ids)
+            + len(selected_checkpoint_ids)
+        ),
+        'local_paths': len(local_entries),
+        'local_bytes': sum(local_entries.values()),
+        'object_keys': len(object_entries),
+        'object_bytes': sum(object_entries.values()),
+    }
+    return {
+        'batch_ids': selected_batch_ids,
+        'task_ids': selected_task_ids,
+        'job_ids': selected_job_ids,
+        'dataset_ids': selected_dataset_ids,
+        'attempt_ids': selected_attempt_ids,
+        'event_ids': selected_event_ids,
+        'checkpoint_ids': selected_checkpoint_ids,
+        'object_entries': object_entries,
+        'local_entries': local_entries,
+        'summary': summary,
+    }
 
 
 def _delete_object_entries(object_entries):
@@ -525,39 +782,43 @@ def _delete_local_entries(local_entries):
             path.unlink()
 
 
-def execute_training_storage_cleanup(retention_days=DEFAULT_RETENTION_DAYS):
+def execute_training_storage_cleanup(
+    retention_days=DEFAULT_RETENTION_DAYS,
+    selection=None,
+):
     state = _build_cleanup_state(retention_days)
     plan = state['public']
-    _delete_object_entries(state['object_entries'])
-    _delete_local_entries(state['local_entries'])
+    selected = _selected_cleanup_state(state, selection)
+    _delete_object_entries(selected['object_entries'])
+    _delete_local_entries(selected['local_entries'])
 
-    if state['checkpoint_ids']:
+    if selected['checkpoint_ids']:
         TrainingCheckpoint.query.filter(
-            TrainingCheckpoint.id.in_(state['checkpoint_ids'])
+            TrainingCheckpoint.id.in_(selected['checkpoint_ids'])
         ).delete(synchronize_session=False)
-    if state['event_ids']:
+    if selected['event_ids']:
         TrainingJobEvent.query.filter(
-            TrainingJobEvent.id.in_(state['event_ids'])
+            TrainingJobEvent.id.in_(selected['event_ids'])
         ).delete(synchronize_session=False)
-    if state['attempt_ids']:
+    if selected['attempt_ids']:
         TrainingJobAttempt.query.filter(
-            TrainingJobAttempt.id.in_(state['attempt_ids'])
+            TrainingJobAttempt.id.in_(selected['attempt_ids'])
         ).delete(synchronize_session=False)
-    if state['task_ids']:
+    if selected['task_ids']:
         TrainingQueueTask.query.filter(
-            TrainingQueueTask.id.in_(state['task_ids'])
+            TrainingQueueTask.id.in_(selected['task_ids'])
         ).delete(synchronize_session=False)
-    if state['batch_ids']:
+    if selected['batch_ids']:
         TrainingBatch.query.filter(
-            TrainingBatch.id.in_(state['batch_ids'])
+            TrainingBatch.id.in_(selected['batch_ids'])
         ).delete(synchronize_session=False)
-    if state['job_ids']:
+    if selected['job_ids']:
         TrainingJob.query.filter(
-            TrainingJob.id.in_(state['job_ids'])
+            TrainingJob.id.in_(selected['job_ids'])
         ).delete(synchronize_session=False)
-    if state['dataset_ids']:
+    if selected['dataset_ids']:
         TrainingDataset.query.filter(
-            TrainingDataset.id.in_(state['dataset_ids'])
+            TrainingDataset.id.in_(selected['dataset_ids'])
         ).delete(synchronize_session=False)
     db.session.commit()
 
@@ -565,12 +826,12 @@ def execute_training_storage_cleanup(retention_days=DEFAULT_RETENTION_DAYS):
         'Training storage cleanup completed',
         extra={
             'retention_days': plan['retention_days'],
-            **plan['summary'],
+            **selected['summary'],
         },
     )
     return {
         'message': 'Training storage cleanup completed.',
-        'deleted': plan['summary'],
+        'deleted': selected['summary'],
         'retention_days': plan['retention_days'],
         'cutoff': plan['cutoff'],
     }

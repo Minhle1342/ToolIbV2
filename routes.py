@@ -3546,7 +3546,10 @@ def manage_training_storage_cleanup():
             return jsonify({
                 'error': 'confirm=true is required to execute storage cleanup.'
             }), 400
-        return jsonify(execute_training_storage_cleanup(retention_days))
+        return jsonify(execute_training_storage_cleanup(
+            retention_days,
+            selection=payload.get('selection'),
+        ))
     except ValueError as exc:
         db.session.rollback()
         return jsonify({'error': str(exc)}), 400

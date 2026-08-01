@@ -587,10 +587,10 @@
                         </summary>
                         <div class="mt-3 space-y-3">
                             <p class="text-xs text-content-muted leading-relaxed">
-                                Chi don batch/task da ket thuc, dataset khong con tham chieu va checkpoint cu.
-                                Job dang chay, job co the resume va model da import luon duoc bao ve.
+                                Hien tat ca du lieu training de ban doi chieu. Chi cac muc an toan moi duoc tick san.
+                                Job dang chay, job co the resume va model da import van hien thi nhung duoc bao ve.
                             </p>
-                            <div class="grid grid-cols-1 sm:grid-cols-[160px_auto_auto] gap-2 items-end">
+                            <div class="grid grid-cols-1 sm:grid-cols-[160px_auto_auto_auto] gap-2 items-end">
                                 <label class="text-xs text-content-muted">
                                     Giu du lieu gan day (ngay)
                                     <input id="trainingCleanupRetentionDays" type="number" value="30" min="0" max="3650" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
@@ -598,8 +598,11 @@
                                 <button id="trainingCleanupPreviewBtn" type="button" onclick="previewTrainingStorageCleanup()" class="text-xs text-sky-300 border border-sky-800 rounded px-3 py-2 hover:bg-sky-950/40">
                                     <i class="fa-solid fa-magnifying-glass mr-1"></i>Xem truoc
                                 </button>
+                                <button id="trainingCleanupShowAllBtn" type="button" onclick="previewAllTrainingStorageCleanup()" class="text-xs text-amber-200 border border-amber-800 rounded px-3 py-2 hover:bg-amber-950/40">
+                                    Hien muc da ket thuc
+                                </button>
                                 <button id="trainingCleanupExecuteBtn" type="button" onclick="executeTrainingStorageCleanup()" disabled class="text-xs text-rose-200 border border-rose-800 rounded px-3 py-2 hover:bg-rose-950/40 disabled:opacity-40 disabled:cursor-not-allowed">
-                                    <i class="fa-solid fa-trash-can mr-1"></i>Don du lieu
+                                    <i class="fa-solid fa-trash-can mr-1"></i>Xoa muc da chon
                                 </button>
                             </div>
                             <div id="trainingCleanupStatus" class="text-[11px] text-content-muted" aria-live="polite">
@@ -611,7 +614,8 @@
                                 <div class="border border-border rounded p-2"><span class="text-content-muted">Local</span><strong id="trainingCleanupLocalBytes" class="block text-content mt-1">0 B</strong></div>
                                 <div class="border border-border rounded p-2"><span class="text-content-muted">R2</span><strong id="trainingCleanupObjectBytes" class="block text-content mt-1">0 B</strong></div>
                             </div>
-                            <div id="trainingCleanupCandidates" class="hidden text-[10px] text-content-muted border border-border rounded p-2 whitespace-pre-wrap break-words"></div>
+                            <div id="trainingCleanupCandidates" class="hidden space-y-2 text-[10px] text-content-muted border border-border rounded p-2"></div>
+                            <div id="trainingCleanupProtected" class="hidden space-y-2 text-[10px] text-content-muted border border-amber-900/70 rounded p-2"></div>
                             <p class="text-[10px] text-amber-300">
                                 Xoa model tren trang Models se don ca file runtime, artifact local va object R2 cua model do.
                             </p>
@@ -3340,6 +3344,12 @@ print("Initialized YOLO-NAS Training Configuration")
         }
 
         let trainingStorageCleanupPlan = null;
+        const TRAINING_CLEANUP_SELECTION_KEYS = [
+            "batches",
+            "datasets",
+            "orphan_jobs",
+            "superseded_checkpoints"
+        ];
 
         function readTrainingCleanupRetentionDays() {
             const value = Number(
@@ -3364,11 +3374,98 @@ print("Initialized YOLO-NAS Training Configuration")
             return `${amount.toFixed(amount >= 10 ? 1 : 2)} ${units[unitIndex]}`;
         }
 
+        function trainingCleanupSelection() {
+            const selection = Object.fromEntries(
+                TRAINING_CLEANUP_SELECTION_KEYS.map(key => [key, []])
+            );
+            document.querySelectorAll("[data-training-cleanup-kind]:checked")
+                .forEach(input => {
+                    selection[input.dataset.trainingCleanupKind].push(
+                        Number(input.value)
+                    );
+                });
+            return selection;
+        }
+
+        function trainingCleanupSelectionCount() {
+            return Object.values(trainingCleanupSelection()).reduce(
+                (count, values) => count + values.length,
+                0
+            );
+        }
+
+        function refreshTrainingCleanupSelection() {
+            const plan = trainingStorageCleanupPlan;
+            const executeButton = document.getElementById("trainingCleanupExecuteBtn");
+            const status = document.getElementById("trainingCleanupStatus");
+            if (!plan) return;
+            const selectedCount = trainingCleanupSelectionCount();
+            executeButton.disabled = !plan.can_execute || selectedCount === 0;
+            if (plan.can_execute) {
+                status.textContent = selectedCount
+                    ? `Da chon ${selectedCount} muc an toan. Server se kiem tra lai truoc khi xoa.`
+                    : "Chua chon muc nao de xoa.";
+                status.className = selectedCount
+                    ? "text-[11px] text-amber-300"
+                    : "text-[11px] text-content-muted";
+            }
+        }
+
+        function trainingCleanupOptionText(kind, item) {
+            if (kind === "batches") {
+                return `${item.name} (${item.status}, ${item.tasks} task)`;
+            }
+            if (kind === "datasets") {
+                return `Dataset ${item.dataset_id} · ${formatTrainingCleanupBytes(item.archive_size)}`;
+            }
+            if (kind === "orphan_jobs") {
+                return `Job khong con batch: ${item.remote_job_id} (${item.status})`;
+            }
+            return `Checkpoint epoch ${item.epoch} · ${formatTrainingCleanupBytes(item.size_bytes)}`;
+        }
+
+        function appendTrainingCleanupOption(container, kind, item) {
+            const label = document.createElement("label");
+            label.className = "flex items-start gap-2 rounded border border-emerald-900/60 bg-emerald-950/10 p-2 cursor-pointer";
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = String(item.id);
+            input.checked = true;
+            input.dataset.trainingCleanupKind = kind;
+            input.className = "mt-0.5";
+            input.addEventListener("change", refreshTrainingCleanupSelection);
+            const text = document.createElement("span");
+            text.textContent = trainingCleanupOptionText(kind, item);
+            label.append(input, text);
+            container.appendChild(label);
+        }
+
+        function trainingCleanupProtectionText(item) {
+            const reasons = {
+                recent: "Dang duoc giu theo so ngay luu. Doi gia tri ve 0 neu muon xem muc an toan co the xoa.",
+                active_or_nonterminal: "Dang train hoac co the resume, khong the xoa luc nay.",
+                imported_model: "Dang duoc model da import su dung. Xoa model tren trang Models truoc neu muon xoa ca du lieu lien quan.",
+                recent_or_nonterminal: "Dataset con moi hoac chua o trang thai an toan de xoa.",
+                referenced: "Dataset dang duoc model hoac lich su training su dung.",
+                unsafe_storage_path: "Duong dan nam ngoai vung luu tru an toan, khong the xoa tu day."
+            };
+            return reasons[item.reason] || "Dang duoc bao ve.";
+        }
+
+        function appendTrainingCleanupProtectedItem(container, item, type) {
+            const row = document.createElement("div");
+            row.className = "rounded border border-amber-900/60 bg-amber-950/10 p-2";
+            const title = type === "batch"
+                ? `${item.name} (${item.status}, ${item.tasks} task)`
+                : `Dataset ${item.dataset_id} · ${formatTrainingCleanupBytes(item.archive_size)}`;
+            row.textContent = `${title} — ${trainingCleanupProtectionText(item)}`;
+            container.appendChild(row);
+        }
+
         function renderTrainingStorageCleanup(plan) {
             trainingStorageCleanupPlan = plan;
             const summary = plan.summary || {};
             const status = document.getElementById("trainingCleanupStatus");
-            const executeButton = document.getElementById("trainingCleanupExecuteBtn");
             document.getElementById("trainingCleanupSummary").classList.remove("hidden");
             document.getElementById("trainingCleanupDbRows").textContent =
                 String(summary.database_rows || 0);
@@ -3379,34 +3476,54 @@ print("Initialized YOLO-NAS Training Configuration")
             document.getElementById("trainingCleanupObjectBytes").textContent =
                 formatTrainingCleanupBytes(summary.object_bytes);
 
-            const batchNames = (plan.items?.batches || [])
-                .slice(0, 8)
-                .map(batch => `- ${batch.name} (${batch.status}, ${batch.tasks} task)`);
             const candidates = document.getElementById("trainingCleanupCandidates");
-            const protectedBatches = plan.protected?.batches || {};
-            const lines = [
-                `Cutoff: ${plan.cutoff}`,
-                `Dataset co the don: ${summary.datasets || 0}`,
-                `Checkpoint co the don: ${summary.checkpoints || 0}`,
-                `Bao ve: ${protectedBatches.active_or_nonterminal || 0} batch dang hoat dong; ${protectedBatches.imported_model || 0} batch co model da import.`,
-                ...batchNames
-            ];
-            candidates.textContent = lines.join("\n");
+            candidates.replaceChildren();
+            const candidateTitle = document.createElement("strong");
+            candidateTitle.className = "block text-emerald-300";
+            candidateTitle.textContent = "Co the xoa an toan (da tick san)";
+            candidates.appendChild(candidateTitle);
+            const items = plan.items || {};
+            for (const kind of TRAINING_CLEANUP_SELECTION_KEYS) {
+                for (const item of items[kind] || []) {
+                    appendTrainingCleanupOption(candidates, kind, item);
+                }
+            }
+            if (!candidates.querySelector("label")) {
+                const empty = document.createElement("div");
+                empty.textContent = "Khong co muc an toan theo so ngay luu hien tai.";
+                candidates.appendChild(empty);
+            }
             candidates.classList.remove("hidden");
 
-            executeButton.disabled = !plan.can_execute || !(summary.database_rows > 0);
+            const protectedList = document.getElementById("trainingCleanupProtected");
+            protectedList.replaceChildren();
+            const protectedTitle = document.createElement("strong");
+            protectedTitle.className = "block text-amber-300";
+            protectedTitle.textContent = "Dang duoc bao ve (van hien thi de doi chieu)";
+            protectedList.appendChild(protectedTitle);
+            const protectedItems = plan.protected_items || {};
+            for (const item of protectedItems.batches || []) {
+                appendTrainingCleanupProtectedItem(protectedList, item, "batch");
+            }
+            for (const item of protectedItems.datasets || []) {
+                appendTrainingCleanupProtectedItem(protectedList, item, "dataset");
+            }
+            if (!protectedList.querySelector("div")) {
+                const empty = document.createElement("div");
+                empty.textContent = "Khong co muc nao dang bi bao ve.";
+                protectedList.appendChild(empty);
+            }
+            protectedList.classList.remove("hidden");
+
             if (!plan.can_execute) {
                 status.textContent = plan.storage?.error
                     ? `Khong the thuc thi: ${plan.storage.error}`
                     : "Khong the thuc thi: plan co object R2 nhung cau hinh object storage dang tat.";
                 status.className = "text-[11px] text-rose-300";
-            } else if (summary.database_rows > 0) {
-                status.textContent = "Dry-run hoan tat. Kiem tra so lieu roi moi bam Don du lieu.";
-                status.className = "text-[11px] text-amber-300";
-            } else {
-                status.textContent = "Khong co du lieu nao dat dieu kien don dep.";
-                status.className = "text-[11px] text-emerald-300";
+                document.getElementById("trainingCleanupExecuteBtn").disabled = true;
+                return;
             }
+            refreshTrainingCleanupSelection();
         }
 
         async function previewTrainingStorageCleanup() {
@@ -3431,6 +3548,11 @@ print("Initialized YOLO-NAS Training Configuration")
             }
         }
 
+        async function previewAllTrainingStorageCleanup() {
+            document.getElementById("trainingCleanupRetentionDays").value = "0";
+            await previewTrainingStorageCleanup();
+        }
+
         async function executeTrainingStorageCleanup() {
             const retentionDays = readTrainingCleanupRetentionDays();
             if (
@@ -3440,12 +3562,13 @@ print("Initialized YOLO-NAS Training Configuration")
                 await previewTrainingStorageCleanup();
             }
             const plan = trainingStorageCleanupPlan;
-            if (!plan?.can_execute || !(plan.summary?.database_rows > 0)) return;
+            const selection = trainingCleanupSelection();
+            const selectedCount = trainingCleanupSelectionCount();
+            if (!plan?.can_execute || selectedCount === 0) return;
             const message = [
-                `Xoa ${plan.summary.database_rows} record DB?`,
-                `Local: ${formatTrainingCleanupBytes(plan.summary.local_bytes)}`,
-                `R2: ${formatTrainingCleanupBytes(plan.summary.object_bytes)}`,
-                "Model da import va job dang hoat dong se duoc giu lai."
+                `Xoa ${selectedCount} muc da chon?`,
+                "Server se kiem tra lai lien ket model, job va R2 truoc khi xoa.",
+                "Muc dang train va model da import van duoc bao ve."
             ].join("\n");
             if (!window.confirm(message)) return;
 
@@ -3459,7 +3582,11 @@ print("Initialized YOLO-NAS Training Configuration")
                     "/api/training-storage-cleanup",
                     {
                         method: "POST",
-                        body: { retention_days: retentionDays, confirm: true }
+                        body: {
+                            retention_days: retentionDays,
+                            selection,
+                            confirm: true
+                        }
                     }
                 );
                 status.textContent = `Da don ${result.deleted.database_rows} record DB.`;
