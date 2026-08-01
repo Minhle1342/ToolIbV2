@@ -193,6 +193,38 @@ def test_finetune_submit_has_immediate_feedback_and_idempotency_guard():
         assert marker in template
 
 
+def test_finetune_parent_ui_explains_requirements_and_architecture_source():
+    template = (
+        REPOSITORY_ROOT / 'templates' / 'colab_manager.html'
+    ).read_text(encoding='utf-8')
+
+    for marker in (
+        'id="trainingFreshModelFields"',
+        'id="trainingFinetuneModelNotice"',
+        'Kiến trúc được lấy từ file .pt',
+        'id="finetuneParentNameError"',
+        'id="finetuneParentFileError"',
+        'id="finetuneParentProjectRequirement"',
+        'id="finetuneParentUploadRequirements"',
+        'id="finetuneParentCompatibilityDetails"',
+        'function compareFinetuneClassNames(',
+        'function describeFinetuneClassMismatch(',
+        'function matchingFinetuneProjects(',
+        'function handleFinetuneParentFileChange(',
+        'nameInput.value = file.name.replace(/\\.pt$/i, "")',
+        'model.finetune_status === "ready"',
+        'Đã xác thực nhưng không khớp dataset',
+        'familySelector.disabled = isFinetune;',
+        'modelSelector.disabled = isFinetune;',
+    ):
+        assert marker in template
+
+    control_plane = (
+        REPOSITORY_ROOT / 'training_control_plane.py'
+    ).read_text(encoding='utf-8')
+    assert "'model': parent_model.filename" in control_plane
+
+
 def test_run_script_starts_and_stops_dedicated_scheduler_process():
     run_script = (REPOSITORY_ROOT / 'run.ps1').read_text(encoding='utf-8')
 

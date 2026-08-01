@@ -95,7 +95,7 @@
                         <span class="hidden" id="yolo_badge">Ultralytics 8.4.110</span>
                     </h3>
                     
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div id="trainingFreshModelFields" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <!-- Dropdown 1: Họ Phiên Bản YOLO (17 Versions) -->
                         <div>
                             <label class="text-xs text-content font-semibold mb-1.5 flex items-center justify-between">
@@ -172,6 +172,15 @@
                                 </span>
                             </label>
                             <input type="number" id="batch_size" value="16" min="1" max="128" oninput="renderCode('batch_size')" class="w-full bg-surface border border-border text-sm rounded-lg p-2 text-content focus:border-amber-500 focus:outline-none">
+                        </div>
+                    </div>
+                    <div id="trainingFinetuneModelNotice" class="hidden rounded-lg border border-cyan-700/60 bg-cyan-950/20 p-3 text-xs text-cyan-100">
+                        <div class="font-semibold">
+                            <i class="fa-solid fa-circle-info mr-1"></i>
+                            Kiến trúc được lấy từ file .pt
+                        </div>
+                        <div id="trainingFinetuneModelNoticeDetail" class="mt-1 text-content-muted">
+                            Chọn parent model ở Bước 3. Phiên bản YOLO và kích thước Nano/Small của file sẽ được giữ nguyên.
                         </div>
                     </div>
                 </div>
@@ -390,12 +399,22 @@
                         <div id="finetuneOnlyFields" class="hidden space-y-2">
                         <div class="border border-border rounded p-2 space-y-2">
                             <strong class="text-xs text-content">Tải model .pt hiện có</strong>
-                            <input id="finetuneParentName" type="text" placeholder="Ví dụ: Model chai phiên bản 14" class="w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
-                            <input id="finetuneParentFile" type="file" accept=".pt" class="w-full bg-panel border border-border rounded p-2 text-[10px] text-content">
-                            <button id="finetuneParentUploadBtn" type="button" onclick="uploadFinetuneParentModel()" class="w-full bg-cyan-800 hover:bg-cyan-700 text-white rounded px-3 py-2 text-xs font-medium">
+                            <label class="block text-xs text-content-muted">
+                                Tên model
+                                <input id="finetuneParentName" type="text" placeholder="Sẽ tự điền từ tên file .pt" oninput="handleFinetuneParentNameInput()" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content focus:border-cyan-500 focus:outline-none">
+                                <span id="finetuneParentNameError" class="block mt-1 text-[10px] text-rose-300"></span>
+                            </label>
+                            <label class="block text-xs text-content-muted">
+                                File model .pt
+                                <input id="finetuneParentFile" type="file" accept=".pt" onchange="handleFinetuneParentFileChange()" class="mt-1 w-full bg-panel border border-border rounded p-2 text-[10px] text-content">
+                                <span id="finetuneParentFileError" class="block mt-1 text-[10px] text-rose-300"></span>
+                            </label>
+                            <div id="finetuneParentProjectRequirement" class="text-[10px] text-amber-300"></div>
+                            <button id="finetuneParentUploadBtn" type="button" onclick="uploadFinetuneParentModel()" disabled class="w-full bg-cyan-800 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded px-3 py-2 text-xs font-medium">
                                 <i class="fa-solid fa-shield-halved mr-1"></i>
                                 Tải lên và kiểm tra
                             </button>
+                            <div id="finetuneParentUploadRequirements" class="text-[10px] text-content-muted" aria-live="polite"></div>
                             <div id="finetuneParentUploadStatus" class="text-[10px] text-content-muted"></div>
                         </div>
 
@@ -403,10 +422,11 @@
                             <strong class="text-xs text-content">Model dùng làm điểm bắt đầu</strong>
                             <label class="block text-xs text-content-muted">
                                 Chọn model đã kiểm tra
-                                <select id="finetuneParentModel" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
+                                <select id="finetuneParentModel" onchange="renderFinetuneParentCompatibilityDetails(); renderTrainingReview()" class="mt-1 w-full bg-panel border border-border rounded p-2 text-xs text-content">
                                     <option value="">Chưa có parent model hợp lệ</option>
                                 </select>
                             </label>
+                            <div id="finetuneParentCompatibilityDetails" class="text-[10px] text-content-muted" aria-live="polite"></div>
                             <button id="finetuneParentValidateBtn" type="button" onclick="validateSelectedFinetuneParent()" class="w-full text-cyan-300 border border-cyan-800 rounded px-3 py-1.5 text-[10px] hover:bg-cyan-950/40">
                                 Kiểm tra lại model đã chọn
                             </button>
@@ -1217,6 +1237,7 @@
         let finetuneParameterSetSelectionInitialized = false;
         let finetuneExperimentSubmitting = false;
         let finetunePendingSubmission = null;
+        let lastValidatedFinetuneParentId = null;
         let lastUnifiedTrainingMode = null;
         let trainingControlPlaneRefreshTimer = null;
         let trainingControlPlaneLoading = false;
@@ -2247,10 +2268,7 @@ print("Initialized YOLO-NAS Training Configuration")
                 && left.every((name, index) => name === right[index]);
         }
 
-        function renderFinetuneParentModels() {
-            const parentSelector = document.getElementById("finetuneParentModel");
-            if (!parentSelector) return;
-            const previousParent = parentSelector.value;
+        function selectedFinetuneProjectContext() {
             const projectSelector = document.getElementById("trainingBatchProjects");
             const selectedProjectIds = Array.from(
                 projectSelector?.selectedOptions || []
@@ -2260,55 +2278,288 @@ print("Initialized YOLO-NAS Training Configuration")
                     candidate => candidate.id === selectedProjectIds[0]
                 )
                 : null;
-            const projectClasses = canonicalFinetuneClassNames(
-                project?.class_names
+            return {
+                selectedProjectIds,
+                project,
+                projectClasses: canonicalFinetuneClassNames(project?.class_names)
+            };
+        }
+
+        function compareFinetuneClassNames(parentValue, projectValue) {
+            const parentClasses = canonicalFinetuneClassNames(parentValue);
+            const projectClasses = canonicalFinetuneClassNames(projectValue);
+            const missingInParent = projectClasses.filter(
+                name => !parentClasses.includes(name)
             );
+            const extraInParent = parentClasses.filter(
+                name => !projectClasses.includes(name)
+            );
+            const exactMatch = sameFinetuneClassNames(parentClasses, projectClasses);
+            return {
+                parentClasses,
+                projectClasses,
+                missingInParent,
+                extraInParent,
+                orderMismatch: (
+                    !exactMatch
+                    && missingInParent.length === 0
+                    && extraInParent.length === 0
+                ),
+                exactMatch
+            };
+        }
+
+        function describeFinetuneClassMismatch(comparison) {
+            const reasons = [];
+            if (comparison.missingInParent.length) {
+                reasons.push(`model thiếu: ${comparison.missingInParent.join(", ")}`);
+            }
+            if (comparison.extraInParent.length) {
+                reasons.push(`model dư: ${comparison.extraInParent.join(", ")}`);
+            }
+            if (comparison.orderMismatch) {
+                reasons.push("đủ tên class nhưng thứ tự không giống dataset");
+            }
+            return reasons.join("; ") || "bộ class không trùng khớp";
+        }
+
+        function finetuneParentArtifact(model) {
+            return (model?.artifacts || []).find(
+                artifact => ["parent_pt", "best_pt"].includes(artifact.kind)
+            ) || null;
+        }
+
+        function finetuneParentOriginalFilename(model) {
+            const artifact = finetuneParentArtifact(model);
+            return artifact?.metadata?.original_filename || model?.filename || "file .pt";
+        }
+
+        function matchingFinetuneProjects(model) {
+            const parentClasses = canonicalFinetuneClassNames(model?.class_names);
+            if (!parentClasses.length) return [];
+            return trainingProjects.filter(project => sameFinetuneClassNames(
+                parentClasses,
+                canonicalFinetuneClassNames(project.class_names)
+            ));
+        }
+
+        function renderFinetuneArchitectureNotice() {
+            const detail = document.getElementById("trainingFinetuneModelNoticeDetail");
+            if (!detail) return;
+            const parentModelId = Number(
+                document.getElementById("finetuneParentModel")?.value || 0
+            );
+            const parentModel = finetuneModels.find(model => model.id === parentModelId);
+            detail.textContent = parentModel
+                ? `Sẽ fine-tune từ ${parentModel.name} (${finetuneParentOriginalFilename(parentModel)}). Phiên bản YOLO và kích thước của file được giữ nguyên.`
+                : "Chọn parent model ở Bước 3. Phiên bản YOLO và kích thước Nano/Small của file sẽ được giữ nguyên.";
+        }
+
+        function renderFinetuneParentCompatibilityDetails() {
+            const details = document.getElementById(
+                "finetuneParentCompatibilityDetails"
+            );
+            if (!details) return;
+            const {selectedProjectIds, project, projectClasses} = (
+                selectedFinetuneProjectContext()
+            );
+            const selectedModelId = Number(
+                document.getElementById("finetuneParentModel")?.value || 0
+            );
+            const selectedModel = finetuneModels.find(
+                model => model.id === selectedModelId
+            );
+            const highlightedModel = selectedModel || finetuneModels.find(
+                model => model.id === lastValidatedFinetuneParentId
+            );
+
+            if (selectedProjectIds.length !== 1) {
+                details.textContent = "Chọn đúng một dự án/dataset để hệ thống đối chiếu class.";
+                details.className = "text-[10px] text-amber-300";
+            } else if (!projectClasses.length) {
+                details.textContent = `${project?.name || "Dự án"} chưa có bộ class để đối chiếu.`;
+                details.className = "text-[10px] text-amber-300";
+            } else if (highlightedModel) {
+                const comparison = compareFinetuneClassNames(
+                    highlightedModel.class_names,
+                    projectClasses
+                );
+                if (comparison.exactMatch) {
+                    details.textContent = (
+                        `Phù hợp: model và ${project.name} cùng ${projectClasses.length} class, đúng thứ tự.`
+                    );
+                    details.className = "text-[10px] text-emerald-300";
+                } else {
+                    const suggestions = matchingFinetuneProjects(highlightedModel);
+                    const suggestionText = suggestions.length
+                        ? ` Dataset phù hợp: ${suggestions.map(item => item.name).join(", ")}.`
+                        : " Chưa có dataset nào đang khớp chính xác.";
+                    details.textContent = (
+                        `${highlightedModel.name} đã xác thực nhưng không dùng được với ${project.name}: `
+                        + `${describeFinetuneClassMismatch(comparison)}.${suggestionText}`
+                    );
+                    details.className = "text-[10px] text-rose-300";
+                }
+            } else {
+                details.textContent = (
+                    `Dataset ${project.name} có ${projectClasses.length} class. `
+                    + "Chọn một parent .pt phù hợp để tiếp tục."
+                );
+                details.className = "text-[10px] text-content-muted";
+            }
+            renderFinetuneArchitectureNotice();
+        }
+
+        function updateFinetuneParentUploadState(showErrors = false) {
+            const button = document.getElementById("finetuneParentUploadBtn");
+            const nameInput = document.getElementById("finetuneParentName");
+            const fileInput = document.getElementById("finetuneParentFile");
+            if (!button || !nameInput || !fileInput) return false;
+            const name = nameInput.value.trim();
+            const files = fileInput.files || [];
+            const fileIsPt = files.length === 1
+                && files[0].name.toLowerCase().endsWith(".pt");
+            const {selectedProjectIds, project, projectClasses} = (
+                selectedFinetuneProjectContext()
+            );
+            const projectReady = selectedProjectIds.length === 1
+                && Boolean(project)
+                && projectClasses.length > 0;
+            const blockers = [];
+            if (!projectReady) blockers.push("chọn đúng một dataset có class");
+            if (files.length !== 1) blockers.push("chọn một file .pt");
+            else if (!fileIsPt) blockers.push("file phải có đuôi .pt");
+            if (!name) blockers.push("nhập tên model");
+
+            const nameError = document.getElementById("finetuneParentNameError");
+            const fileError = document.getElementById("finetuneParentFileError");
+            const projectRequirement = document.getElementById(
+                "finetuneParentProjectRequirement"
+            );
+            const requirements = document.getElementById(
+                "finetuneParentUploadRequirements"
+            );
+            nameError.textContent = showErrors && !name
+                ? "Tên model đang để trống. Chọn file để tự điền hoặc nhập tên."
+                : "";
+            fileError.textContent = showErrors && !fileIsPt
+                ? "Hãy chọn đúng một file có đuôi .pt."
+                : "";
+            projectRequirement.textContent = projectReady
+                ? `Sẽ đối chiếu với ${project.name} (${projectClasses.length} class).`
+                : "Trước khi upload, hãy chọn đúng một dự án/dataset có class ở Bước 2.";
+            projectRequirement.className = projectReady
+                ? "text-[10px] text-emerald-300"
+                : "text-[10px] text-amber-300";
+            requirements.textContent = blockers.length
+                ? `Cần hoàn tất: ${blockers.join("; ")}.`
+                : "Đã đủ thông tin. Có thể tải lên và kiểm tra.";
+            requirements.className = blockers.length
+                ? "text-[10px] text-amber-300"
+                : "text-[10px] text-emerald-300";
+            button.disabled = blockers.length > 0;
+            button.title = blockers.length ? requirements.textContent : "";
+            return blockers.length === 0;
+        }
+
+        function handleFinetuneParentNameInput() {
+            const nameInput = document.getElementById("finetuneParentName");
+            if (nameInput) nameInput.dataset.autoFilled = "false";
+            updateFinetuneParentUploadState();
+        }
+
+        function handleFinetuneParentFileChange() {
+            const nameInput = document.getElementById("finetuneParentName");
+            const fileInput = document.getElementById("finetuneParentFile");
+            const file = fileInput?.files?.[0];
+            if (
+                file
+                && nameInput
+                && (!nameInput.value.trim() || nameInput.dataset.autoFilled === "true")
+            ) {
+                nameInput.value = file.name.replace(/\.pt$/i, "");
+                nameInput.dataset.autoFilled = "true";
+            }
+            updateFinetuneParentUploadState(true);
+        }
+
+        function renderFinetuneParentModels() {
+            const parentSelector = document.getElementById("finetuneParentModel");
+            if (!parentSelector) return;
+            const previousParent = parentSelector.value;
+            const {selectedProjectIds, projectClasses} = selectedFinetuneProjectContext();
             const allTrainableParents = finetuneModels.filter(model => (
                 model.model_type === "detection"
+                && model.finetune_status === "ready"
                 && (model.artifacts || []).some(
                     artifact => ["parent_pt", "best_pt"].includes(artifact.kind)
                 )
             ));
-            const trainableParents = projectClasses.length
-                ? allTrainableParents.filter(model => (
-                    sameFinetuneClassNames(
-                        canonicalFinetuneClassNames(model.class_names),
-                        projectClasses
-                    )
-                ))
-                : allTrainableParents;
+            const compatibleParents = projectClasses.length
+                ? allTrainableParents.filter(model => compareFinetuneClassNames(
+                    model.class_names,
+                    projectClasses
+                ).exactMatch)
+                : [];
+            const incompatibleParents = projectClasses.length
+                ? allTrainableParents.filter(model => !compareFinetuneClassNames(
+                    model.class_names,
+                    projectClasses
+                ).exactMatch)
+                : [];
 
             parentSelector.innerHTML = "";
             const option = document.createElement("option");
             option.value = "";
             if (selectedProjectIds.length !== 1) {
                 option.textContent = "Chọn đúng một project để đối chiếu class";
-                option.disabled = true;
-                parentSelector.appendChild(option);
             } else if (!projectClasses.length) {
                 option.textContent = "Project chưa có bộ class để đối chiếu";
-                option.disabled = true;
-                parentSelector.appendChild(option);
-            } else if (!trainableParents.length) {
+            } else if (!compatibleParents.length) {
                 option.textContent = "Chưa có parent .pt đúng bộ class của project";
-                parentSelector.appendChild(option);
+            } else {
+                option.textContent = "Chọn parent .pt phù hợp";
             }
-            if (!trainableParents.length) return;
+            parentSelector.appendChild(option);
 
-            for (const model of trainableParents) {
+            for (const model of compatibleParents) {
                 const modelOption = document.createElement("option");
                 modelOption.value = model.id;
                 const modelClassCount = canonicalFinetuneClassNames(
                     model.class_names
                 ).length;
                 modelOption.textContent = (
-                    `${model.name} · ${modelClassCount} lớp nhận diện`
+                    `${model.name} · ${finetuneParentOriginalFilename(model)} · `
+                    + `${modelClassCount} lớp nhận diện`
                 );
                 parentSelector.appendChild(modelOption);
             }
-            if (trainableParents.some(model => String(model.id) === previousParent)) {
+            if (incompatibleParents.length) {
+                const heading = document.createElement("option");
+                heading.disabled = true;
+                heading.textContent = "── Đã xác thực nhưng không khớp dataset ──";
+                parentSelector.appendChild(heading);
+                for (const model of incompatibleParents) {
+                    const comparison = compareFinetuneClassNames(
+                        model.class_names,
+                        projectClasses
+                    );
+                    const modelOption = document.createElement("option");
+                    modelOption.value = model.id;
+                    modelOption.disabled = true;
+                    modelOption.textContent = (
+                        `${model.name} · ${comparison.parentClasses.length} lớp · `
+                        + describeFinetuneClassMismatch(comparison)
+                    );
+                    parentSelector.appendChild(modelOption);
+                }
+            }
+            if (compatibleParents.some(model => String(model.id) === previousParent)) {
                 parentSelector.value = previousParent;
             }
+            renderFinetuneParentCompatibilityDetails();
+            updateFinetuneParentUploadState();
+            renderTrainingReview();
         }
 
         async function loadFinetuneOptions(projects = null) {
@@ -2758,12 +3009,8 @@ print("Initialized YOLO-NAS Training Configuration")
             const statusBox = document.getElementById("finetuneParentUploadStatus");
             const name = document.getElementById("finetuneParentName").value.trim();
             const fileInput = document.getElementById("finetuneParentFile");
-            if (!name || fileInput.files.length !== 1) {
-                showColabRemoteError("Nhập tên và chọn đúng một file parent .pt.");
-                return;
-            }
-            if (!fileInput.files[0].name.toLowerCase().endsWith(".pt")) {
-                showColabRemoteError("Parent model phải là file .pt.");
+            if (!updateFinetuneParentUploadState(true)) {
+                showColabRemoteError("Hãy hoàn tất các mục được hướng dẫn trước khi upload.");
                 return;
             }
 
@@ -2784,21 +3031,37 @@ print("Initialized YOLO-NAS Training Configuration")
                 const parentModelId = imported.id || imported.model_id;
                 statusBox.textContent = "Đã lưu checkpoint. Đang gửi sang worker để xác thực...";
                 const validated = await validateFinetuneParentModel(parentModelId);
-                statusBox.textContent = (
-                    `Ready · ${validated.class_names.length} classes · `
-                    + validated.artifacts[0].sha256.slice(0, 12)
+                lastValidatedFinetuneParentId = validated.id;
+                const {project, projectClasses} = selectedFinetuneProjectContext();
+                const comparison = compareFinetuneClassNames(
+                    validated.class_names,
+                    projectClasses
                 );
+                const checksum = validated.artifacts[0].sha256.slice(0, 12);
+                statusBox.textContent = comparison.exactMatch
+                    ? `Đã xác thực · ${validated.class_names.length} class · phù hợp ${project.name} · ${checksum}`
+                    : (
+                        `File .pt hợp lệ (${validated.class_names.length} class), nhưng chưa dùng được với ${project.name}: `
+                        + describeFinetuneClassMismatch(comparison)
+                    );
+                statusBox.className = comparison.exactMatch
+                    ? "text-[10px] text-emerald-300"
+                    : "text-[10px] text-rose-300";
                 document.getElementById("finetuneParentName").value = "";
+                document.getElementById("finetuneParentName").dataset.autoFilled = "false";
                 fileInput.value = "";
-                await loadFinetuneOptions();
-                document.getElementById("finetuneParentModel").value = String(validated.id);
-                showToast(`Parent ${validated.name} đã sẵn sàng để fine-tune.`);
+                renderFinetuneParentModels();
+                updateFinetuneParentUploadState();
+                if (comparison.exactMatch) {
+                    showToast(`Parent ${validated.name} đã sẵn sàng để fine-tune.`);
+                }
             } catch (error) {
                 statusBox.textContent = `Chưa xác thực: ${error.message}`;
+                statusBox.className = "text-[10px] text-rose-300";
                 showColabRemoteError(`Import parent lỗi: ${error.message}`);
                 await loadFinetuneOptions().catch(() => {});
             } finally {
-                button.disabled = false;
+                updateFinetuneParentUploadState();
             }
         }
 
@@ -2807,8 +3070,14 @@ print("Initialized YOLO-NAS Training Configuration")
                 `/api/finetune-models/${modelId}/validate`,
                 { method: "POST", body: {} }
             );
+            lastValidatedFinetuneParentId = Number(modelId);
             await loadFinetuneOptions();
-            document.getElementById("finetuneParentModel").value = String(modelId);
+            const parentSelector = document.getElementById("finetuneParentModel");
+            const modelOption = Array.from(parentSelector.options).find(
+                option => option.value === String(modelId) && !option.disabled
+            );
+            if (modelOption) parentSelector.value = String(modelId);
+            renderFinetuneParentCompatibilityDetails();
             renderTrainingReview();
             return validated;
         }
@@ -2870,6 +3139,18 @@ print("Initialized YOLO-NAS Training Configuration")
                 "hidden",
                 !isFinetune
             );
+            document.getElementById("trainingFreshModelFields").classList.toggle(
+                "hidden",
+                isFinetune
+            );
+            document.getElementById("trainingFinetuneModelNotice").classList.toggle(
+                "hidden",
+                !isFinetune
+            );
+            const familySelector = document.getElementById("yolo_family");
+            const modelSelector = document.getElementById("model_version");
+            familySelector.disabled = isFinetune;
+            modelSelector.disabled = isFinetune;
             const freshSummary = document.getElementById("trainingFreshModelSummary");
             freshSummary.classList.toggle("hidden", isFinetune);
             if (!isFinetune) {
@@ -2885,6 +3166,8 @@ print("Initialized YOLO-NAS Training Configuration")
                     ? '<i class="fa-solid fa-play mr-1"></i>Bắt đầu cải thiện model'
                     : '<i class="fa-solid fa-play mr-1"></i>Bắt đầu huấn luyện model mới';
             }
+            renderFinetuneArchitectureNotice();
+            updateFinetuneParentUploadState();
             renderTrainingReview();
         }
 
