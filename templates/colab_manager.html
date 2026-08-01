@@ -2054,6 +2054,27 @@ print("Initialized YOLO-NAS Training Configuration")
             return payload;
         }
 
+        async function hydrateTrainingProjectClasses(projects) {
+            return Promise.all((projects || []).map(async project => {
+                if (Array.isArray(project.class_names) && project.class_names.length) {
+                    return project;
+                }
+                try {
+                    const classes = await localTrainingApiFetch(
+                        `/api/projects/${project.id}/classes`
+                    );
+                    return {
+                        ...project,
+                        class_names: Array.isArray(classes)
+                            ? classes
+                            : (classes.classes || [])
+                    };
+                } catch (_error) {
+                    return project;
+                }
+            }));
+        }
+
         async function initializeTrainingControlPlane() {
             try {
                 const [catalog, projects] = await Promise.all([
@@ -2061,24 +2082,25 @@ print("Initialized YOLO-NAS Training Configuration")
                     localTrainingApiFetch("/api/projects")
                 ]);
                 applyTrainingModelCatalog(catalog);
-                trainingProjects = projects;
+                const projectsWithClasses = await hydrateTrainingProjectClasses(projects);
+                trainingProjects = projectsWithClasses;
                 loadTemplateToUI(activeTemplateId);
                 const selector = document.getElementById("trainingBatchProjects");
                 selector.innerHTML = "";
-                for (const project of projects) {
+                for (const project of projectsWithClasses) {
                     const option = document.createElement("option");
                     option.value = project.id;
                     option.textContent = `${project.name} (#${project.id})`;
                     selector.appendChild(option);
                 }
-                if (!projects.length) {
+                if (!projectsWithClasses.length) {
                     const option = document.createElement("option");
                     option.disabled = true;
                     option.textContent = "Chưa có ToolIb project.";
                     selector.appendChild(option);
                 }
                 selector.addEventListener("change", renderFinetuneParentModels);
-                await loadFinetuneOptions(projects);
+                await loadFinetuneOptions(projectsWithClasses);
             } catch (error) {
                 showColabRemoteError(`Không tải được project cho batch: ${error.message}`);
             }
@@ -2235,16 +2257,20 @@ print("Initialized YOLO-NAS Training Configuration")
             const projectClasses = canonicalFinetuneClassNames(
                 project?.class_names
             );
-            const trainableParents = finetuneModels.filter(model => (
+            const allTrainableParents = finetuneModels.filter(model => (
                 model.model_type === "detection"
                 && (model.artifacts || []).some(
                     artifact => ["parent_pt", "best_pt"].includes(artifact.kind)
                 )
-                && sameFinetuneClassNames(
-                    canonicalFinetuneClassNames(model.class_names),
-                    projectClasses
-                )
             ));
+            const trainableParents = projectClasses.length
+                ? allTrainableParents.filter(model => (
+                    sameFinetuneClassNames(
+                        canonicalFinetuneClassNames(model.class_names),
+                        projectClasses
+                    )
+                ))
+                : allTrainableParents;
 
             parentSelector.innerHTML = "";
             const option = document.createElement("option");
@@ -2254,10 +2280,10 @@ print("Initialized YOLO-NAS Training Configuration")
             } else if (!trainableParents.length) {
                 option.textContent = "Chua co parent .pt dung bo classes cua project";
             }
-            if (!project || !projectClasses.length || !trainableParents.length) {
+            if (!trainableParents.length) {
                 parentSelector.appendChild(option);
-                return;
             }
+            if (!trainableParents.length) return;
 
             for (const model of trainableParents) {
                 const modelOption = document.createElement("option");

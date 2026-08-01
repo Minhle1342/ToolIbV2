@@ -29,6 +29,8 @@ def test_colab_manager_exposes_phase5_worker_batch_and_reconnect_controls():
         'finetuneParentFile',
         'finetuneParentModel',
         'trainingProjects = projects',
+        'function hydrateTrainingProjectClasses(projects)',
+        '/api/projects/${project.id}/classes',
         'function renderFinetuneParentModels()',
         'canonicalFinetuneClassNames',
         'sameFinetuneClassNames',
