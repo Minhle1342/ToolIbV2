@@ -20,7 +20,15 @@ class YOLOInference:
     def ensure_session(self):
         if self.session is None and os.path.exists(self.model_path):
             try:
-                self.session = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
+                # Cấu hình SessionOptions giới hạn số luồng CPU để không làm nghẽn/đơ hệ thống
+                session_options = ort.SessionOptions()
+                cpu_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
+                session_options.intra_op_num_threads = cpu_threads
+                session_options.inter_op_num_threads = 1
+                session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+                session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+                self.session = ort.InferenceSession(self.model_path, session_options, providers=['CPUExecutionProvider'])
                 self.input_name = self.session.get_inputs()[0].name
                 
                 # Try to get input shape dynamically from model
@@ -522,7 +530,14 @@ class ClassificationInference:
             return
             
         try:
-            self.session = ort.InferenceSession(self.model_path, providers=['CPUExecutionProvider'])
+            session_options = ort.SessionOptions()
+            cpu_threads = max(1, min(4, (os.cpu_count() or 4) // 2))
+            session_options.intra_op_num_threads = cpu_threads
+            session_options.inter_op_num_threads = 1
+            session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+            self.session = ort.InferenceSession(self.model_path, session_options, providers=['CPUExecutionProvider'])
             self.input_name = self.session.get_inputs()[0].name
             
             # Try to get input size from model
@@ -567,7 +582,8 @@ class ClassificationInference:
             working = utils.resize_image_quality(working, (target_w, target_h))
 
         if min_dim < 96:
-            working = cv2.fastNlMeansDenoisingColored(working, None, 3, 3, 7, 21)
+            # Thay thế cv2.fastNlMeansDenoisingColored (tốn 100-500ms CPU) bằng bilateralFilter (<1ms) giữ cạnh tốt
+            working = cv2.bilateralFilter(working, d=5, sigmaColor=35, sigmaSpace=35)
 
         lab = cv2.cvtColor(working, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)

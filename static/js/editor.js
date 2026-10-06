@@ -60,20 +60,12 @@ class Editor {
     }
 
     startCenterDotAnimation() {
-        if (this._dotAnimFrame) return;
-
-        const animateDots = () => {
-            const rectCount = this.canvas.getObjects('rect').length;
-            if (this.showBoxes || rectCount > this.maxAnimatedCenterDots) {
-                this._dotAnimFrame = null;
-                return;
-            }
-
-            this.canvas.requestRenderAll();
-            this._dotAnimFrame = requestAnimationFrame(animateDots);
-        };
-
-        this._dotAnimFrame = requestAnimationFrame(animateDots);
+        if (this._dotAnimFrame) {
+            cancelAnimationFrame(this._dotAnimFrame);
+            this._dotAnimFrame = null;
+        }
+        // Render một lần tĩnh thay vì chạy vòng lặp vô hạn ngốn 100% CPU/GPU
+        this.canvas.requestRenderAll();
     }
 
     setFocusClass(id) {
@@ -1193,11 +1185,7 @@ class Editor {
                 if (ctx) {
                     ctx.save();
                     const rects = this.canvas.getObjects('rect');
-                    const animateDots = rects.length <= this.maxAnimatedCenterDots;
-                    const time = performance.now();
-                    const pulse = animateDots ? (Math.sin(time / 200) + 1) / 2 : 0; // oscillates between 0 and 1
-                    const pulseRadius = animateDots ? 4.5 + pulse * 6 : 4.5; // oscillates between 4.5 and 10.5
-                    const pulseAlpha = animateDots ? (1 - pulse) * 0.8 : 0; // fades out as it expands
+                    const dotBaseRadius = 5;
 
                     rects.forEach(rect => {
                         const cls = this.classes.find(c => c.id === rect.classId) || { color: '#00C2FF' };
@@ -1209,39 +1197,24 @@ class Editor {
                         const baseColor = isOverlapping ? '#ff3b30' : cls.color;
                         const overlapBoost = Math.min(overlapCount, 4);
 
-                        // Draw glowing outer ring
-                        if (animateDots) {
-                            ctx.save();
-                            ctx.globalAlpha = isOverlapping ? Math.min(0.35 + pulse * 0.45 + overlapBoost * 0.08, 0.95) : pulseAlpha;
-                            ctx.fillStyle = baseColor;
-                            ctx.shadowColor = baseColor;
-                            ctx.shadowBlur = isOverlapping ? 18 + overlapBoost * 4 : 10;
-                            ctx.beginPath();
-                            ctx.arc(cx, cy, isOverlapping ? pulseRadius + 4 + overlapBoost * 2 : pulseRadius, 0, Math.PI * 2);
-                            ctx.fill();
-                            ctx.restore();
-                        }
+                        // Vẽ quầng hào quang tĩnh nhẹ (không dùng shadowBlur gây chậm CPU/GPU)
+                        ctx.save();
+                        ctx.globalAlpha = isOverlapping ? 0.35 : 0.2;
+                        ctx.fillStyle = baseColor;
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, isOverlapping ? dotBaseRadius + 4 + overlapBoost * 2 : dotBaseRadius + 3, 0, Math.PI * 2);
+                        ctx.fill();
+                        ctx.restore();
 
-                        if (isOverlapping && animateDots) {
+                        if (isOverlapping) {
                             ctx.save();
                             ctx.strokeStyle = '#ff3b30';
-                            ctx.lineWidth = 2 + Math.min(overlapBoost, 2);
-                            ctx.globalAlpha = 0.9;
+                            ctx.lineWidth = 1.5;
+                            ctx.globalAlpha = 0.8;
                             ctx.beginPath();
-                            ctx.arc(cx, cy, pulseRadius + 10 + overlapBoost * 2, 0, Math.PI * 2);
+                            ctx.arc(cx, cy, dotBaseRadius + 6 + overlapBoost * 2, 0, Math.PI * 2);
                             ctx.stroke();
                             ctx.restore();
-
-                            for (let ringIndex = 1; ringIndex < overlapCount; ringIndex++) {
-                                ctx.save();
-                                ctx.strokeStyle = '#ff3b30';
-                                ctx.lineWidth = 1.2;
-                                ctx.globalAlpha = Math.max(0.55 - ringIndex * 0.12, 0.18);
-                                ctx.beginPath();
-                                ctx.arc(cx, cy, pulseRadius + 10 + overlapBoost * 2 + ringIndex * 5, 0, Math.PI * 2);
-                                ctx.stroke();
-                                ctx.restore();
-                            }
                         }
 
                         // Draw solid center dot

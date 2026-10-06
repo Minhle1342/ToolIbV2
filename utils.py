@@ -20,8 +20,10 @@ except ImportError:
 
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp'}
 
+import functools
 import pathlib
 
+@functools.lru_cache(maxsize=4096)
 def find_dataset_root(selected_path):
     path = pathlib.Path(selected_path).resolve()
     for current in [path] + list(path.parents):
@@ -36,6 +38,7 @@ def find_dataset_root(selected_path):
                 return current
     return path
 
+@functools.lru_cache(maxsize=32768)
 def safe_resolve_under_root(root, relative_path):
     root_path = pathlib.Path(root).resolve()
     rel_path = pathlib.Path(relative_path)
@@ -48,9 +51,11 @@ def safe_resolve_under_root(root, relative_path):
         raise ValueError(f"Path traversal detected: {relative_path}")
     return candidate
 
+@functools.lru_cache(maxsize=32768)
 def resolve_image_path(project_root, image_filename):
     return str(safe_resolve_under_root(project_root, image_filename))
 
+@functools.lru_cache(maxsize=32768)
 def resolve_label_path(project_root, image_filename):
     root_path = pathlib.Path(project_root).resolve()
     rel_path = pathlib.Path(image_filename)

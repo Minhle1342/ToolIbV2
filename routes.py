@@ -285,15 +285,17 @@ def valid_auto_label_boxes(boxes):
     return accepted
 
 
-def apply_auto_label_classifier(project, image_path, result):
+def apply_auto_label_classifier(project, image_path, result, loaded_image=None):
     classifier = get_classifier_engine()
     if classifier and result.get('success') and result.get('boxes'):
         import sys
         sys.stderr.write(f"[AutoLabel] Classifier ACTIVE - Re-classifying {len(result['boxes'])} boxes...\n")
         sys.stderr.flush()
-        img = utils.imread_with_exif(image_path)
+        img = loaded_image if loaded_image is not None else utils.imread_with_exif(image_path)
         if img is not None:
             img_h, img_w = img.shape[:2]
+            project_classes = utils.get_classes(project)
+            project_classes_lower = [c.lower() for c in project_classes]
 
             for i, box in enumerate(result['boxes']):
                 bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
@@ -309,17 +311,15 @@ def apply_auto_label_classifier(project, image_path, result):
                     predicted_name = cls_result.get('class_name')
                     if not predicted_name:
                         continue
-                    project_classes = utils.get_classes(project)
                     if predicted_name in project_classes:
                         project_class_id = project_classes.index(predicted_name)
+                    elif predicted_name.lower() in project_classes_lower:
+                        project_class_id = project_classes_lower.index(predicted_name.lower())
                     else:
-                        project_classes_lower = [c.lower() for c in project_classes]
-                        if predicted_name.lower() in project_classes_lower:
-                            project_class_id = project_classes_lower.index(predicted_name.lower())
-                        else:
-                            project_classes.append(predicted_name)
-                            utils.save_classes(project, project_classes)
-                            project_class_id = len(project_classes) - 1
+                        project_classes.append(predicted_name)
+                        project_classes_lower.append(predicted_name.lower())
+                        utils.save_classes(project, project_classes)
+                        project_class_id = len(project_classes) - 1
 
                     box['class_id'] = project_class_id
                     box['cls_confidence'] = cls_result['confidence']
