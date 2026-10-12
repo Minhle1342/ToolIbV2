@@ -1,0 +1,324 @@
+{
+  "projectName": "toolib-main",
+  "projectType": "Python (Flask)",
+  "packageManager": "pip",
+  "scripts": {
+    "dev": "node dev.js",
+    "build": "tailwindcss -i static/css/input.css -o static/css/output.css --minify",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "run": "python app.py",
+    "lint": "ruff check .",
+    "typecheck": "mypy ."
+  },
+  "keyDirectories": {
+    ".venv/": "Module directory",
+    "config/": "Module directory",
+    "doc/": "Module directory",
+    "docs/": "Guides and documentation",
+    "exported_dataset/": "Module directory",
+    "models/": "Module directory",
+    "notebooks/": "Module directory",
+    "project_guides/": "Module directory",
+    "scripts/": "Module directory",
+    "specs/": "Module directory",
+    "static/": "Module directory",
+    "templates/": "Module directory",
+    "tests/": "Test directory",
+    "test_data/": "Module directory",
+    "uploads/": "Module directory"
+  },
+  "dependenciesSummary": [
+    "@tailwindcss/cli",
+    "tailwindcss"
+  ],
+  "codingConventions": [
+    "TypeScript strict mode",
+    "Surgical edits with replace_text",
+    "Run test verification before concluding"
+  ],
+  "learnedInsights": [
+    {
+      "id": "memory-1791778993246-3q277n",
+      "key": "session_session-1791778728698-ropdak",
+      "insight": "[Session session-17] Objective: \"Kiểm tra nguyên nhân khi chạy file @toollb.bat thì website báo lỗi [User Attached Workspace Context] --- [Attached File: toollb.bat (26 lines • 0.8 \". Modified files: none. Result: Surveyed. Summary: Dựa trên nội dung file `toollb.bat` và `run.ps1` trong dự án Team YOLO Labeling Hub, lỗi khi chạy website có thể do một vài nguyên nhân phổ biến sau: 1. **Chưa",
+      "category": "episodic",
+      "scope": "project",
+      "source": "model",
+      "confidence": 0.8,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:13.242Z",
+      "updatedAt": "2026-10-12T04:23:17.729Z",
+      "tags": [
+        "episodic",
+        "session:session-1791778728698-ropdak",
+        "outcome:completed"
+      ],
+      "sourceEventSeq": 114,
+      "sourceToolCallId": "call_2129011",
+      "expiresAt": "2026-11-11T04:23:17.733Z",
+      "recordedAt": "2026-10-12T04:23:17.729Z",
+      "accessCount": 6
+    },
+    {
+      "id": "memory-dream-4d78eb49-efd0-4991-8013-8e41edbfc539",
+      "key": "team_yolo_labeling_hub",
+      "insight": "Team YOLO Labeling Hub là một công cụ gán nhãn dữ liệu YOLO chuyên nghiệp hoạt động trên nền tảng Web/LAN, hỗ trợ làm việc nhóm, tích hợp Auto-Labeling và quy trình gán nhãn tối ưu hóa tốc độ.",
+      "category": "architecture",
+      "scope": "project",
+      "source": "dream",
+      "confidence": 0.9,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:20.215Z",
+      "updatedAt": "2026-10-12T04:23:20.215Z",
+      "tags": [
+        "yolo",
+        "labeling",
+        "web",
+        "lan",
+        "auto-labeling"
+      ],
+      "provenance": [
+        {
+          "evidenceId": "session-1791778728698-ropdak:66",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 66,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:21:58.508Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:78",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 78,
+          "kind": "tool-failure",
+          "createdAt": "2026-10-12T04:22:17.287Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:89",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 89,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:22:32.700Z"
+        }
+      ],
+      "verifiedAt": "2026-10-12T04:23:20.215Z",
+      "sourceEventSeq": 89,
+      "recordedAt": "2026-10-12T04:23:20.215Z"
+    },
+    {
+      "id": "memory-dream-6f36dc5b-03f1-433c-af80-eab0fd23663c",
+      "key": "toollb_bat_script",
+      "insight": "File toollb.bat được sử dụng để khởi động Team YOLO Labeling Hub, bao gồm các bước kiểm tra cấu hình Cloudflare Tunnel và khởi động Tailwind CSS và Cloudflare Tunnel.",
+      "category": "convention",
+      "scope": "project",
+      "source": "dream",
+      "confidence": 0.8,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:20.215Z",
+      "updatedAt": "2026-10-12T04:23:20.215Z",
+      "tags": [
+        "bat",
+        "script",
+        "cloudflare",
+        "tailwind",
+        "tunnel"
+      ],
+      "provenance": [
+        {
+          "evidenceId": "session-1791778728698-ropdak:2",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 2,
+          "kind": "human",
+          "createdAt": "2026-10-12T04:20:07.083Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:113",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113,
+          "kind": "audit",
+          "createdAt": "2026-10-12T04:23:13.153Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:114",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:23:13.166Z"
+        }
+      ],
+      "verifiedAt": "2026-10-12T04:23:20.215Z",
+      "sourceEventSeq": 114,
+      "recordedAt": "2026-10-12T04:23:20.215Z"
+    },
+    {
+      "id": "memory-dream-370c41f9-289e-42c4-be6b-4e2ac60b00ef",
+      "key": "run_ps1_script",
+      "insight": "File run.ps1 được sử dụng để thiết lập môi trường và khởi động các dịch vụ cần thiết cho Team YOLO Labeling Hub, bao gồm kiểm tra sự tồn tại của môi trường ảo (.venv).",
+      "category": "convention",
+      "scope": "project",
+      "source": "dream",
+      "confidence": 0.8,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:20.215Z",
+      "updatedAt": "2026-10-12T04:23:20.215Z",
+      "tags": [
+        "ps1",
+        "script",
+        "environment",
+        "virtualenv",
+        "venv"
+      ],
+      "provenance": [
+        {
+          "evidenceId": "session-1791778728698-ropdak:30",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 30,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:20:51.475Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:113",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113,
+          "kind": "audit",
+          "createdAt": "2026-10-12T04:23:13.153Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:114",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:23:13.166Z"
+        }
+      ],
+      "verifiedAt": "2026-10-12T04:23:20.215Z",
+      "sourceEventSeq": 114,
+      "recordedAt": "2026-10-12T04:23:20.215Z",
+      "accessCount": 5
+    },
+    {
+      "id": "memory-dream-3f59f68d-fee8-4016-aa97-f13d1eb3c036",
+      "key": "app_py_script",
+      "insight": "File app.py là điểm khởi đầu của ứng dụng Team YOLO Labeling Hub, sử dụng Flask và Flask-SocketIO để quản lý các kết nối và tương tác thời gian thực.",
+      "category": "architecture",
+      "scope": "project",
+      "source": "dream",
+      "confidence": 0.9,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:20.215Z",
+      "updatedAt": "2026-10-12T04:23:20.215Z",
+      "tags": [
+        "python",
+        "flask",
+        "flask-socketio",
+        "web",
+        "application"
+      ],
+      "provenance": [
+        {
+          "evidenceId": "session-1791778728698-ropdak:89",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 89,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:22:32.700Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:101",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 101,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:22:54.634Z"
+        }
+      ],
+      "verifiedAt": "2026-10-12T04:23:20.215Z",
+      "sourceEventSeq": 101,
+      "recordedAt": "2026-10-12T04:23:20.215Z",
+      "accessCount": 1
+    },
+    {
+      "id": "memory-dream-09969a8c-c282-4d00-a44d-18a9f44a5a22",
+      "key": "common_error_causes",
+      "insight": "Các nguyên nhân phổ biến gây lỗi khi chạy Team YOLO Labeling Hub bao gồm: chưa cài đặt môi trường ảo (.venv), xung đột cấu hình Cloudflare Tunnel hoặc cổng, và thiếu các thư viện cần thiết.",
+      "category": "gotcha",
+      "scope": "project",
+      "source": "dream",
+      "confidence": 0.8,
+      "trustStatus": "active",
+      "createdAt": "2026-10-12T04:23:20.215Z",
+      "updatedAt": "2026-10-12T04:23:20.215Z",
+      "tags": [
+        "error",
+        "troubleshooting",
+        "venv",
+        "cloudflare",
+        "port"
+      ],
+      "provenance": [
+        {
+          "evidenceId": "session-1791778728698-ropdak:113",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113,
+          "kind": "audit",
+          "createdAt": "2026-10-12T04:23:13.153Z"
+        },
+        {
+          "evidenceId": "session-1791778728698-ropdak:114",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "kind": "tool-success",
+          "createdAt": "2026-10-12T04:23:13.166Z"
+        }
+      ],
+      "verifiedAt": "2026-10-12T04:23:20.215Z",
+      "sourceEventSeq": 114,
+      "recordedAt": "2026-10-12T04:23:20.215Z",
+      "accessCount": 2
+    },
+    {
+      "id": "memory-1791779131986-n2j4ba",
+      "key": "session_session-1791778728698-ropdak",
+      "insight": "[Session session-17] Objective: \"Kiểm tra nguyên nhân khi chạy file @toollb.bat thì website báo lỗi [User Attached Workspace Context] --- [Attached File: toollb.bat (26 lines • 0.8 \". Modified files: none. Result: Surveyed. Summary: Đã thực hiện phân tích và kiểm tra cấu hình khởi động của dự án thông qua các file `toollb.bat` và `run.ps1`. Do môi trường chạy lệnh trong sandboxed bị hạn c",
+      "category": "episodic",
+      "scope": "project",
+      "source": "model",
+      "confidence": 0.35,
+      "trustStatus": "contested",
+      "createdAt": "2026-10-12T04:25:31.982Z",
+      "updatedAt": "2026-10-12T04:25:31.982Z",
+      "tags": [
+        "episodic",
+        "session:session-1791778728698-ropdak",
+        "outcome:completed"
+      ],
+      "sourceEventSeq": 150,
+      "sourceToolCallId": "call_2429749",
+      "expiresAt": "2026-11-11T04:25:31.986Z",
+      "conflictReason": "Model-authored value conflicts with the previous value for key \"session_session-1791778728698-ropdak\".",
+      "recordedAt": "2026-10-12T04:25:31.982Z"
+    },
+    {
+      "id": "memory-1791779594912-xw0bpk",
+      "key": "session_session-1791778728698-ropdak",
+      "insight": "[Session session-17] Objective: \"Kiểm tra nguyên nhân khi chạy file @toollb.bat thì website báo lỗi [User Attached Workspace Context] --- [Attached File: toollb.bat (26 lines • 0.8 \". Modified files: none. Result: Tests verified successfully (exitCode: 0). Summary: Kết quả kiểm tra chi tiết các yêu cầu của bạn: 1. **Thư mục `.venv`**: - **Đã được tạo thành công** tại thư mục gốc của dự án và chứa đầy đủ cấu trúc môi tr",
+      "category": "episodic",
+      "scope": "project",
+      "source": "model",
+      "confidence": 0.35,
+      "trustStatus": "contested",
+      "createdAt": "2026-10-12T04:33:14.906Z",
+      "updatedAt": "2026-10-12T04:33:14.906Z",
+      "tags": [
+        "episodic",
+        "session:session-1791778728698-ropdak",
+        "outcome:success"
+      ],
+      "sourceEventSeq": 221,
+      "sourceToolCallId": "call_2498972",
+      "expiresAt": "2026-11-11T04:33:14.912Z",
+      "conflictReason": "Model-authored value conflicts with the previous value for key \"session_session-1791778728698-ropdak\".",
+      "recordedAt": "2026-10-12T04:33:14.906Z"
+    }
+  ],
+  "lastIndexed": "2026-10-12T04:23:20.215Z",
+  "isMonorepo": false,
+  "monorepoWorkspaces": []
+}

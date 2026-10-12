@@ -548,14 +548,6 @@ if __name__ == '__main__':
     with app.app_context():
         db.create_all()  # Create tables if they don't exist
         
-        # Safely upgrade existing db to add model_type if it doesn't exist
-        try:
-            from sqlalchemy import text
-            with db.engine.connect() as conn:
-                conn.execute(text("ALTER TABLE ai_models ADD COLUMN model_type VARCHAR(50) DEFAULT 'detection'"))
-                conn.commit()
-        except Exception:
-            pass # Column already exists
             
     # Check/generate certs and run Socket.IO over HTTPS
     key_path, cert_path = check_and_generate_certificates()

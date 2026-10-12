@@ -14,4 +14,4 @@ call "%~dp0stop.bat" --no-pause
 
 echo.
 echo [BUOC 2] Dang khoi dong lai he thong...
-call "%~dp0run.bat"
+call "%~dp0toollb.bat"

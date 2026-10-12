@@ -189,17 +189,12 @@ def move_directory_to_recycle_bin(path):
 def get_pdf_page_count(pdf_path):
     if not os.path.exists(pdf_path):
         return 0
-
     try:
-        from pypdf import PdfReader
-        return len(PdfReader(pdf_path).pages)
+        with open(pdf_path, 'rb') as f:
+            content = f.read().decode('latin-1', errors='ignore')
+        return len(re.findall(r'/Type\s*/Page\b', content))
     except Exception:
-        try:
-            with open(pdf_path, 'rb') as f:
-                content = f.read().decode('latin-1', errors='ignore')
-            return len(re.findall(r'/Type\s*/Page\b', content))
-        except Exception:
-            return 0
+        return 0
 
 
 def get_inference_engine():
@@ -297,34 +292,43 @@ def apply_auto_label_classifier(project, image_path, result, loaded_image=None):
             project_classes = utils.get_classes(project)
             project_classes_lower = [c.lower() for c in project_classes]
 
+            crops = []
+            valid_indices = []
             for i, box in enumerate(result['boxes']):
                 bounds = utils.yolo_box_to_pixel_bounds(box, img_w, img_h, padding_ratio=0.12, min_padding_px=6)
                 crop = utils.crop_bgr_with_bounds(img, bounds)
+                if crop is not None:
+                    crops.append(crop)
+                    valid_indices.append(i)
 
-                if crop is None:
-                    continue
+            if crops:
+                if hasattr(classifier, 'predict_batch'):
+                    cls_results = classifier.predict_batch(crops)
+                else:
+                    cls_results = [classifier.predict(c) for c in crops]
 
-                cls_result = classifier.predict(crop)
+                for idx, i in enumerate(valid_indices):
+                    box = result['boxes'][i]
+                    cls_result = cls_results[idx]
+                    if 'error' not in cls_result:
+                        old_class_id = box['class_id']
+                        predicted_name = cls_result.get('class_name')
+                        if not predicted_name:
+                            continue
+                        if predicted_name in project_classes:
+                            project_class_id = project_classes.index(predicted_name)
+                        elif predicted_name.lower() in project_classes_lower:
+                            project_class_id = project_classes_lower.index(predicted_name.lower())
+                        else:
+                            project_classes.append(predicted_name)
+                            project_classes_lower.append(predicted_name.lower())
+                            utils.save_classes(project, project_classes)
+                            project_class_id = len(project_classes) - 1
 
-                if 'error' not in cls_result:
-                    old_class_id = box['class_id']
-                    predicted_name = cls_result.get('class_name')
-                    if not predicted_name:
-                        continue
-                    if predicted_name in project_classes:
-                        project_class_id = project_classes.index(predicted_name)
-                    elif predicted_name.lower() in project_classes_lower:
-                        project_class_id = project_classes_lower.index(predicted_name.lower())
-                    else:
-                        project_classes.append(predicted_name)
-                        project_classes_lower.append(predicted_name.lower())
-                        utils.save_classes(project, project_classes)
-                        project_class_id = len(project_classes) - 1
-
-                    box['class_id'] = project_class_id
-                    box['cls_confidence'] = cls_result['confidence']
-                    box['cls_class_name'] = predicted_name
-                    sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {predicted_name} ({cls_result['confidence']*100:.1f}%)\n")
+                        box['class_id'] = project_class_id
+                        box['cls_confidence'] = cls_result['confidence']
+                        box['cls_class_name'] = predicted_name
+                        sys.stderr.write(f"  Box {i}: YOLO class {old_class_id} -> Classifier: {predicted_name} ({cls_result['confidence']*100:.1f}%)\n")
             sys.stderr.flush()
         sys.stderr.write(f"[AutoLabel] Classifier done.\n")
         sys.stderr.flush()

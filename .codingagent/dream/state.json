@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "cursors": {
+    "session-1791778728698-ropdak": {
+      "lastSeq": 117
+    }
+  },
+  "lastRunAt": "2026-10-12T04:23:21.187Z",
+  "lastSuccessfulRunId": "dream-cca8fb01-87ff-48b5-9073-9b5d66e5f862",
+  "lastReport": {
+    "runId": "dream-cca8fb01-87ff-48b5-9073-9b5d66e5f862",
+    "model": "mistral/codestral-latest",
+    "mode": "auto",
+    "startedAt": "2026-10-12T04:23:13.184Z",
+    "scannedSessions": 1,
+    "scannedEvents": 117,
+    "evidenceCount": 11,
+    "proposals": 5,
+    "accepted": 5,
+    "rejected": 0,
+    "upserted": 5,
+    "superseded": 0,
+    "pruned": 0,
+    "status": "completed",
+    "finishedAt": "2026-10-12T04:23:21.187Z",
+    "preview": [
+      {
+        "key": "team_yolo_labeling_hub",
+        "action": "remember",
+        "confidence": 0.9,
+        "evidence": 3
+      },
+      {
+        "key": "toollb_bat_script",
+        "action": "remember",
+        "confidence": 0.8,
+        "evidence": 3
+      },
+      {
+        "key": "run_ps1_script",
+        "action": "remember",
+        "confidence": 0.8,
+        "evidence": 3
+      },
+      {
+        "key": "app_py_script",
+        "action": "remember",
+        "confidence": 0.9,
+        "evidence": 2
+      },
+      {
+        "key": "common_error_causes",
+        "action": "remember",
+        "confidence": 0.8,
+        "evidence": 2
+      }
+    ]
+  }
+}

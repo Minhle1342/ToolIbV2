@@ -74,11 +74,8 @@ if (-not $venvValid) {
     if (-not $pythonCheck) {
         Write-Host "----------------------------------------------------------" -ForegroundColor Red
         Write-Host "[LOI CRITICAL] Khong the truy cap hoac tim thay Python tren may!" -ForegroundColor Red
-        Write-Host "Nguyen nhan: Thu muc Python goc (C:\Users\HP\AppData\Local\Programs\Python) bi chan quyen (Access is Denied)." -ForegroundColor Yellow
-        Write-Host "CACH SUA DE DANG:" -ForegroundColor Green
-        Write-Host "  1. Nhap chuot phai vao file 'Fix-PythonPermissions.bat' trong thu muc nay" -ForegroundColor White
-        Write-Host "  2. Chon 'Run as administrator' (Chay voi quyen Quan tri vien)" -ForegroundColor White
-        Write-Host "  3. Thu chay lai 'Toollb.bat'!" -ForegroundColor White
+        Write-Host "Vui long kiem tra Python da duoc cai dat va them vao PATH." -ForegroundColor Yellow
+        Write-Host "Sau do thu chay lai 'Toollb.bat'!" -ForegroundColor White
         Write-Host "----------------------------------------------------------" -ForegroundColor Red
         Write-Host "Nhan phim bat ky de dong..." -ForegroundColor Yellow
         $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

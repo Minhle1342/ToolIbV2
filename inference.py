@@ -6,6 +6,7 @@ import numpy as np
 import onnxruntime as ort
 import utils
 
+
 class YOLOInference:
     def __init__(self, model_path):
         self.model_path = model_path
@@ -242,25 +243,31 @@ class YOLOInference:
         filtered_scores = class_scores[mask]
         filtered_classes = classes[mask]
         
-        # Convert to XYWH (center to top-left) and rescale from letterbox to original
-        for i in range(len(filtered_boxes)):
-            cx, cy, bw, bh = filtered_boxes[i]
+        # Vectorized coordinate transform (C-level NumPy SIMD)
+        if len(filtered_boxes) > 0:
+            cx = filtered_boxes[:, 0].copy()
+            cy = filtered_boxes[:, 1].copy()
+            bw = filtered_boxes[:, 2].copy()
+            bh = filtered_boxes[:, 3].copy()
 
-            if max(abs(cx), abs(cy), abs(bw), abs(bh)) <= 2.0:
-                cx *= target_w
-                bw *= target_w
-                cy *= target_h
-                bh *= target_h
-            
-            # Map coordinates from the selected input geometry to the source image.
-            x = ((cx - bw / 2) - pad_w) / scale_x
-            y = ((cy - bh / 2) - pad_h) / scale_y
+            norm_mask = (np.abs(cx) <= 2.0) & (np.abs(cy) <= 2.0) & (np.abs(bw) <= 2.0) & (np.abs(bh) <= 2.0)
+            cx[norm_mask] *= target_w
+            bw[norm_mask] *= target_w
+            cy[norm_mask] *= target_h
+            bh[norm_mask] *= target_h
+
+            x = ((cx - bw / 2.0) - pad_w) / scale_x
+            y = ((cy - bh / 2.0) - pad_h) / scale_y
             w = bw / scale_x
             h = bh / scale_y
-            
-            boxes.append([x, y, w, h])
-            confidences.append(float(filtered_scores[i]))
-            class_ids.append(int(filtered_classes[i]))
+
+            boxes = np.column_stack([x, y, w, h]).tolist()
+            confidences = filtered_scores.astype(float).tolist()
+            class_ids = filtered_classes.astype(int).tolist()
+        else:
+            boxes = []
+            confidences = []
+            class_ids = []
 
         # NMS
         indices = cv2.dnn.NMSBoxes(boxes, confidences, conf_threshold, iou_threshold)
@@ -509,6 +516,7 @@ class ClassificationInference:
         self.input_name = None
         self.input_size = 224  # Default, will try to read from model
         self.class_names = {}
+        self._clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)) if cv2 is not None else None
         
         # Load class mapping
         if mapping_path is None:
@@ -587,8 +595,11 @@ class ClassificationInference:
 
         lab = cv2.cvtColor(working, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l_channel = clahe.apply(l_channel)
+        if self._clahe is not None:
+            l_channel = self._clahe.apply(l_channel)
+        else:
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            l_channel = clahe.apply(l_channel)
         working = cv2.cvtColor(cv2.merge((l_channel, a_channel, b_channel)), cv2.COLOR_LAB2BGR)
 
         blur = cv2.GaussianBlur(working, (0, 0), sigmaX=1.0, sigmaY=1.0)
@@ -642,4 +653,60 @@ class ClassificationInference:
             'class_name': class_name,
             'confidence': confidence
         }
+
+    def predict_batch(self, crops_bgr):
+        """Classify a batch of cropped BGR images (list of numpy arrays)."""
+        if self.session is None:
+            return [{'error': 'Classifier model not loaded'} for _ in crops_bgr]
+        if not crops_bgr:
+            return []
+
+        supports_batch = False
+        try:
+            input_shape = self.session.get_inputs()[0].shape
+            b_dim = input_shape[0] if len(input_shape) == 4 else None
+            supports_batch = (b_dim is None or isinstance(b_dim, str) or b_dim < 0 or b_dim >= len(crops_bgr))
+        except Exception:
+            supports_batch = False
+
+        if supports_batch and len(crops_bgr) > 1:
+            try:
+                processed_list = []
+                valid_indices = []
+                for idx, crop in enumerate(crops_bgr):
+                    if crop is None or crop.size == 0:
+                        continue
+                    img = self._enhance_crop(crop)
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    img = img.astype(np.float32) / 255.0
+                    img = (img - self.MEAN) / self.STD
+                    img = img.transpose(2, 0, 1)
+                    processed_list.append(img)
+                    valid_indices.append(idx)
+
+                if processed_list:
+                    batch_tensor = np.stack(processed_list, axis=0)
+                    outputs = self.session.run(None, {self.input_name: batch_tensor})
+                    logits = outputs[0]
+
+                    # Vectorized softmax across batch
+                    exp_logits = np.exp(logits - np.max(logits, axis=1, keepdims=True))
+                    probs = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+                    class_ids = np.argmax(probs, axis=1)
+                    confidences = np.max(probs, axis=1)
+
+                    results = [{'error': 'Invalid crop'}] * len(crops_bgr)
+                    for i, orig_idx in enumerate(valid_indices):
+                        cid = int(class_ids[i])
+                        results[orig_idx] = {
+                            'class_id': cid,
+                            'class_name': self.class_names.get(str(cid), f"Class_{cid}"),
+                            'confidence': float(confidences[i])
+                        }
+                    return results
+            except Exception as batch_err:
+                pass
+
+        # Fallback to sequential
+        return [self.predict(crop) for crop in crops_bgr]
 

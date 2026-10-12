@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "id": "repo-memory-94b3e400-29fb-4136-b2e5-1d06871878f5",
+      "statement": "Team YOLO Labeling Hub là một công cụ gán nhãn dữ liệu YOLO chuyên nghiệp hoạt động trên nền tảng Web/LAN, hỗ trợ làm việc nhóm, tích hợp Auto-Labeling và quy trình gán nhãn tối ưu hóa tốc độ.",
+      "category": "architecture",
+      "source": "dream",
+      "confidence": 0.9,
+      "status": "active",
+      "citations": [
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 66,
+          "outcome": "success"
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 78,
+          "outcome": "failure"
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 89,
+          "outcome": "success"
+        }
+      ],
+      "concepts": [
+        "yolo",
+        "labeling",
+        "web",
+        "lan",
+        "auto-labeling"
+      ],
+      "relatedFiles": [],
+      "createdAt": "2026-10-12T04:23:21.106Z",
+      "updatedAt": "2026-10-12T04:23:21.106Z",
+      "lastValidatedAt": "2026-10-12T04:23:21.106Z",
+      "accessCount": 0
+    },
+    {
+      "id": "repo-memory-05fbc22b-b2f3-45ee-8ee4-7b67c74c7609",
+      "statement": "File toollb.bat được sử dụng để khởi động Team YOLO Labeling Hub, bao gồm các bước kiểm tra cấu hình Cloudflare Tunnel và khởi động Tailwind CSS và Cloudflare Tunnel.",
+      "category": "convention",
+      "source": "dream",
+      "confidence": 0.8,
+      "status": "active",
+      "citations": [
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 2
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "outcome": "success"
+        }
+      ],
+      "concepts": [
+        "bat",
+        "script",
+        "cloudflare",
+        "tailwind",
+        "tunnel"
+      ],
+      "relatedFiles": [],
+      "createdAt": "2026-10-12T04:23:21.129Z",
+      "updatedAt": "2026-10-12T04:23:21.129Z",
+      "lastValidatedAt": "2026-10-12T04:33:10.079Z",
+      "accessCount": 4
+    },
+    {
+      "id": "repo-memory-e7f63a11-ceeb-4011-906e-2092c9f88fa6",
+      "statement": "File run.ps1 được sử dụng để thiết lập môi trường và khởi động các dịch vụ cần thiết cho Team YOLO Labeling Hub, bao gồm kiểm tra sự tồn tại của môi trường ảo (.venv).",
+      "category": "convention",
+      "source": "dream",
+      "confidence": 0.8,
+      "status": "active",
+      "citations": [
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 30,
+          "outcome": "success"
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "outcome": "success"
+        }
+      ],
+      "concepts": [
+        "ps1",
+        "script",
+        "environment",
+        "virtualenv",
+        "venv"
+      ],
+      "relatedFiles": [],
+      "createdAt": "2026-10-12T04:23:21.147Z",
+      "updatedAt": "2026-10-12T04:23:21.147Z",
+      "lastValidatedAt": "2026-10-12T04:33:10.041Z",
+      "accessCount": 4
+    },
+    {
+      "id": "repo-memory-7636a471-9c8c-4c44-a101-9465d3903be6",
+      "statement": "File app.py là điểm khởi đầu của ứng dụng Team YOLO Labeling Hub, sử dụng Flask và Flask-SocketIO để quản lý các kết nối và tương tác thời gian thực.",
+      "category": "architecture",
+      "source": "dream",
+      "confidence": 0.9,
+      "status": "active",
+      "citations": [
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 89,
+          "outcome": "success"
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 101,
+          "outcome": "success"
+        }
+      ],
+      "concepts": [
+        "python",
+        "flask",
+        "flask-socketio",
+        "web",
+        "application"
+      ],
+      "relatedFiles": [],
+      "createdAt": "2026-10-12T04:23:21.163Z",
+      "updatedAt": "2026-10-12T04:23:21.163Z",
+      "lastValidatedAt": "2026-10-12T04:33:10.063Z",
+      "accessCount": 4
+    },
+    {
+      "id": "repo-memory-4413d53c-11bb-434f-84de-60b1f2c063e9",
+      "statement": "Các nguyên nhân phổ biến gây lỗi khi chạy Team YOLO Labeling Hub bao gồm: chưa cài đặt môi trường ảo (.venv), xung đột cấu hình Cloudflare Tunnel hoặc cổng, và thiếu các thư viện cần thiết.",
+      "category": "gotcha",
+      "source": "dream",
+      "confidence": 0.8,
+      "status": "active",
+      "citations": [
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 113
+        },
+        {
+          "kind": "session-event",
+          "sessionId": "session-1791778728698-ropdak",
+          "eventSeq": 114,
+          "outcome": "success"
+        }
+      ],
+      "concepts": [
+        "error",
+        "troubleshooting",
+        "venv",
+        "cloudflare",
+        "port"
+      ],
+      "relatedFiles": [],
+      "createdAt": "2026-10-12T04:23:21.179Z",
+      "updatedAt": "2026-10-12T04:23:21.179Z",
+      "lastValidatedAt": "2026-10-12T04:33:10.052Z",
+      "accessCount": 4
+    }
+  ]
+}
